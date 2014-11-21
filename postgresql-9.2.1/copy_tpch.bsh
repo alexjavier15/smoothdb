@@ -1,0 +1,26 @@
+dir='/home/renata/smoothdb/tpch/tpch_2_14_3/postgres'
+opts="tpch"
+
+bin/psql $opts -c "COPY part FROM '$dir/part.csv'
+                               WITH (FORMAT csv, DELIMITER '|')"
+
+bin/psql $opts -c "COPY region FROM '$dir/region.csv'
+                               WITH (FORMAT csv, DELIMITER '|')"
+
+bin/psql $opts -c "COPY nation FROM '$dir/nation.csv'
+                               WITH (FORMAT csv, DELIMITER '|')"
+
+bin/psql $opts -c "COPY supplier FROM '$dir/supplier.csv'
+                               WITH (FORMAT csv, DELIMITER '|')"
+
+bin/psql $opts -c "COPY customer FROM '$dir/customer.csv'
+                                WITH (FORMAT csv, DELIMITER '|')"
+
+bin/psql $opts -c "COPY partsupp FROM '$dir/partsupp.csv'
+                               WITH (FORMAT csv, DELIMITER '|')"
+
+bin/psql $opts -c "COPY orders FROM '$dir/orders.csv'
+                               WITH (FORMAT csv, DELIMITER '|')"
+
+bin/psql $opts -c "COPY lineitem FROM '$dir/lineitem.csv'
+                               WITH (FORMAT csv, DELIMITER '|')"

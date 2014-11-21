@@ -1,0 +1,5 @@
+LOG:  database system was shut down at 2012-09-28 19:29:34 CEST
+LOG:  database system is ready to accept connections
+LOG:  autovacuum launcher started
+FATAL:  database "renata" does not exist
+FATAL:  database "testPostgres" does not exist
