@@ -706,14 +706,24 @@ static struct config_bool ConfigureNamesBool[] =
 			NULL, NULL, NULL
 	},
 	{
-				{"enable_filterpushdown", PGC_USERSET, QUERY_TUNING_METHOD,
-					gettext_noop("Enables filter push down - before putting it in hash (SmoothDB)."),
-					NULL
-				},
+			{"enable_smoothshare", PGC_USERSET, QUERY_TUNING_METHOD,
+				gettext_noop("Enables index smooth scan (started from an index scan) (SmoothDB)."),
+				NULL
+			},
+			&enable_smoothshare,
+				true,
+				NULL, NULL, NULL
+		},
+	{
+			{"enable_filterpushdown", PGC_USERSET, QUERY_TUNING_METHOD,
+				gettext_noop("Enables filter push down - before putting it in hash (SmoothDB)."),
+				NULL
+			},
 				&enable_filterpushdown,
 				true,
 				NULL, NULL, NULL
 		},
+
 	{
 				{"enable_smoothnestedloop", PGC_USERSET, QUERY_TUNING_METHOD,
 					gettext_noop("Enables INLJ morphing into HJ (SmoothDB)."),
@@ -1809,6 +1819,18 @@ static struct config_int ConfigureNamesInt[] =
 			GUC_UNIT_KB
 		},
 		&work_mem,
+		1024, 64, MAX_KILOBYTES,
+		NULL, NULL, NULL
+	},
+	{
+		{"smooth_work_mem", PGC_USERSET, RESOURCES_MEM,
+			gettext_noop("Sets the maximum shared memory to be used for smooth scans."),
+			gettext_noop("This much memory can be used by each smooth  internal "
+										 " hash table before switching to "
+										 "temporary disk files."),
+			GUC_UNIT_KB
+		},
+		&smooth_work_mem,
 		1024, 64, MAX_KILOBYTES,
 		NULL, NULL, NULL
 	},

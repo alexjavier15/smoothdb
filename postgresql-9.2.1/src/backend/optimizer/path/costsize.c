@@ -122,6 +122,7 @@ bool		enable_hashjoin = true;
  * */
 bool		enable_smoothscan 		= false;
 bool		enable_indexsmoothscan 	= false;
+bool		enable_smoothshare		= false;
 bool 		enable_filterpushdown 	= false;
 bool 		enable_smoothnestedloop	= false;
 bool 		enable_skewcheck 		= false;

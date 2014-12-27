@@ -226,6 +226,7 @@ DynaHashAlloc(Size size)
  * bytes, so we can only compare that many ... hence strncmp is almost but
  * not quite the right thing.
  */
+
 static int
 string_compare(const char *key1, const char *key2, Size keysize)
 {

@@ -1511,7 +1511,7 @@ _bt_checkkeys(IndexScanDesc scan,
 		/* get heap pageID from TID */
 		heappage = ItemPointerGetBlockNumber(heapTid);
 		//if(bms_is_member(heappage, smoothDesc->bs_tovispages)||bms_is_member(heappage, smoothDesc->bs_vispages)){
-		if(bms_is_member(heappage, smoothDesc->bs_vispages)){
+		if(bms_is_member(heappage, smoothDesc->bs_vispages) /*&& !smoothDesc->result_cache->isCached */){
 			/* this page is already marked as the one that needs to be accessed
 			 * nothing to be done now, move to next tuple from INDEX LEAF page */
 

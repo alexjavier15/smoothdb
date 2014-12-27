@@ -652,6 +652,8 @@ struct ResultCache
 	Datum	   *projected_values; /* this space is used for manipulations with projection
 	 	 	 	 	 	 	 	 	 we create it once deleted when we are done*/
 	bool	   *projected_isnull;
+	bool		isCached;
+	Size 		bs_size;
 
 
 };
@@ -794,6 +796,8 @@ typedef struct SmoothScanOpaqueData
 	bool		start_prefetch	;
 	bool		start_smooth	;
 	int 		num_result_cache_hits;
+	int 		num_result_cache_misses;
+
 	int 		num_result_tuples;
 
 	Bitmapset  *bs_vispages;		/* keep track of all visited pages  */

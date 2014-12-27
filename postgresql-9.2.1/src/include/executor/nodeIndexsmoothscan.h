@@ -32,6 +32,6 @@ extern bool
 smooth_resultcache_find_tuple(ResultCache *cache, HeapTuple tpl, BlockNumber blkn);
 
 extern bool
-smooth_resultcache_add_tuple(ResultCache *cache, const BlockNumber blknum, const OffsetNumber off, const HeapTuple tpl, const TupleDesc tupleDesc, List *target_list, List *qual_list, Index index);
+smooth_resultcache_add_tuple(SmoothScanOpaque ss, const BlockNumber blknum, const OffsetNumber off, const HeapTuple tpl, const TupleDesc tupleDesc, List *target_list, List *qual_list, Index index, bool *pageHasOneResultTuple);
 
 #endif   /* NODEINDEXSMOOTHSCAN_H */

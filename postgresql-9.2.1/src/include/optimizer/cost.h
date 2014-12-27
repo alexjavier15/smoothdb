@@ -66,6 +66,7 @@ extern int	constraint_exclusion;
 extern bool enable_smoothscan;
 extern bool enable_smoothsorting;
 extern bool enable_indexsmoothscan;
+extern bool enable_smoothshare;
 extern bool enable_filterpushdown;
 extern bool enable_smoothnestedloop;
 extern bool enable_skewcheck;
