@@ -42,17 +42,18 @@
 
 #define ITUPLE_ARRAY_SIZE(ntuples)	\
 	(offsetof(HashPartitionDesc, itupleArray) + (ntuples) * sizeof(IndexTupleData))
-void _saveitem(IndexTuple *items, int itemIndex,
-			 OffsetNumber offnum, IndexTuple itup);
+//void _saveitem(IndexTuple *items, int itemIndex,
+//			 OffsetNumber offnum, IndexTuple itup);
+void _saveitem(BTScanOpaque so, int itemIndex, OffsetNumber offnum, IndexTuple itup);
 bool
-_readpage(BTScanOpaque so, Buffer buf, IndexScanDesc scan, ScanDirection dir, IndexTuple *items);
+_readpage(BTScanOpaque so, Buffer buf, IndexScanDesc scan, ScanDirection dir);
 void print_tuple(TupleDesc tupdesc, IndexTuple itup);
 static TupleTableSlot *IndexSmoothNext(IndexSmoothScanState *node);
 void set_IndexScanBoundaries(IndexScanDesc scan, ScanDirection dir);
 BTStack get_root_IndexStartoffset(IndexScanDesc scan, ScanDirection dir);
 bool build_IndexScanKeys(IndexScanDesc scan, ScanDirection dir,
 		int *keysCount, ScanKeyData * scankeys, StrategyNumber *strat_total);
-void get_all_keys(IndexSmoothScanState *indexstate);
+void get_all_keys(IndexScanDesc scan);
 
 /* renata
  * decladation of additional methods for index smooth scan
@@ -167,7 +168,7 @@ static TupleIDCache *
 smooth_tuplecache_create_empty();
 
 static void
-smooth_resultcache_create(ResultCache *res_cache, uint32 tup_length);
+smooth_resultcache_create(IndexScanDesc scan, uint32 tup_length);
 
 void
 smooth_resultcache_free(ResultCache *cache);
@@ -175,10 +176,10 @@ void
 smooth_tuplecache_free(TupleIDCache *cache);
 
 static ResultCacheEntry *
-smooth_resultcache_get_resultentry(ResultCache *cache, HeapTuple tpl, BlockNumber blknum);
+smooth_resultcache_get_resultentry(IndexScanDesc scan, HeapTuple tpl, BlockNumber blknum);
 
 static ResultCacheEntry *
-smooth_resultcache_find_resultentry(ResultCache *cache, ResultCacheKey tid);
+smooth_resultcache_find_resultentry(IndexScanDesc scan, ResultCacheKey tid, HeapTuple tpl);
 
 static HeapTuple project_tuple(const HeapTuple tuple, const TupleDesc tupleDesc, List *target_list, List *qual_list,
 		Index index, Datum *values, bool * isnull);
@@ -503,12 +504,15 @@ static TupleIDCache * smooth_tuplecache_create_empty() {
  * proposition, we don't do it until we have to.
  */
 
-static void smooth_resultcache_create(ResultCache *res_cache, uint32 tup_length) {
+static void smooth_resultcache_create(IndexScanDesc scan, uint32 tup_length) {
 	HASHCTL hash_ctl;
 	HASHCTL *hash_ctl_ptr;
 	bool found;
 	MemoryContext oldctx = CurrentMemoryContext;
+	SmoothScanOpaque sso = (SmoothScanOpaque) scan->smoothInfo;
+	ResultCache *res_cache = sso->result_cache;
 	int hash_tag = HASH_ELEM | HASH_FUNCTION | HASH_SMOOTH;
+	res_cache->tuple_length = tup_length;
 
 	long nbuckets;
 
@@ -525,6 +529,27 @@ static void smooth_resultcache_create(ResultCache *res_cache, uint32 tup_length)
 		hash_ctl_ptr = &hash_ctl;
 		MemSet(hash_ctl_ptr, 0, sizeof(hash_ctl));
 	}
+	sso->creatingBounds = true;
+	get_all_keys(scan);
+	sso->creatingBounds = false;
+	int j;
+	int partitionz = res_cache->npartition;
+	// checking//
+	for(j=0; j<partitionz; j++){
+		printf("Printing bounds for partition : %d \n", j);
+		printf("Lower Bound: %d \n", j);
+		print_tuple(RelationGetDescr(scan->indexRelation),res_cache->partion_array[j]->lower_bound);
+
+		printf("Upper Bound: %d \n", j);
+		print_tuple(RelationGetDescr(scan->indexRelation),res_cache->partion_array[j]->upper_bound);
+
+		printf("************************************************\n");
+
+
+	}
+
+
+
 	/*
 	 * Estimate number of hashtable entries we can have within maxbytes. This
 	 * estimates the hash overhead at MAXALIGN(sizeof(HASHELEMENT)) plus a
@@ -624,7 +649,7 @@ bool smooth_resultcache_add_tuple(IndexScanDesc scan, const BlockNumber blknum, 
 	HeapTuple projectedTuple = project_tuple(tpl, tupleDesc, target_list, qual_list, index,
 			ss->result_cache->projected_values, ss->result_cache->projected_isnull);
 
-	resultEntry = smooth_resultcache_get_resultentry(ss->result_cache, projectedTuple, blknum);
+	resultEntry = smooth_resultcache_get_resultentry(scan, projectedTuple, blknum);
 
 	if (resultEntry != NULL) {
 		//build_scanKey_from_tup(scan, ForwardScanDirection, tpl,tupleDesc);
@@ -759,16 +784,18 @@ bool smooth_tuplecache_find_tuple(TupleIDCache *cache, TID tid) {
 		return false;
 }
 
-bool smooth_resultcache_find_tuple(ResultCache *cache, HeapTuple tpl, BlockNumber blkn) {
+bool smooth_resultcache_find_tuple(IndexScanDesc scan, HeapTuple tpl, BlockNumber blkn) {
 	ResultCacheEntry *resultCache = NULL;
+	SmoothScanOpaque sso = (SmoothScanOpaque)scan->smoothInfo;
 	bool found = false;
 
 //	TID tid = form_tuple_id(tpl, blkn);
+
 	TID tid;
 	//calling macro
 	form_tuple_id(tpl, blkn, &tid);
 
-	resultCache = smooth_resultcache_find_resultentry(cache, tid);
+	resultCache = smooth_resultcache_find_resultentry(scan, tid, tpl);
 
 	/* if we have a bucket for this block */
 	if (resultCache != NULL) {
@@ -782,9 +809,13 @@ bool smooth_resultcache_find_tuple(ResultCache *cache, HeapTuple tpl, BlockNumbe
 
 /* This method returns ResultCacheEntry if exists, if not NULL is returned */
 static ResultCacheEntry *
-smooth_resultcache_find_resultentry(ResultCache *cache, ResultCacheKey tid) {
+smooth_resultcache_find_resultentry(IndexScanDesc scan, ResultCacheKey tid, HeapTuple tpl) {
 	ResultCacheEntry *resultCache = NULL;
 
+
+	SmoothScanOpaque sso = (SmoothScanOpaque)scan->smoothInfo;
+
+	ResultCache *cache = sso->result_cache;
 	if (cache->nentries == 0) /* in case pagetable doesn't exist */
 	{
 		printf("\nCache has not entries\n");
@@ -794,7 +825,7 @@ smooth_resultcache_find_resultentry(ResultCache *cache, ResultCacheKey tid) {
 	if (cache->status == SS_EMPTY) {
 		if (cache->isCached) {
 
-			smooth_resultcache_create(cache, cache->tuple_length);
+			smooth_resultcache_create(scan, tpl->t_len);
 		} else {
 
 			printf("Cache is empty\n");
@@ -813,9 +844,11 @@ smooth_resultcache_find_resultentry(ResultCache *cache, ResultCacheKey tid) {
  * This may cause the table to exceed the desired memory size.
  */
 static ResultCacheEntry *
-smooth_resultcache_get_resultentry(ResultCache *cache, HeapTuple tpl, BlockNumber blknum) {
+smooth_resultcache_get_resultentry(IndexScanDesc scan, HeapTuple tpl, BlockNumber blknum) {
 	ResultCacheEntry *resultCache;
 	bool found;
+	SmoothScanOpaque sso = (SmoothScanOpaque)scan->smoothInfo;
+	ResultCache *cache = sso->result_cache;
 
 //	TID tid = form_tuple_id(tpl, blknum);
 	TID tid;
@@ -823,7 +856,7 @@ smooth_resultcache_get_resultentry(ResultCache *cache, HeapTuple tpl, BlockNumbe
 	form_tuple_id(tpl, blknum, &tid);
 
 	if (cache->status == SS_EMPTY) {
-		smooth_resultcache_create(cache, tpl->t_len);
+		smooth_resultcache_create(scan, tpl->t_len);
 	}
 	if (cache->status == SS_HASH) {
 		/* Look up or create an entry */
@@ -914,6 +947,7 @@ IndexSmoothNext(IndexSmoothScanState *node) {
 			node->iss_ScanKeys, node->ss.ps.targetlist, node->ss.ps.qual,
 			((IndexSmoothScan *) (node->ss.ps.plan))->scan.scanrelid, node->iss_NumSmoothScanKeys,
 			node->iss_SmoothScanKeys, node->allqual, node->ss.ps.ps_ExprContext, node->ss.ss_ScanTupleSlot)) != NULL) {
+
 		/*
 		 * Store the scanned tuple in the scan tuple slot of the scan state.
 		 * Note: we pass 'false' because tuples returned by amgetnext are
@@ -940,6 +974,8 @@ IndexSmoothNext(IndexSmoothScanState *node) {
 
 		return slot;
 	}
+
+
 
 	/*
 	 * if we get here it means the index scan failed so we are at the end of
@@ -1114,7 +1150,7 @@ void ExecEndIndexSmoothScan(IndexSmoothScanState *node) {
 	SmoothScanOpaque ss;
 
 
-	build_partition_descriptor(node);
+//	build_partition_descriptor(node);
 
 
 	/*
@@ -1127,9 +1163,7 @@ void ExecEndIndexSmoothScan(IndexSmoothScanState *node) {
 	/*delete smooth info*/
 	if (indexScanDesc != NULL) {
 		ss = (SmoothScanOpaque) node->iss_ScanDesc->smoothInfo;
-		//ss->creatingBounds = true;
-	//	get_all_keys(node);
-	//	ss->creatingBounds = false;
+
 		printf("\nOverall table size in blocks %ld, prefetcher accumulated %ld, page cache size %ld \n",
 				ss->rel_nblocks, ss->prefetch_cumul, bms_num_members(ss->bs_vispages));
 		if (ss->bs_vispages != NULL)
@@ -1277,7 +1311,7 @@ ExecInitIndexSmoothScan(IndexSmoothScan *node, EState *estate, int eflags) {
 	indexstate = makeNode(IndexSmoothScanState);
 	indexstate->ss.ps.plan = (Plan *) node;
 	indexstate->ss.ps.state = estate;
-	indexstate->work_mem = work_mem * 1024L;
+
 
 	/*
 	 * Miscellaneous initialization
@@ -1477,6 +1511,8 @@ ExecInitIndexSmoothScan(IndexSmoothScan *node, EState *estate, int eflags) {
 		ss->keyData = (ScanKey) palloc(indexstate->iss_ScanDesc->numberOfKeys * sizeof(ScanKeyData));
 	else
 		ss->keyData = NULL;
+
+	ss->work_mem = work_mem * 1024L;
 	ss->creatingBounds = false;
 	ss->max_offset  = 0;
 	ss->min_offset = 0;
@@ -2079,14 +2115,30 @@ void ExecIndexBuildSmoothScanKeys(PlanState *planstate, Relation index, List *qu
 	} else if (n_array_keys != 0)
 		elog(ERROR, "ScalarArrayOpExpr index qual found where not allowed");
 }
-void _saveitem(IndexTuple *items, int itemIndex, OffsetNumber offnum, IndexTuple itup) {
+//void _saveitem(IndexTuple *items, int itemIndex, OffsetNumber offnum, IndexTuple itup) {
+//
+//	if (items) {
+//
+//		//items[itemIndex] = CopyIndexTuple(itup);
+//
+//	}
+//}
+void _saveitem(BTScanOpaque so, int itemIndex, OffsetNumber offnum, IndexTuple itup) {
+	BTScanPosItem *currItem = &so->currPos.items[itemIndex];
 
-	if (items) {
+	currItem->heapTid = itup->t_tid;
+	currItem->indexOffset = offnum;
+	if (so->currTuples) {
+		Size itupsz = IndexTupleSize(itup);
 
-		//items[itemIndex] = CopyIndexTuple(itup);
-
+		currItem->tupleOffset = so->currPos.nextTupleOffset;
+		memcpy(so->currTuples + so->currPos.nextTupleOffset, itup, itupsz);
+		so->currPos.nextTupleOffset += MAXALIGN(itupsz);
 	}
 }
+
+
+
 /*
  *	_bt_readpage() -- Load data from current index page into so->currPos
  *
@@ -2102,21 +2154,30 @@ void _saveitem(IndexTuple *items, int itemIndex, OffsetNumber offnum, IndexTuple
  *
  * Returns true if any matching items found on the page, false if none.
  */
-bool _readpage(BTScanOpaque so, Buffer buf, IndexScanDesc scan, ScanDirection dir, IndexTuple *items) {
+bool _readpage(BTScanOpaque so, Buffer buf, IndexScanDesc scan, ScanDirection dir) {
 	Page page;
 	BTPageOpaque opaque;
 	OffsetNumber minoff;
 	OffsetNumber maxoff;
 	int itemIndex;
+	//TupleDesc tupdes = RelationGetDescr(scan->indexRelation);
 	IndexTuple itup;
 	bool continuescan;
 	OffsetNumber offnum;
 
 	/* we must have the buffer pinned and locked */
 	Assert(BufferIsValid(buf));
+	_bt_checkpage(scan->indexRelation, buf);
+
 
 	page = BufferGetPage(buf);
 	opaque = (BTPageOpaque) PageGetSpecialPointer(page);
+	if (P_IGNORE(opaque)) {
+
+		printf("ignoring...\n");
+		return false;
+	}
+
 	minoff = P_FIRSTDATAKEY(opaque);
 	maxoff = PageGetMaxOffsetNumber(page);
 
@@ -2137,14 +2198,16 @@ bool _readpage(BTScanOpaque so, Buffer buf, IndexScanDesc scan, ScanDirection di
 		offnum = minoff;
 
 		while (offnum <= maxoff) {
-			ItemId iid = PageGetItemId(page, offnum);
+			//ItemId iid = PageGetItemId(page, offnum);
 
-			itup = (IndexTuple) PageGetItem(page, iid);
+			itup = 	_bt_checkkeys(scan,page,offnum,ForwardScanDirection,&continuescan);
+
 
 			if (itup != NULL) {
-				print_tuple(RelationGetDescr(scan->indexRelation), itup);
+
+				//print_tuple(tupdes, itup);
 				/* tuple passes all scan key conditions, so remember it */
-				_saveitem(items, itemIndex, offnum, itup);
+				_saveitem(so, itemIndex, offnum, itup);
 				itemIndex++;
 			}
 
@@ -2168,7 +2231,7 @@ bool _readpage(BTScanOpaque so, Buffer buf, IndexScanDesc scan, ScanDirection di
 
 				/* tuple passes all scan key conditions, so remember it */
 				itemIndex--;
-				_saveitem(items, itemIndex, offnum, itup);
+				_saveitem(so, itemIndex, offnum, itup);
 			}
 
 			offnum = OffsetNumberPrev(offnum);
@@ -2183,14 +2246,15 @@ bool _readpage(BTScanOpaque so, Buffer buf, IndexScanDesc scan, ScanDirection di
 	return (so->currPos.firstItem <= so->currPos.lastItem);
 }
 
-void get_all_keys(IndexSmoothScanState *indexstate) {
+void get_all_keys(IndexScanDesc scan) {
 
 	double root_lentgh = 1.0;
 	double scan_length = 1.0;
 	double rootfrac = 1.0;
-	Relation rel = indexstate->iss_ScanDesc->indexRelation;
-	SmoothScanOpaque sso = (SmoothScanOpaque) indexstate->iss_ScanDesc->smoothInfo;
-	IndexScanDesc scan = indexstate->iss_ScanDesc;
+
+	Relation rel = scan->indexRelation;
+	SmoothScanOpaque sso = (SmoothScanOpaque) scan->smoothInfo;
+
 	BTScanOpaque so = (BTScanOpaque) scan->opaque;
 	//ScanKey scanKeys = ss->iss_ScanKeys;
 	double reltuples = rel->rd_rel->reltuples;
@@ -2199,14 +2263,14 @@ void get_all_keys(IndexSmoothScanState *indexstate) {
 	int partitionsz;
 	int nbuckets;
 	TupleDesc tupdesc = RelationGetDescr(rel);
-	long work_mem = indexstate->work_mem;
+	long work_mem = sso->work_mem;
 	int min_off = sso->min_offset;
 	int max_off = sso->max_offset;
 	int start_off = sso->root_offbounds[RightBound];
 	int end_off = sso->root_offbounds[LeftBound];
 	IndexTuple firsttup = sso->itup_bounds[RightBound];
 	IndexTuple lastttup = sso->itup_bounds[LeftBound];
-
+	IndexTuple *bounds;
 	root_lentgh = max_off - min_off;
 	scan_length = end_off - start_off;
 
@@ -2239,51 +2303,59 @@ void get_all_keys(IndexSmoothScanState *indexstate) {
 
 	if (partitionsz <= scan_length) {
 
+
 		// we have enough bounds
 	} else {
-		int split_fator;
-
 		// we need go down in the index to find suitable bounds
-
 		Buffer buf;
-		Buffer buf_root;
+		//Buffer buf_root;
 		BTScanOpaque dummy_so;
 		BlockNumber blkno;
 		int pos = 0;
-		split_fator = ceil((double) partitionsz / scan_length);
-		int newpartitionz = (scan_length + 2) * split_fator;
-		IndexTuple bounds[newpartitionz];
-		OffsetNumber offnum = start_off - 1;
+		int split_fator = ceil((double) partitionsz / scan_length);
+		int newpartitionz = (scan_length + 2) * ( split_fator + 1); // we can split a  range at most split_fator + 1 i.e. 3/2 = 1
+		OffsetNumber offnum = start_off;
 		IndexTuple curr_roottup;
 		bool continuescan = true;
 		Page page;
+		bool found;
 
+		bounds = palloc0(sizeof(IndexTuple)*newpartitionz);
 		/* allocate private workspace */
 		printf("Offset start : %d , end: %d\n", offnum, end_off);
-		buf_root = _bt_getroot(rel, BT_READ);
-		page = BufferGetPage(buf_root);
+		buf = _bt_getroot(rel, BT_READ);
+		page = BufferGetPage(buf);
 		printf("split_fator : %d\n", split_fator);
 		printf("has morleft : %d, hash moreRignt : %d\n", sso->moreLeft, sso->moreRight);
-		end_off = end_off + 1;
+
+		bounds[pos]= firsttup;
+
+		printf("left bund %d: \n", offnum);
+		print_tuple(tupdesc, bounds[pos]);
+		printf("**************************\n");
+		pos++;
 		while (offnum <= end_off) {
+
+
 			ItemId iid = PageGetItemId(page, offnum);
 
 			curr_roottup = (IndexTuple) PageGetItem(page, iid);
 
 			if (curr_roottup != NULL) {
-				IndexTuple items[MaxIndexTuplesPerPage];
-				memset(items, 0, sizeof(IndexTuple));
-				bounds[pos] = CopyIndexTuple(curr_roottup);
-				printf("root tuple %d: \n", offnum);
-				print_tuple(tupdesc, bounds[pos]);
-				printf("**************************\n");
 
-				pos++;
 				int split_point = 0;
-				BTScanPosItem *currItem;
+
+
+				if(offnum != start_off && offnum !=  end_off){
+					bounds[pos] = CopyIndexTuple(curr_roottup);
+					printf("root tuple %d: \n", offnum);
+					print_tuple(tupdesc, bounds[pos]);
+					printf("**************************\n");
+					pos++;
+				}
 				blkno = ItemPointerGetBlockNumber(&(curr_roottup->t_tid));
 
-				buf = _bt_getbuf(rel, blkno, BT_READ);
+				buf = _bt_relandgetbuf(rel,buf, blkno, BT_READ);
 
 				dummy_so = (BTScanOpaque) palloc(sizeof(BTScanOpaqueData));
 				dummy_so->currPos.buf = dummy_so->markPos.buf = InvalidBuffer;
@@ -2310,39 +2382,63 @@ void get_all_keys(IndexSmoothScanState *indexstate) {
 				dummy_so->markPos.nextTupleOffset = 0;
 				dummy_so->currTuples = (char *) palloc(BLCKSZ * 2);
 				dummy_so->markTuples = dummy_so->currTuples + BLCKSZ;
-				_readpage(dummy_so, buf, scan, ForwardScanDirection, items);
+				found = _readpage(dummy_so, buf, scan, ForwardScanDirection);
 				//Assert(dummy_so->currPos.lastItem >= split_fator);
 				split_point = dummy_so->currPos.lastItem / split_fator;
 				printf("split_point : %d\n ", split_point);
 				if (split_point > 0) {
-					int i;
+//					int i;
 //					for (i = 0; i <= dummy_so->currPos.lastItem; i++) {
 //						if (items[i]) {
 //							print_tuple(tupdesc, items[i]);
 //
 //						}
+
+					int next = split_point;
+				//	int i;
+
+					while (next < dummy_so->currPos.lastItem ) {
+						BTScanPosItem *currItem;
+
+						currItem = &dummy_so->currPos.items[next];
+
+						bounds[pos] = CopyIndexTuple((IndexTuple) (dummy_so->currTuples + currItem->tupleOffset));
+
+						print_tuple(tupdesc, bounds[pos]);
+						next += next;
+						pos++;
+					}
 				}
-//					int next = split_point;
-//					int i;
-//					while (next <= dummy_so->currPos.lastItem ) {
-//						currItem = &so->currPos.items[next];
-//
-//						bounds[pos] = CopyIndexTuple((IndexTuple) (so->currTuples + currItem->tupleOffset));
-//
-//						print_tuple(tupdesc, bounds[pos]);
-//						next += next;
-//						pos++;
-//					}
-				_bt_relbuf(rel, buf);
 				pfree(dummy_so->currTuples);
 				pfree(dummy_so);
-				offnum = OffsetNumberNext(offnum);
+
 
 			}
+			offnum = OffsetNumberNext(offnum);
 
 		}
-		_bt_relbuf(rel, buf_root);
+		bounds[pos]= lastttup;
+		printf("right bund %d: \n", offnum);
+		print_tuple(tupdesc, bounds[pos]);
+		printf("**************************\n");
+		_bt_relbuf(rel, buf);
+		int final_partitionz = pos;
+		HashPartitionDesc **partitions;
+		int np;
+		partitions = (HashPartitionDesc **)palloc0( sizeof(HashPartitionDesc *)*final_partitionz);
 
+		for(np = pos; np > 0 ; np--){
+			int pindex = np - 1;
+			partitions[pindex] =(HashPartitionDesc *)palloc0(sizeof(HashPartitionDesc));
+			partitions[pindex]->curbatch = 0;
+			partitions[pindex]->lower_bound = bounds[np-1];
+			partitions[pindex]->upper_bound = bounds[np];
+			partitions[pindex]->nbatch = 1;
+			partitions[pindex]->nextBatch= 0;
+
+		}
+		sso->result_cache->partion_array = partitions;
+		sso->result_cache->npartition = final_partitionz;
 	}
 
 	//
@@ -2363,7 +2459,7 @@ void build_partition_descriptor(IndexSmoothScanState *ss) {
 	int npartitions;
 	int nbuckets;
 	TupleDesc tupdesc = RelationGetDescr(rel);
-	long work_mem = ss->work_mem;
+	//long work_mem = ss->work_mem;
 	int min_off = sso->min_offset;
 	int max_off = sso->max_offset;
 	int start_off = sso->root_offbounds[RightBound];
@@ -2601,7 +2697,7 @@ void print_tuple(TupleDesc tupdesc, IndexTuple itup) {
 			printf(" attno : %d , Type: %u ,", j + 1, (tupdesc->attrs[j])->atttypid);
 			if (attr_form->atttypid == 1700) {
 				char *str;
-
+				Datum attr;
 				Oid type = attr_form->atttypid;
 				Oid typeOut;
 				bool isvarlena;
@@ -2609,9 +2705,22 @@ void print_tuple(TupleDesc tupdesc, IndexTuple itup) {
 				intvalue = DatumGetInt32(values[j]);
 				getTypeOutputInfo(type, &typeOut, &isvarlena);
 				printf("function oid: %d\n", typeOut);
-				str = OidOutputFunctionCall(typeOut, values[j]);
-				printf(" value: %s  , ", str);
-				printf(" int value: %x", intvalue);
+
+				/*
+				 * If we have a toasted datum, forcibly detoast it here to avoid
+				 * memory leakage inside the type's output routine.
+				 */
+				if (isvarlena)
+					attr = PointerGetDatum(PG_DETOAST_DATUM(values[j]));
+				else
+					attr = values[j];
+
+				str = OidOutputFunctionCall(typeOut, attr);
+
+				printatt((unsigned) j + 1, tupdesc->attrs[j], str);
+
+				pfree(str);
+
 			} else if (attr_form->atttypid == 1082) {
 				DateADT date;
 				struct pg_tm tm;
@@ -2629,7 +2738,8 @@ void print_tuple(TupleDesc tupdesc, IndexTuple itup) {
 
 			}
 
-		}
+		}else
+			continue;
 
 	}
 	printf("  ]   \n");

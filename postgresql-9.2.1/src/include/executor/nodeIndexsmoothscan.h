@@ -31,7 +31,7 @@ extern void ExecIndexBuildSmoothScanKeys(PlanState *planstate, Relation index,
 
 
 extern bool
-smooth_resultcache_find_tuple(ResultCache *cache, HeapTuple tpl, BlockNumber blkn);
+smooth_resultcache_find_tuple(IndexScanDesc scan, HeapTuple tpl, BlockNumber blkn);
 
 extern bool
 smooth_resultcache_add_tuple(IndexScanDesc scan, const BlockNumber blknum, const OffsetNumber off, const HeapTuple tpl, const TupleDesc tupleDesc, List *target_list, List *qual_list, Index index, bool *pageHasOneResultTuple);

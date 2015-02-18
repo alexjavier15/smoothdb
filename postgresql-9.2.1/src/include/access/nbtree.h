@@ -20,6 +20,7 @@
 #include "access/xlog.h"
 #include "access/xlogutils.h"
 #include "catalog/pg_index.h"
+#include "storage/buffile.h"
 //#include "nodes/bitmapset64.h"
 
 /* There's room for a 16-bit vacuum cycle ID in BTPageOpaqueData */
@@ -641,6 +642,16 @@ typedef struct ResultCacheEntry
 	HeapTupleHeader tuple_data;			/* tuple = value*/
 } ResultCacheEntry;
 
+typedef struct HashPartitionDesc
+{
+	int			nbatch;			/* number of batches */
+	int			curbatch;		/* current batch #; 0 during 1st pass */
+	BufFile   **BatchFile;      /*Array of batch files pointers;*/;
+	int			nextBatch;
+	IndexTuple	lower_bound;    /*lower bound index tuple*/
+	IndexTuple	upper_bound;    /*upper bound index tuple*/
+}HashPartitionDesc;
+
 
 struct ResultCache
 {
@@ -658,16 +669,15 @@ struct ResultCache
 	bool	   *projected_isnull;
 	bool		isCached;
 	Size 		bs_size;
+	// Alex: for patined mode
+	int			npartition;			/* number of batches */
+	int			curpartition;		/* current batch #; 0 during 1st pass */
+	HashPartitionDesc   **partion_array;      /*Array of batch files;*/
 
 
 };
-typedef struct HashPartitionDesc
-{
-	IndexTupleData itupleArray[1];
-	int size;
 
 
-}HashPartitionDesc;
 
 
 
@@ -837,6 +847,8 @@ typedef struct SmoothScanOpaqueData
 	bool moreRight;
 	double pagefactor;
 	bool creatingBounds;
+
+	long		work_mem;
 } SmoothScanOpaqueData;
 
 typedef SmoothScanOpaqueData *SmoothScanOpaque;

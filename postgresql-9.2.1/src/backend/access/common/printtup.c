@@ -472,7 +472,7 @@ printtup_destroy(DestReceiver *self)
  *		printatt
  * ----------------
  */
-static void
+void
 printatt(unsigned attributeId,
 		 Form_pg_attribute attributeP,
 		 char *value)
