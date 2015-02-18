@@ -17,18 +17,20 @@
  *-------------------------------------------------------------------------
  */
 #include "postgres.h"
-
+#include "miscadmin.h"
 #include "access/nbtree.h"
 #include "access/relscan.h"
 #include "catalog/index.h"
 #include "commands/vacuum.h"
+#include "utils/datetime.h"
 #include "storage/indexfsm.h"
 #include "storage/ipc.h"
 #include "storage/lmgr.h"
 #include "storage/smgr.h"
 #include "tcop/tcopprot.h"
 #include "utils/memutils.h"
-
+#include "utils/date.h"
+#include "utils/lsyscache.h"
 
 /* Working state for btbuild and its callback */
 typedef struct
@@ -298,8 +300,98 @@ btgettuple(PG_FUNCTION_ARGS)
 		 * the appropriate direction.  If we haven't done so yet, we call
 		 * _bt_first() to get the first item in the scan.
 		 */
-		if (!BTScanPosIsValid(so->currPos))
+		if (!BTScanPosIsValid(so->currPos)) {
+
+			if (HasSmoothInfo(scan)) {
+				bool sres;
+				//Alex: we set up the scan in both direction in order to get the boundary infos
+				// for this index scan only if dir == 1 or -1. Could we have SmoothIndexScan with NotMouvement direction?;
+				ScanDirection new_dir = dir * -1;
+
+				sres = _bt_first(scan, new_dir);
+				// Only the lock was dropped by _bt_first. We need to unpin it too.
+				if (sres)
+					ReleaseBuffer(so->currPos.buf);
+			}
 			res = _bt_first(scan, dir);
+			if (HasSmoothInfo(scan)) {
+				TupleDesc tupdesc = scan->xs_itupdesc;
+				SmoothScanOpaque sso = (SmoothScanOpaque)scan->smoothInfo;
+				int i;
+				printf("\nBounds:\n");
+				printf("******************************************************************\n");
+				int32 low[2];
+				int32 high[2];
+				int cter = 0;
+				for (i = 0; i < 3; i++) {
+					if (sso->itup_bounds[i] != 0) {
+
+						IndexTuple itup = sso->itup_bounds[i];
+						int nattrs = tupdesc->natts;
+						int j = 0;
+						Datum		values[INDEX_MAX_KEYS];
+						bool		isnull[INDEX_MAX_KEYS];
+						printf("\ntuple with data : [  ");
+						index_deform_tuple(itup, tupdesc,values,isnull);
+
+						for (j = 0; j < nattrs; j++) {
+							Form_pg_attribute attr_form= tupdesc->attrs[j];
+							int32 intvalue;
+							if (!isnull[j]) {
+
+								printf(" attno : %d , Type: %u ,", j+1 , (tupdesc->attrs[j])->atttypid);
+								if(attr_form->atttypid == 1700){
+									char *str;
+									Oid type = attr_form->atttypid;
+									Oid typeOut;
+									bool isvarlena;
+									intvalue =  DatumGetInt32(values[j]);
+									getTypeOutputInfo(type, &typeOut, &isvarlena);
+
+
+									str = OidOutputFunctionCall(typeOut, values[j]);
+								printf(" value: %s  , ", str );
+								printf(" int value: %x", intvalue);
+								}else if(attr_form->atttypid == 1082){
+									DateADT		date;
+									struct pg_tm tm;
+									char		buf[MAXDATELEN + 1];
+									intvalue = DatumGetInt32(values[j]);
+									date = DatumGetDateADT(values[j]);
+									if (!DATE_NOT_FINITE(date)){
+
+														j2date(date + POSTGRES_EPOCH_JDATE,
+															   &(tm.tm_year), &(tm.tm_mon), &(tm.tm_mday));
+														EncodeDateOnly(&tm, USE_XSD_DATES, buf);
+
+
+
+									printf(" value: %s  , ", buf );
+									printf(" value: %d  ", intvalue );
+									}
+
+								}
+								low[cter]=intvalue;
+								cter++;
+							}
+
+						}
+						printf("  ]   \n");
+					}
+
+				}
+
+
+
+
+
+
+
+		}
+
+		}
+
+
 		else
 		{
 			/*

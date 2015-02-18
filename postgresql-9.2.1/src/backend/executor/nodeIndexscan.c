@@ -738,7 +738,7 @@ ExecIndexBuildScanKeys(PlanState *planstate, Relation index,
 		Expr	   *leftop;		/* expr on lhs of operator */
 		Expr	   *rightop;	/* expr on rhs ... */
 		AttrNumber	varattno;	/* att number used in scan */
-
+		AttrNumber	varorigattno;	/* att number used in heap scan */
 		if (IsA(clause, OpExpr))
 		{
 			/* indexkey op const or indexkey op expression */
@@ -763,6 +763,10 @@ ExecIndexBuildScanKeys(PlanState *planstate, Relation index,
 				elog(ERROR, "indexqual doesn't have key on left side");
 
 			varattno = ((Var *) leftop)->varattno;
+			/*Alex: map index to heap scan keys
+			 */
+
+			varorigattno= ((Var *) leftop)->varoattno;
 			if (varattno < 1 || varattno > index->rd_index->indnatts)
 				elog(ERROR, "bogus index qualification");
 
@@ -836,6 +840,9 @@ ExecIndexBuildScanKeys(PlanState *planstate, Relation index,
 								   ((OpExpr *) clause)->inputcollid,	/* collation */
 								   opfuncid,	/* reg proc to use */
 								   scanvalue, false);	/* constant */
+			//Alex: map heap scan key with index scan key for easy swiching
+			this_scan_key->sk_attono = 	varorigattno;
+
 		}
 		else if (IsA(clause, RowCompareExpr))
 		{
@@ -878,7 +885,7 @@ ExecIndexBuildScanKeys(PlanState *planstate, Relation index,
 					elog(ERROR, "indexqual doesn't have key on left side");
 
 				varattno = ((Var *) leftop)->varattno;
-
+				varorigattno = ((Var *) leftop)->varoattno;
 				/*
 				 * We have to look up the operator's associated btree support
 				 * function
@@ -964,6 +971,7 @@ ExecIndexBuildScanKeys(PlanState *planstate, Relation index,
 									   opfuncid,		/* reg proc to use */
 									   scanvalue, false);		/* constant */
 				n_sub_key++;
+				this_scan_key->sk_attono = varorigattno;
 			}
 
 			/* Mark the last subsidiary scankey correctly */
@@ -976,6 +984,7 @@ ExecIndexBuildScanKeys(PlanState *planstate, Relation index,
 			MemSet(this_scan_key, 0, sizeof(ScanKeyData));
 			this_scan_key->sk_flags = SK_ROW_HEADER;
 			this_scan_key->sk_attno = first_sub_key->sk_attno;
+			this_scan_key->sk_attono = first_sub_key->sk_attono;
 			this_scan_key->sk_strategy = rc->rctype;
 			/* sk_subtype, sk_collation, sk_func not used in a header */
 			this_scan_key->sk_argument = PointerGetDatum(first_sub_key);
@@ -1008,6 +1017,7 @@ ExecIndexBuildScanKeys(PlanState *planstate, Relation index,
 				elog(ERROR, "indexqual doesn't have key on left side");
 
 			varattno = ((Var *) leftop)->varattno;
+			varorigattno = ((Var *) leftop)->varoattno;
 			if (varattno < 1 || varattno > index->rd_index->indnatts)
 				elog(ERROR, "bogus index qualification");
 
@@ -1098,6 +1108,7 @@ ExecIndexBuildScanKeys(PlanState *planstate, Relation index,
 								   saop->inputcollid,	/* collation */
 								   opfuncid,	/* reg proc to use */
 								   scanvalue, false);	/* constant */
+			this_scan_key->sk_attono =varorigattno;
 		}
 		else if (IsA(clause, NullTest))
 		{
@@ -1122,7 +1133,7 @@ ExecIndexBuildScanKeys(PlanState *planstate, Relation index,
 				elog(ERROR, "NullTest indexqual has wrong key");
 
 			varattno = ((Var *) leftop)->varattno;
-
+			varorigattno = ((Var *) leftop)->varattno;
 			/*
 			 * initialize the scan key's fields appropriately
 			 */

@@ -123,6 +123,8 @@ typedef enum IndexUniqueCheck
  *		True iff the index scan is valid.
  */
 #define IndexScanIsValid(scan) PointerIsValid(scan)
+#define HasSmoothInfo(scan) PointerIsValid(scan->smoothInfo)
+
 
 extern Relation index_open(Oid relationId, LOCKMODE lockmode);
 extern void index_close(Relation relation, LOCKMODE lockmode);

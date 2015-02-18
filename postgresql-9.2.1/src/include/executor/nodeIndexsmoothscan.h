@@ -21,6 +21,8 @@ extern void ExecIndexSmoothRestrPos(IndexSmoothScanState *node);
 extern void ExecReScanIndexSmoothScan(IndexSmoothScanState *node);
 /* renata: this is added because with smooth scan with have to follow ScanKeys for Heap Scan and not Index Scan
  * attno = 1 is actually first attribute in the table and not in the index */
+extern bool  build_scanKey_from_tup(IndexScanDesc scan, ScanDirection dir, HeapTuple	tup, TupleDesc tupdes);
+
 extern void ExecIndexBuildSmoothScanKeys(PlanState *planstate, Relation index,
 					   List *quals, bool isorderby,
 					   ScanKey *scanKeys, int *numScanKeys,
@@ -32,6 +34,6 @@ extern bool
 smooth_resultcache_find_tuple(ResultCache *cache, HeapTuple tpl, BlockNumber blkn);
 
 extern bool
-smooth_resultcache_add_tuple(SmoothScanOpaque ss, const BlockNumber blknum, const OffsetNumber off, const HeapTuple tpl, const TupleDesc tupleDesc, List *target_list, List *qual_list, Index index, bool *pageHasOneResultTuple);
+smooth_resultcache_add_tuple(IndexScanDesc scan, const BlockNumber blknum, const OffsetNumber off, const HeapTuple tpl, const TupleDesc tupleDesc, List *target_list, List *qual_list, Index index, bool *pageHasOneResultTuple);
 
 #endif   /* NODEINDEXSMOOTHSCAN_H */

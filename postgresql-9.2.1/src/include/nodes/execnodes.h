@@ -1282,6 +1282,7 @@ typedef struct IndexSmoothScanState
 	IndexScanDesc iss_ScanDesc;
 	List	   *allqual; // for Smooth Scan all predicates should be kept (not only the ones that are kept in indexqualorig)
 						// because indexqualorig keeps only predicates for index - but for full scan part we need other one that belong to filter (qual!!)
+	long		work_mem;
 } IndexSmoothScanState;
 
 /*		For accessing the heap. The logic is now two step, similar to bitmap heap and index scan.

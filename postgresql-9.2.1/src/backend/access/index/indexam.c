@@ -812,7 +812,7 @@ HeapTuple SmoothProcessOnePageOrder(IndexScanDesc scan, BlockNumber page, ScanDi
 							} // if filter push down
 							if (valid) {
 								copyTuple = heap_copytuple(tuple);
-								smooth_resultcache_add_tuple(smoothDesc, page, lineoff, tuple,
+								smooth_resultcache_add_tuple(scan, page, lineoff, tuple,
 																	RelationGetDescr(scan->heapRelation), target_list, qual_list, index,
 																	&pageHasOneResultTuple);
 							}
@@ -917,7 +917,7 @@ HeapTuple SmoothProcessOnePageOrder(IndexScanDesc scan, BlockNumber page, ScanDi
 						}
 						if (valid) {
 							/* this is a randomly found tuple - store it in the result cache since we will need it later */
-							if (smooth_resultcache_add_tuple(smoothDesc, page, lineoff, tuple,
+							if (smooth_resultcache_add_tuple(scan, page, lineoff, tuple,
 									RelationGetDescr(scan->heapRelation), target_list, qual_list, index,
 									&pageHasOneResultTuple)) {
 
@@ -1426,7 +1426,7 @@ HeapTuple index_smoothfetch_heap(IndexScanDesc scan, ScanDirection direction, do
 				/* if the page is in the cache - fill tuple with it*/
 				/* NO ORDER BY - return all tuples from a page */
 				page = ItemPointerGetBlockNumber(tid);
-				if ( smooth_resultcache_find_tuple(smoothDesc->result_cache, tuple, page)) {
+				if (smooth_resultcache_find_tuple(smoothDesc->result_cache, tuple, page)) {
 
 					smoothDesc->num_result_cache_hits++;
 					return tuple;

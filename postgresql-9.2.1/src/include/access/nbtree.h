@@ -75,6 +75,10 @@ typedef BTPageOpaqueData *BTPageOpaque;
 #define BTP_SPLIT_END	(1 << 5)	/* rightmost page of split group */
 #define BTP_HAS_GARBAGE (1 << 6)	/* page has LP_DEAD tuples */
 
+
+#define	BTP_SMOOTH_PART		0x0100
+#define	BTP_SMOOTH_ALL		0x1000
+
 /*
  * The max allowed value of a cycle ID is a bit less than 64K.	This is
  * for convenience of pg_filedump and similar utilities: we want to use
@@ -634,7 +638,7 @@ typedef TID ResultCacheKey;
 typedef struct ResultCacheEntry
 {
 	ResultCacheKey 		tid;			/* Tuple id number (hashtable key) */
-	HeapTupleHeaderData tuple_data;			/* tuple = value*/
+	HeapTupleHeader tuple_data;			/* tuple = value*/
 } ResultCacheEntry;
 
 
@@ -657,6 +661,16 @@ struct ResultCache
 
 
 };
+typedef struct HashPartitionDesc
+{
+	IndexTupleData itupleArray[1];
+	int size;
+
+
+}HashPartitionDesc;
+
+
+
 typedef struct ResultCache ResultCache;
 
 /*TID Cache - for tuples produces in Stage 1 of indes smooth scan*/
@@ -800,17 +814,35 @@ typedef struct SmoothScanOpaqueData
 
 	int 		num_result_tuples;
 
-	Bitmapset  *bs_vispages;		/* keep track of all visited pages  */
+	Bitmapset     *bs_vispages;		/* keep track of all visited pages  */
 	TupleIDCache  *tupleID_cache;		/* keep track of all visited tuples in a hash table (blok id = key, offset = value) */
 	//Bitmapset  *bs_tovispages;		/* keep track of all pages to visit */
 	/* keep these last in struct for efficiency */
 	SmoothScanPosData currPos;		/* current position data */
 	SmoothScanPosData markPos;		/* marked position, if any */
 	ResultCache  *result_cache;		/* when we have order imposed we stored tuples in a hash table*/
+	/*Alex: use save the insert scankeys for look up tuples in the root during partitioning in order to get the partition number*/
+	ScanKey		search_keyData ;
+	int			keyz;
+	int			strat_total;
 
+	/*Alex: Information about boundaries and root used for partitioning */
+	OffsetNumber	root_offbounds[3];  /*Alex: root offset used for tuple count aprox. using root*/
+	IndexTuple		itup_bounds[3];  /*Alex: storage for index tuples (Leaf ) bounds used for partitioning*/
+	/*Alex : Max and min offset in root used for tuple count aprox. using root*/
+	OffsetNumber	min_offset;
+	OffsetNumber    max_offset;
+
+	bool moreLeft;
+	bool moreRight;
+	double pagefactor;
+	bool creatingBounds;
 } SmoothScanOpaqueData;
 
 typedef SmoothScanOpaqueData *SmoothScanOpaque;
+
+#define RightBound 2
+#define LeftBound 0
 
 #define SmoothScanPosIsValid(scanpos) BufferIsValid((scanpos).buf)
 
@@ -886,6 +918,8 @@ extern int	_bt_pagedel(Relation rel, Buffer buf, BTStack stack);
 extern BTStack _bt_search(Relation rel,
 		   int keysz, ScanKey scankey, bool nextkey,
 		   Buffer *bufP, int access);
+extern int _bt_sel_startkeys(BTScanOpaque so, ScanDirection dir,ScanKey *startKeys, StrategyNumber *strat,
+		StrategyNumber *strat_total);
 extern Buffer _bt_moveright(Relation rel, Buffer buf, int keysz,
 			  ScanKey scankey, bool nextkey, int access);
 extern OffsetNumber _bt_binsrch(Relation rel, Buffer buf, int keysz,
@@ -893,9 +927,12 @@ extern OffsetNumber _bt_binsrch(Relation rel, Buffer buf, int keysz,
 extern int32 _bt_compare(Relation rel, int keysz, ScanKey scankey,
 			Page page, OffsetNumber offnum);
 extern bool _bt_first(IndexScanDesc scan, ScanDirection dir);
+extern bool _bt_build_startkeys(ScanKey *startKeys,ScanKeyData *scankeys, int *keysCount, Relation rel, StrategyNumber *strat_total);
+extern bool _bt_firstwithtuple(IndexScanDesc scan, ScanDirection dir, ScanKeyData *scankeys);
+
 extern bool _bt_next(IndexScanDesc scan, ScanDirection dir);
 extern Buffer _bt_get_endpoint(Relation rel, uint32 level, bool rightmost);
-
+extern BTStack _bt_get_endentry(IndexScanDesc scan, ScanDirection dir );
 /*
  * prototypes for functions in nbtutils.c
  */
@@ -936,5 +973,7 @@ extern void btree_desc(StringInfo buf, uint8 xl_info, char *rec);
 extern void btree_xlog_startup(void);
 extern void btree_xlog_cleanup(void);
 extern bool btree_safe_restartpoint(void);
+extern int32 _bt_compare_tup(IndexTuple itup, TupleDesc	itupdes, int keysz,	ScanKey scankey);
+
 
 #endif   /* NBTREE_H */

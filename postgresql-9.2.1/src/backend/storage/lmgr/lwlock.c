@@ -737,8 +737,12 @@ LWLockRelease(LWLockId lockid)
 		if (lockid == held_lwlocks[i])
 			break;
 	}
-	if (i < 0)
+	if (i < 0){
+		LWLock *lo = NULL;
+		lo->exclusive = 'o';
 		elog(ERROR, "lock %d is not held", (int) lockid);
+
+	}
 	num_held_lwlocks--;
 	for (; i < num_held_lwlocks; i++)
 		held_lwlocks[i] = held_lwlocks[i + 1];
