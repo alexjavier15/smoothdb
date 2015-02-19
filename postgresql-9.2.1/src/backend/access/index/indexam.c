@@ -2254,6 +2254,7 @@ HeapTuple indexsmooth_getnext(IndexScanDesc scan, ScanDirection direction, doubl
 		ScanKey orig_smooth_keys, List *allqual, ExprContext *econtext, TupleTableSlot *slot) {
 	HeapTuple heapTuple;
 	ItemPointer tid;
+	int batchno;
 
 	for (;;) { /* we are either processing current page, or have more pages in prefetcher
 	 In any case, I should not fetch next TID from the index, until I don't consume all prefetched pages
@@ -2273,8 +2274,10 @@ HeapTuple indexsmooth_getnext(IndexScanDesc scan, ScanDirection direction, doubl
 			tid = index_getnext_tid(scan, direction);
 
 			/* If we're out of index entries, we're done */
-			if (tid == NULL)
-				break;
+
+
+
+
 		}
 
 		/*
@@ -2289,7 +2292,13 @@ HeapTuple indexsmooth_getnext(IndexScanDesc scan, ScanDirection direction, doubl
 		heapTuple = index_smoothfetch_heap(scan, direction, plan_rows, no_orig_keys, orig_keys, target_list, qual_list,
 				index, no_orig_smooth_keys, orig_smooth_keys, allqual, econtext, slot);
 		if (heapTuple != NULL) {
-			((SmoothScanOpaque) scan->smoothInfo)->num_result_tuples++;
+			SmoothScanOpaque sso =(SmoothScanOpaque) scan->smoothInfo;
+			// time to verify the current batch:
+
+			ExecResultCacheGetBatch(scan,heapTuple,&batchno);
+			if(sso->result_cache->curbatch !=batchno ){}
+
+			sso->num_result_tuples++;
 			return heapTuple;
 		}
 	}
