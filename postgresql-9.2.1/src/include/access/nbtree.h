@@ -645,8 +645,9 @@ typedef struct ResultCacheEntry
 typedef struct HashPartitionDesc
 {
 	int			nbatch;			/* number of batches */
+	int			nbucket;
 	int			curbatch;		/* current batch #; 0 during 1st pass */
-	BufFile   **BatchFile;      /*Array of batch files pointers;*/;
+	BufFile   	*BatchFile;      /*Array of batch files pointers;*/;
 	int			nextBatch;
 	IndexTuple	lower_bound;    /*lower bound index tuple*/
 	IndexTuple	upper_bound;    /*upper bound index tuple*/
@@ -670,7 +671,8 @@ struct ResultCache
 	bool		isCached;
 	Size 		bs_size;
 	// Alex: for patined mode
-	int			npartition;			/* number of batches */
+	int			curbatch;		/* current batch #; 0 during 1st pass */
+	int			nbatch;			/* number of batches */
 	int			curpartition;		/* current batch #; 0 during 1st pass */
 	HashPartitionDesc   **partion_array;      /*Array of batch files;*/
 

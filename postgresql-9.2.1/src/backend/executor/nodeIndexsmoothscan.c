@@ -53,8 +53,20 @@ void set_IndexScanBoundaries(IndexScanDesc scan, ScanDirection dir);
 BTStack get_root_IndexStartoffset(IndexScanDesc scan, ScanDirection dir);
 bool build_IndexScanKeys(IndexScanDesc scan, ScanDirection dir,
 		int *keysCount, ScanKeyData * scankeys, StrategyNumber *strat_total);
+OffsetNumber
+_binsrch(Relation rel, IndexScanDesc scan,	int keysz, ScanKey scankey);
 void get_all_keys(IndexScanDesc scan);
-
+static bool
+ExecHashJoinNewBatch(IndexScanDesc scan, int batchindex);
+void
+ExecResultCacheInsert(IndexScanDesc scan, ResultCache *resultcache,
+					HeapTuple tuple,
+					ResultCacheKey hashkey);
+void
+ExecResultCacheSaveTuple(HeapTuple tuple, ResultCacheKey hashkey,
+					  BufFile **fileptr);
+void ExecResultCacheGetBatch(IndexScanDesc scan, HeapTuple tuple,  int *batchno);
+void BuildScanKeyFromTuple(SmoothScanOpaque sso, TupleDesc tupdesc, HeapTuple tuple, ScanKey *tuple_sk );
 /* renata
  * decladation of additional methods for index smooth scan
  * (mostly for dealing with result hash table)
@@ -398,7 +410,18 @@ void smooth_resultcache_free(ResultCache *cache) {
 	if (enable_benchmarking || enable_smoothnestedloop)
 		if (cache->nentries)
 			printf("\n Number of entries is %d, max is %d", cache->nentries, cache->maxentries);
+	int j;
+	int partitionz = cache->nbatch;
+		// checking//
+		for(j=0; j<partitionz; j++){
+			printf("Number of buckets for partition  %d is %d \n", j, cache->partion_array[j]->nbucket);
 
+
+
+			printf("************************************************\n");
+
+
+		}
 	pfree(cache->projected_values);
 	pfree(cache->projected_isnull);
 	if (!enable_smoothshare) {
@@ -533,7 +556,7 @@ static void smooth_resultcache_create(IndexScanDesc scan, uint32 tup_length) {
 	get_all_keys(scan);
 	sso->creatingBounds = false;
 	int j;
-	int partitionz = res_cache->npartition;
+	int partitionz = res_cache->nbatch;
 	// checking//
 	for(j=0; j<partitionz; j++){
 		printf("Printing bounds for partition : %d \n", j);
@@ -548,6 +571,16 @@ static void smooth_resultcache_create(IndexScanDesc scan, uint32 tup_length) {
 
 	}
 
+	/*Crate buffer files*/
+
+	for(j=0; j<partitionz; j++){
+			int nbatch = 0;
+
+			nbatch = res_cache->partion_array[j]->nbatch = 1;
+			res_cache->partion_array[j]->BatchFile = NULL;
+
+	}
+	PrepareTempTablespaces();
 
 
 	/*
@@ -652,7 +685,7 @@ bool smooth_resultcache_add_tuple(IndexScanDesc scan, const BlockNumber blknum, 
 	resultEntry = smooth_resultcache_get_resultentry(scan, projectedTuple, blknum);
 
 	if (resultEntry != NULL) {
-		//build_scanKey_from_tup(scan, ForwardScanDirection, tpl,tupleDesc);
+		build_scanKey_from_tup(scan, ForwardScanDirection, tpl,tupleDesc);
 
 		//heap_copytuple_into_hash(tpl, &resultEntry->tuple);
 		//heap_copytuple_with_tuple(tpl, &resultEntry->tuple);
@@ -859,6 +892,9 @@ smooth_resultcache_get_resultentry(IndexScanDesc scan, HeapTuple tpl, BlockNumbe
 		smooth_resultcache_create(scan, tpl->t_len);
 	}
 	if (cache->status == SS_HASH) {
+
+		ExecResultCacheInsert(scan,cache,tpl,tid);
+
 		/* Look up or create an entry */
 		resultCache = (ResultCacheEntry *) hash_search(cache->hashtable, (void *) &tid, HASH_ENTER, &found);
 	} else {
@@ -2115,6 +2151,115 @@ void ExecIndexBuildSmoothScanKeys(PlanState *planstate, Relation index, List *qu
 	} else if (n_array_keys != 0)
 		elog(ERROR, "ScalarArrayOpExpr index qual found where not allowed");
 }
+
+/*
+ *	_bt_binsrch() -- Do a binary search for a key on a particular page.
+ *
+ * The passed scankey must be an insertion-type scankey (see nbtree/README),
+ * but it can omit the rightmost column(s) of the index.
+ *
+ * When nextkey is false (the usual case), we are looking for the first
+ * item >= scankey.  When nextkey is true, we are looking for the first
+ * item strictly greater than scankey.
+ *
+ * On a leaf page, _bt_binsrch() returns the OffsetNumber of the first
+ * key >= given scankey, or > scankey if nextkey is true.  (NOTE: in
+ * particular, this means it is possible to return a value 1 greater than the
+ * number of keys on the page, if the scankey is > all keys on the page.)
+ *
+ * On an internal (non-leaf) page, _bt_binsrch() returns the OffsetNumber
+ * of the last key < given scankey, or last key <= given scankey if nextkey
+ * is true.  (Since _bt_compare treats the first data key of such a page as
+ * minus infinity, there will be at least one key < scankey, so the result
+ * always points at one of the keys on the page.)  This key indicates the
+ * right place to descend to be sure we find all leaf keys >= given scankey
+ * (or leaf keys > given scankey when nextkey is true).
+ *
+ * This procedure is not responsible for walking right, it just examines
+ * the given page.	_bt_binsrch() has no lock or refcount side effects
+ * on the buffer.
+ */
+OffsetNumber
+_binsrch(Relation rel, IndexScanDesc scan,
+			int keysz,
+			ScanKey scankey)
+{
+	Page		page;
+	BTPageOpaque opaque;
+	OffsetNumber low,
+				high;
+	int32		result,
+				cmpval;
+	SmoothScanOpaque sso = (SmoothScanOpaque)scan->smoothInfo;
+	ResultCache *res_cache = sso->result_cache;
+	int partitionz = res_cache->nbatch;
+	HashPartitionDesc **partion_array = res_cache->partion_array;
+	TupleDesc itupdesc = RelationGetDescr(scan->indexRelation);
+
+	low = 0;
+	high = partitionz-1;
+
+	/*
+	 * If there are no keys on the page, return the first available slot. Note
+	 * this covers two cases: the page is really empty (no keys), or it
+	 * contains only a high key.  The latter case is possible after vacuuming.
+	 * This can never happen on an internal page, however, since they are
+	 * never empty (an internal page must have children).
+	 */
+	if (high < low)
+		return low;
+
+	/*
+	 * Binary search to find the first key on the page >= scan key, or first
+	 * key > scankey when nextkey is true.
+	 *
+	 * For nextkey=false (cmpval=1), the loop invariant is: all slots before
+	 * 'low' are < scan key, all slots at or after 'high' are >= scan key.
+	 *
+	 * For nextkey=true (cmpval=0), the loop invariant is: all slots before
+	 * 'low' are <= scan key, all slots at or after 'high' are > scan key.
+	 *
+	 * We can fall out when high == low.
+	 */
+	high++;						/* establish the loop_binsrch invariant for high */
+
+	//cmpval = nextkey ? 0 : 1;	/* select comparison value */
+	cmpval = 1;
+
+	while (high > low)
+	{	IndexTuple itup;
+		OffsetNumber mid = low + ((high - low) / 2);
+
+		itup = partion_array[mid]->upper_bound;
+
+		/* We have low <= mid < high, so mid points at a real slot */
+
+		result = _bt_compare_tup(itup, itupdesc, keysz, scankey);
+
+		if (result >= cmpval)
+			low = mid + 1;
+		else
+			high = mid;
+	}
+
+	/*
+	 * At this point we have high == low, but be careful: they could point
+	 * past the last slot on the page.
+	 *
+	 * On a leaf page, we always return the first key >= scan key (resp. >
+	 * scan key), which could be the last slot + 1.
+	 */
+
+		return low;
+
+	/*
+	 * On a non-leaf page, return the last key < scan key (resp. <= scan key).
+	 * There must be one if _bt_compare() is playing by the rules.
+
+	Assert(low > P_FIRSTDATAKEY(opaque));
+
+	return OffsetNumberPrev(low);*/
+}
 //void _saveitem(IndexTuple *items, int itemIndex, OffsetNumber offnum, IndexTuple itup) {
 //
 //	if (items) {
@@ -2123,6 +2268,7 @@ void ExecIndexBuildSmoothScanKeys(PlanState *planstate, Relation index, List *qu
 //
 //	}
 //}
+
 void _saveitem(BTScanOpaque so, int itemIndex, OffsetNumber offnum, IndexTuple itup) {
 	BTScanPosItem *currItem = &so->currPos.items[itemIndex];
 
@@ -2435,10 +2581,12 @@ void get_all_keys(IndexScanDesc scan) {
 			partitions[pindex]->upper_bound = bounds[np];
 			partitions[pindex]->nbatch = 1;
 			partitions[pindex]->nextBatch= 0;
+			partitions[pindex]->nbucket = 0;
+
 
 		}
 		sso->result_cache->partion_array = partitions;
-		sso->result_cache->npartition = final_partitionz;
+		sso->result_cache->nbatch = final_partitionz;
 	}
 
 	//
@@ -3001,195 +3149,422 @@ BTStack get_root_IndexStartoffset(IndexScanDesc scan, ScanDirection dir) {
 	smootho->keyData = scankeysorig;
 	return stack;
 }
-
-bool build_scanKey_from_tup(IndexScanDesc scan, ScanDirection dir, HeapTuple tup, TupleDesc tupdes) {
-	Relation rel = scan->indexRelation;
-	BTScanOpaque so = (BTScanOpaque) scan->opaque;
-	StrategyNumber strat;
-	ScanKey startKeys[INDEX_MAX_KEYS];
-	ScanKeyData notnullkeys[INDEX_MAX_KEYS];
-	ScanKey scankeys;
-	//int			keysCount = 0;
-	StrategyNumber strat_total;
+void BuildScanKeyFromTuple(SmoothScanOpaque sso, TupleDesc tupdesc, HeapTuple tuple, ScanKey *tuple_sk ){
 	ScanKey this_scan_key;
-	int i;
-	bool nextkey;
-	bool goback;
+	ScanKey scankeys;
+	int	keyz = sso->keyz;
+	int i = 0;
 	bool isNull;
 
-	Buffer buf;
 
-	Page page;
-	BTPageOpaque opaque;
-	OffsetNumber offnum;
-	ItemId itemid;
-	IndexTuple itup;
-	BlockNumber blkno;
-	BlockNumber par_blkno;
-	BTStack new_stack;
-	SmoothScanOpaque smootho = (SmoothScanOpaque) scan->smoothInfo;
+	Assert(sso->keyz <= INDEX_MAX_KEYS);
+	Assert(sso->search_keyData != NULL);
+	scankeys = sso->search_keyData;
 
-	this_scan_key = (ScanKey) palloc(smootho->keyz * sizeof(ScanKeyData));
+	this_scan_key = (ScanKey) palloc(sso->keyz * sizeof(ScanKeyData));
 
-	//_bt_preprocess_keys(scan);
+	for (i = 0; i < keyz; i++) {
+			int attnum = scankeys[i].sk_attono;
+			memcpy(&this_scan_key[i], &scankeys[i], sizeof(ScanKeyData));
 
-	/*
-	 * Quit now if _bt_preprocess_keys() discovered that the scan keys can
-	 * never be satisfied (eg, x == 1 AND x > 2).
-	 */
-	if (!so->qual_ok)
-		return false;
 
-	//keysCount = _bt_sel_startkeys(so,dir,startKeys,&strat,&strat_total);
+		//	printf("atton : %d ", attnum);
+			if (attnum > 0) {
+				Datum value = heap_getattr(tuple,attnum,tupdesc,&isNull);
+				if (((scankeys[i].sk_flags & SK_ISNULL) && isNull)
+						|| (!(scankeys[i].sk_flags & SK_ISNULL) && !isNull)) /* key is NULL */
+				{
+					//printf(" old value: %u ", this_scan_key[i].sk_argument);
 
-	/*if (smootho->keyz == 0)
-	 return _bt_endpoint(scan, dir);*/
-
-	Assert(smootho->keyz <= INDEX_MAX_KEYS);
-	Assert(smootho->search_keyData != NULL);
-	scankeys = smootho->search_keyData;
-	strat_total = smootho->strat_total;
-	/*if(!_bt_build_startkeys(startKeys,scankeys,&keysCount,rel,&strat_total))
-	 return false;*/
-
-	switch (strat_total) {
-		case BTLessStrategyNumber:
-
-			/*
-			 * Find first item >= scankey, then back up one to arrive at last
-			 * item < scankey.  (Note: this positioning strategy is only used
-			 * for a backward scan, so that is always the correct starting
-			 * position.)
-			 */
-			nextkey = false;
-			goback = true;
-			break;
-
-		case BTLessEqualStrategyNumber:
-
-			/*
-			 * Find first item > scankey, then back up one to arrive at last
-			 * item <= scankey.  (Note: this positioning strategy is only used
-			 * for a backward scan, so that is always the correct starting
-			 * position.)
-			 */
-			nextkey = true;
-			goback = true;
-			break;
-
-		case BTEqualStrategyNumber:
-
-			/*
-			 * If a backward scan was specified, need to start with last equal
-			 * item not first one.
-			 */
-			if (ScanDirectionIsBackward(dir)) {
-				/*
-				 * This is the same as the <= strategy.  We will check at the
-				 * end whether the found item is actually =.
-				 */
-				nextkey = true;
-				goback = true;
-			} else {
-				/*
-				 * This is the same as the >= strategy.  We will check at the
-				 * end whether the found item is actually =.
-				 */
-				nextkey = false;
-				goback = false;
-			}
-			break;
-
-		case BTGreaterEqualStrategyNumber:
-
-			/*
-			 * Find first item >= scankey.  (This is only used for forward
-			 * scans.)
-			 */
-			nextkey = false;
-			goback = false;
-			break;
-
-		case BTGreaterStrategyNumber:
-
-			/*
-			 * Find first item > scankey.  (This is only used for forward
-			 * scans.)
-			 */
-			nextkey = true;
-			goback = false;
-			break;
-
-		default:
-			/* can't get here, but keep compiler quiet */
-			elog(ERROR, "unrecognized strat_total: %d", (int) strat_total);
-			return false;
-	}
-
-	/*Alex: Now change the boundary values to the desired value from tuple;*/
-	printf("tuple with data : [  ");
-	for (i = 0; i < smootho->keyz; i++) {
-		memcpy(&this_scan_key[i], &scankeys[i], sizeof(ScanKeyData));
-
-		int attnum = scankeys[i].sk_attono;
-		printf("atton : %d ", attnum);
-		if (attnum > 0) {
-			Datum value = heap_getattr(tup,attnum,tupdes,&isNull);
-			if (((scankeys[i].sk_flags & SK_ISNULL) && isNull) || (!(scankeys[i].sk_flags & SK_ISNULL) && !isNull)) /* key is NULL */
-			{
-				printf(" old value: %u ", this_scan_key[i].sk_argument);
-
-				this_scan_key[i].sk_argument = value;
-				printf("  %u  ", this_scan_key[i].sk_argument);
+					this_scan_key[i].sk_argument = value;
+					//printf("  %u  ", this_scan_key[i].sk_argument);
+				}
 			}
 		}
+	*tuple_sk = this_scan_key;
+}
+
+void ExecResultCacheGetBatch(IndexScanDesc scan, HeapTuple tuple,  int *batchno){
+	Relation rel = scan->indexRelation;
+	SmoothScanOpaque sso = (SmoothScanOpaque) scan->smoothInfo;
+	OffsetNumber offnum;
+	ScanKey scankeys;
+
+	BuildScanKeyFromTuple(sso,RelationGetDescr(rel),tuple,&scankeys);
+
+
+	offnum = _binsrch(rel, scan, sso->keyz, scankeys);
+
+	*batchno = offnum;
+
+
+}
+
+void build_scanKey_from_tup(IndexScanDesc scan, ScanDirection dir, HeapTuple tup, TupleDesc tupdes) {
+//	Relation rel = scan->indexRelation;
+//	BTScanOpaque so = (BTScanOpaque) scan->opaque;
+//
+//	ScanKey scankeys;
+//	//int			keysCount = 0;
+//	StrategyNumber strat_total;
+//	ScanKey this_scan_key;
+//	int i;
+//
+//	bool isNull;
+//
+//
+//
+//	SmoothScanOpaque smootho = (SmoothScanOpaque) scan->smoothInfo;
+//	ResultCache *res_cache = smootho->result_cache;
+//
+//	this_scan_key = (ScanKey) palloc(smootho->keyz * sizeof(ScanKeyData));
+//
+//	//_bt_preprocess_keys(scan);
+//
+//	/*
+//	 * Quit now if _bt_preprocess_keys() discovered that the scan keys can
+//	 * never be satisfied (eg, x == 1 AND x > 2).
+//	 */
+//	if (!so->qual_ok)
+//		return false;
+//
+//	//keysCount = _bt_sel_startkeys(so,dir,startKeys,&strat,&strat_total);
+//
+//	/*if (smootho->keyz == 0)
+//	 return _bt_endpoint(scan, dir);*/
+//
+//	Assert(smootho->keyz <= INDEX_MAX_KEYS);
+//	Assert(smootho->search_keyData != NULL);
+//	scankeys = smootho->search_keyData;
+//	strat_total = smootho->strat_total;
+//	/*if(!_bt_build_startkeys(startKeys,scankeys,&keysCount,rel,&strat_total))
+//	 return false;*/
+//
+//
+//
+//	/*Alex: Now change the boundary values to the desired value from tuple;*/
+////	printf("tuple with data : [  ");
+//	for (i = 0; i < smootho->keyz; i++) {
+//		int attnum = scankeys[i].sk_attono;
+//		memcpy(&this_scan_key[i], &scankeys[i], sizeof(ScanKeyData));
+//
+//
+//	//	printf("atton : %d ", attnum);
+//		if (attnum > 0) {
+//			Datum value = heap_getattr(tup,attnum,tupdes,&isNull);
+//			if (((scankeys[i].sk_flags & SK_ISNULL) && isNull) || (!(scankeys[i].sk_flags & SK_ISNULL) && !isNull)) /* key is NULL */
+//			{
+//				//printf(" old value: %u ", this_scan_key[i].sk_argument);
+//
+//				this_scan_key[i].sk_argument = value;
+//				//printf("  %u  ", this_scan_key[i].sk_argument);
+//			}
+//		}
+//	}
+//
+////	printf("  ]   ");
+//	/*Alex: Do the search job
+//	 *
+//	 *
+//	 */
+//
+//
+//
+//	/*
+//	 * Find the appropriate item on the internal page, and get the child
+//	 * page that it points to.
+//	 */
+//	offnum = _binsrch(rel, scan, smootho->keyz, this_scan_key);
+//
+//	res_cache->partion_array[offnum]->nbucket++;
+//
+//	//printf("goes to partition : %d \n", offnum);
+//
+//	return true;
+
+}
+
+
+/*
+ * ExecHashJoinSaveTuple
+ *		save a tuple to a batch file.
+ *
+ * The data recorded in the file for each tuple is its hash value,
+ * then the tuple in MinimalTuple format.
+ *
+ * Note: it is important always to call this in the regular executor
+ * context, not in a shorter-lived context; else the temp file buffers
+ * will get messed up.
+ */
+void
+ExecResultCacheSaveTuple(HeapTuple tuple, ResultCacheKey hashkey,
+					  BufFile **fileptr)
+{
+	BufFile    *file = *fileptr;
+	size_t		written;
+
+	if (file == NULL)
+	{
+		/* First write to this batch file, so open it. */
+		file = BufFileCreateTemp(false);
+		*fileptr = file;
 	}
 
-	printf("  ]   ");
-	/*Alex: Do the search job
-	 *
-	 *
-	 */
+	written = BufFileWrite(file, (void *) &hashkey, sizeof(uint64));
+	if (written != sizeof(uint64))
+		ereport(ERROR,
+				(errcode_for_file_access(),
+				 errmsg("could not write to result-cache temporary file: %m")));
 
-	/* Get the root page to start with */
-	buf = _bt_getroot(rel, BT_READ);
+	written = BufFileWrite(file, (void *) tuple, tuple->t_len);
+	if (written != tuple->t_len)
+		ereport(ERROR,
+				(errcode_for_file_access(),
+				 errmsg("could not write to result-cache temporary file: %m")));
+}
+ResultCacheEntry *
+ExecResultCacheInsert(IndexScanDesc scan, ResultCache *resultcache,
+					HeapTuple tuple,
+					ResultCacheKey hashkey)
+{
+		int			batchno;
 
-	/* If index is empty and access = BT_READ, no root page is created. */
-	if (!BufferIsValid(buf))
-		return false;
+		ExecResultCacheGetBatch(scan, tuple, &batchno);
 
-	/* if this is a leaf page, we're done */
-	page = BufferGetPage(buf);
-	opaque = (BTPageOpaque) PageGetSpecialPointer(page);
-	if (P_ISLEAF(opaque)) {
-		_bt_relbuf(rel, buf);
-		return false;
+		/*
+		 * decide whether to put the tuple in the hash table or a temp file
+		 */
+	if (batchno == resultcache->curbatch) {
+		ResultCacheEntry *resultEntry = NULL;
+		bool found;
+		/*
+		 * put the tuple in hash table
+		 */
 
+		resultEntry = (ResultCacheEntry *) hash_search(resultcache->hashtable, &hashkey, HASH_ENTER, &found);
+		if (!found) {
+					//this works
+					Size entry = MAXALIGN(sizeof(ResultCacheKey)+ (tuple->t_len));
+
+					//this is just for tpch testing
+					//Size entry = MAXALIGN(sizeof(ResultCacheKey))+ HEAPTUPLESIZE + cache->tuple_length;
+
+					MemSet(resultEntry, 0, entry);
+					//MemSet(resultCache, 0, (sizeof(TID) + tpl->t_len));
+					resultEntry->tid = hashkey;
+
+					/* must count it too */
+
+					if (resultcache->nentries == resultcache->maxentries) {
+						printf("\nNO MORE PAGES ARE SUPPOSED TO BE ADDED IN THE CACHE. FULL! \n ");
+						resultcache->status = SS_FULL;
+					}
+		}
+		else
+		memcpy( &resultEntry->tuple_data, tuple->t_data, tuple->t_len);
+
+		resultcache->nentries++;
+
+		return resultEntry;
+	} else {
+		HashPartitionDesc *hashtable = resultcache->partion_array[batchno];
+		//int curr_file = hashtable->curbatch;
+		/*
+		 * put the tuple into a temp file for later batches
+		 */
+		Assert(batchno > resultcache->curbatch);
+		ExecResultCacheSaveTuple(tuple, hashkey, &hashtable->BatchFile);
+//			ExecHashJoinSaveTuple(tuple,
+//								  hashvalue,
+//								  &hashtable->innerBatchFile[batchno]);
+	}
+}
+static HeapTuple
+ExecResultCacheGetSavedTuple(IndexScanDesc scan, BufFile *file,
+						  ResultCacheKey *hashkey,HeapTuple *tuple){
+
+		uint32		header[3];
+		size_t		nread;
+
+
+		/*
+		 * Since both the hash value and the MinimalTuple length word are uint32,
+		 * we can read them both in one BufFileRead() call without any type
+		 * cheating.
+		 */
+		nread = BufFileRead(file, (void *) header, sizeof(header));
+		if (nread == 0)				/* end of file */
+		{
+
+			return NULL;
+		}
+		if (nread != sizeof(header))
+			ereport(ERROR,
+					(errcode_for_file_access(),
+					 errmsg("could not read from result-cache temporary file: %m")));
+		*hashkey = header[0];
+		*tuple = (HeapTuple) palloc(header[2]);
+		(*tuple)->t_len = header[2];
+		nread = BufFileRead(file, &(*tuple)->t_data ,
+							header[2] - sizeof(uint32));
+
+
+		if (nread != header[2] - sizeof(uint32))
+			ereport(ERROR,
+					(errcode_for_file_access(),
+					 errmsg("could not read from result-cache temporary file: %m")));
+		return *tuple;
+	return NULL;
+
+}
+/*
+ * ExecHashJoinNewBatch
+ *		switch to a new hashjoin batch
+ *
+ * Returns true if successful, false if there are no more batches.
+ */
+static bool
+ExecHashJoinNewBatch(IndexScanDesc scan, int batchindex)
+{
+	SmoothScanOpaque sso = (SmoothScanOpaque)scan->smoothInfo;
+	int			nbatch;
+	int			curbatch;
+	BufFile    *bufferFile;
+	ResultCacheKey		hashvalue;
+	ResultCache * res_cache = sso->result_cache;
+	HeapTuple tuple;
+	HashPartitionDesc  **hashtable = res_cache->partion_array;
+
+	nbatch = res_cache->nbatch;
+	curbatch = res_cache->curbatch;
+
+	if (curbatch > 0)
+	{
+//		/*
+//		 * We no longer need the previous outer batch file; close it right
+//		 * away to free disk space.
+//		 */
+//		if (hashtable->outerBatchFile[curbatch])
+//			BufFileClose(hashtable->outerBatchFile[curbatch]);
+//		hashtable->outerBatchFile[curbatch] = NULL;
+	}
+	else	/* we just finished the first batch */
+	{
+//		/*
+//		 * Reset some of the skew optimization state variables, since we no
+//		 * longer need to consider skew tuples after the first batch. The
+//		 * memory context reset we are about to do will release the skew
+//		 * hashtable itself.
+//		 */
+//		hashtable->skewEnabled = false;
+//		hashtable->skewBucket = NULL;
+//		hashtable->skewBucketNums = NULL;
+//		hashtable->nSkewBuckets = 0;
+//		hashtable->spaceUsedSkew = 0;
 	}
 
 	/*
-	 * Find the appropriate item on the internal page, and get the child
-	 * page that it points to.
+	 * We can always skip over any batches that are completely empty on both
+	 * sides.  We can sometimes skip over batches that are empty on only one
+	 * side, but there are exceptions:
+	 *
+	 * 1. In a left/full outer join, we have to process outer batches even if
+	 * the inner batch is empty.  Similarly, in a right/full outer join, we
+	 * have to process inner batches even if the outer batch is empty.
+	 *
+	 * 2. If we have increased nbatch since the initial estimate, we have to
+	 * scan inner batches since they might contain tuples that need to be
+	 * reassigned to later inner batches.
+	 *
+	 * 3. Similarly, if we have increased nbatch since starting the outer
+	 * scan, we have to rescan outer batches in case they contain tuples that
+	 * need to be reassigned.
 	 */
-	offnum = _bt_binsrch(rel, buf, smootho->keyz, this_scan_key, false);
+
+//	while (curbatch < nbatch &&
+//		   (hashtable->outerBatchFile[curbatch] == NULL ||
+//			hashtable->innerBatchFile[curbatch] == NULL))
+//	{
+//		if (hashtable->outerBatchFile[curbatch] &&
+//			HJ_FILL_OUTER(hjstate))
+//			break;				/* must process due to rule 1 */
+//		if (hashtable->innerBatchFile[curbatch] &&
+//			HJ_FILL_INNER(hjstate))
+//			break;				/* must process due to rule 1 */
+//		if (hashtable->innerBatchFile[curbatch] &&
+//			nbatch != hashtable->nbatch_original)
+//			break;				/* must process due to rule 2 */
+//		if (hashtable->outerBatchFile[curbatch] &&
+//			nbatch != hashtable->nbatch_outstart)
+//			break;				/* must process due to rule 3 */
+//		/* We can ignore this batch. */
+//		/* Release associated temp files right away. */
+//		if (hashtable->innerBatchFile[curbatch])
+//			BufFileClose(hashtable->innerBatchFile[curbatch]);
+//		hashtable->innerBatchFile[curbatch] = NULL;
+//		if (hashtable->outerBatchFile[curbatch])
+//			BufFileClose(hashtable->outerBatchFile[curbatch]);
+//		hashtable->outerBatchFile[curbatch] = NULL;
+//		curbatch++;
+//	}
+
+	if (batchindex >= nbatch)
+		return false;			/* no more batches */
+
+	res_cache->curbatch = batchindex;
+	res_cache->nentries = 0;
+	//res_cache->status =
+
+
 
 	/*
-	 * We need to save the location of the index entry we chose in the
-	 * parent page on a stack. In case we split the tree, we'll use the
-	 * stack to work back up to the parent page.  We also save the actual
-	 * downlink (TID) to uniquely identify the index entry, in case it
-	 * moves right while we're working lower in the tree.  See the paper
-	 * by Lehman and Yao for how this is detected and handled. (We use the
-	 * child link to disambiguate duplicate keys in the index -- Lehman
-	 * and Yao disallow duplicate keys.)
+	 * Reload the hash table with the new inner batch (which could be empty)
 	 */
+	//ExecHashTableReset(hashtable);
 
-	_bt_relbuf(rel, buf);
+	bufferFile = hashtable[batchindex]->BatchFile;
 
-	printf("goes to partition : %d \n", offnum);
+	if (bufferFile != NULL)
+	{
+		if (BufFileSeek(bufferFile, 0, 0L, SEEK_SET))
+			ereport(ERROR,
+					(errcode_for_file_access(),
+				   errmsg("could not rewind hash-resultCache temporary file: %m")));
+
+		while ((tuple = ExecResultCacheGetSavedTuple(scan,
+												bufferFile,
+												 &hashvalue,
+												 &tuple)))
+		{
+			/*
+			 * NOTE: some tuples may be sent to future batches.  Also, it is
+			 * possible for hashtable->nbatch to be increased here!
+			 */
+			ExecResultCacheInsert(scan,res_cache, tuple, hashvalue);
+		}
+
+		/*
+		 * after we build the hash table, the inner batch file is no longer
+		 * needed
+		 */
+//		BufFileClose(innerFile);
+//		hashtable->innerBatchFile[curbatch] = NULL;
+	}else{
+		return false;
+	}
+
+	/*
+	 * Rewind outer batch file (if present), so that we can start reading it.
+	 */
+//	if (hashtable->outerBatchFile[curbatch] != NULL)
+//	{
+//		if (BufFileSeek(hashtable->outerBatchFile[curbatch], 0, 0L, SEEK_SET))
+//			ereport(ERROR,
+//					(errcode_for_file_access(),
+//				   errmsg("could not rewind hash-join temporary file: %m")));
+//	}
 
 	return true;
-
 }
 /***************************************************************************************************/
 //previous version that partially worked

@@ -21,7 +21,7 @@ extern void ExecIndexSmoothRestrPos(IndexSmoothScanState *node);
 extern void ExecReScanIndexSmoothScan(IndexSmoothScanState *node);
 /* renata: this is added because with smooth scan with have to follow ScanKeys for Heap Scan and not Index Scan
  * attno = 1 is actually first attribute in the table and not in the index */
-extern bool  build_scanKey_from_tup(IndexScanDesc scan, ScanDirection dir, HeapTuple	tup, TupleDesc tupdes);
+extern void  build_scanKey_from_tup(IndexScanDesc scan, ScanDirection dir, HeapTuple	tup, TupleDesc tupdes);
 
 extern void ExecIndexBuildSmoothScanKeys(PlanState *planstate, Relation index,
 					   List *quals, bool isorderby,
