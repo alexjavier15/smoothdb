@@ -1015,6 +1015,51 @@ get_hash_entry(HTAB *hashp)
 	return newElement;
 }
 
+
+void init_hash_iter(HASH_ITER ** iter){
+*iter = (HASH_ITER *)palloc0(sizeof(HASH_ITER));
+	(*iter)->curr = 0;
+	(*iter)->next = 0;
+	(*iter)->currBucket=0;
+	(*iter)->currSegm = 0;
+
+}
+bool hash_get_next(HTAB *hashp, HASH_ITER * iter){
+	Assert(iter->currBucket >0);
+	Assert(iter->currSegm < hashp->hctl->nsegs);
+
+	// try to get a new element of not more element are found in the chain
+	if(iter->next == NULL){
+		// fetch the next bucket in the actual segment or the next segment of possible
+		int currSegmIdx =  iter->currSegm;
+		while(currSegmIdx < hashp->hctl->nsegs){
+			HASHSEGMENT currSegm = hashp->dir[currSegmIdx];
+			HASHBUCKET nextBucket;
+			nextBucket = currSegm[++iter->currBucket];
+			if(nextBucket != NULL){
+				iter->curr = (void *) ELEMENTKEY(nextBucket);
+				iter->next = nextBucket->link;
+				return true;
+			}
+			currSegmIdx++;
+			iter->currSegm++;
+
+		}
+		// if we get here we get the end of the chain not more buckets left
+		iter->curr = NULL;
+		iter->next = NULL;
+		return false;
+	}else{
+		// base case: update iter->next with the next element and return the prev one
+		iter->curr = iter->next;
+		iter->next = ((HASHSEGMENT)iter->next)->link;
+		return true;
+
+	}
+
+
+
+}
 /*
  * hash_get_num_entries -- get the number of entries in a hashtable
  */

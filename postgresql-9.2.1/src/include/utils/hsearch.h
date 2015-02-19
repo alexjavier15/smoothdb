@@ -79,6 +79,14 @@ typedef struct HASHCTL
 	HASHHDR    *hctl;			/* location of header in shared mem */
 } HASHCTL;
 
+typedef struct HASH_ITER
+{	int	currSegm;
+	int currBucket;
+	void * curr;
+	void * next;
+
+} HASH_ITER;
+
 /* Flags to indicate which parameters are supplied */
 #define HASH_PARTITION	0x001	/* Hashtable is used w/partitioned locking */
 #define HASH_SEGMENT	0x002	/* Set segment size */
@@ -149,4 +157,9 @@ extern uint32 oid_hash(const void *key, Size keysize);
 extern uint32 bitmap_hash(const void *key, Size keysize);
 extern int	bitmap_match(const void *key1, const void *key2, Size keysize);
 
+/* Alex : fontion for iterating the hash table
+ *
+ */
+extern bool hash_get_next(HTAB *hashp, HASH_ITER * iter);
+extern void init_hash_iter(HASH_ITER ** iter);
 #endif   /* HSEARCH_H */

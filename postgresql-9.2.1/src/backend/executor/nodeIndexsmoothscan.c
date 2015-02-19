@@ -59,6 +59,10 @@ ResultCacheEntry *
 ExecResultCacheInsert(IndexScanDesc scan, ResultCache *resultcache,
 					HeapTuple tuple,
 					ResultCacheKey hashkey,int action);
+ResultCacheEntry *
+ExecResultCacheInsertByBatch(IndexScanDesc scan, ResultCache *resultcache,
+					HeapTuple tuple,
+					ResultCacheKey hashkey, int batchno , int action);
 void
 ExecResultCacheSaveTuple(HeapTuple tuple, ResultCacheKey hashkey,
 					  BufFile **fileptr);
@@ -2779,70 +2783,82 @@ ExecResultCacheSaveTuple(HeapTuple tuple, ResultCacheKey hashkey,
 
 }
 ResultCacheEntry *
+ExecResultCacheInsertByBatch(IndexScanDesc scan, ResultCache *resultcache,
+					HeapTuple tuple,
+					ResultCacheKey hashkey, int batchno , int action)
+{
+	ResultCacheEntry *resultEntry = NULL;
+			/*
+			 * decide whether to put the tuple in the hash table or a temp file
+			 */
+		if (batchno == resultcache->curbatch) {
+
+			bool found;
+			/*
+			 * put the tuple in hash table
+			 */
+
+			resultEntry = (ResultCacheEntry *) hash_search(resultcache->hashtable, &hashkey, action, &found);
+
+			if (resultEntry != NULL) {
+				if (!found) {
+					//this works
+					Size entry = MAXALIGN(sizeof(ResultCacheKey)+ (tuple->t_len));
+
+					//this is just for tpch testing
+					//Size entry = MAXALIGN(sizeof(ResultCacheKey))+ HEAPTUPLESIZE + cache->tuple_length;
+
+					MemSet(resultEntry, 0, entry);
+					//MemSet(resultCache, 0, (sizeof(TID) + tpl->t_len));
+					resultEntry->tid = hashkey;
+
+					memcpy(&resultEntry->tuple_data, tuple->t_data, tuple->t_len);
+					if (resultcache->nentries == resultcache->maxentries) {
+						printf(
+								"\nNO MORE PAGES ARE SUPPOSED TO BE ADDED IN THE CACHE. FULL! \n ");
+						resultcache->status = SS_FULL;
+					}
+				}
+
+			}
+
+
+			return resultEntry;
+		} else {
+			Size entry = MAXALIGN(sizeof(ResultCacheKey)+ (tuple->t_len));
+
+			HashPartitionDesc *hashtable = resultcache->partion_array[batchno];
+			//int curr_file = hashtable->curbatch;
+			/*
+			 * put the tuple into a temp file for later batches
+			 */
+			Assert(batchno > resultcache->curbatch);
+			ExecResultCacheSaveTuple(tuple, hashkey, &hashtable->BatchFile);
+	//			ExecHashJoinSaveTuple(tuple,
+	//								  hashvalue,
+	//								  &hashtable->innerBatchFile[batchno]);
+			resultEntry = (ResultCacheEntry *)palloc0(entry);
+			resultEntry->tid = hashkey;
+			memcpy(&resultEntry->tuple_data, tuple->t_data, tuple->t_len);
+			return resultEntry;
+		}
+
+
+
+
+}
+ResultCacheEntry *
 ExecResultCacheInsert(IndexScanDesc scan, ResultCache *resultcache,
 					HeapTuple tuple,
 					ResultCacheKey hashkey, int action)
 {
 		int			batchno;
-		ResultCacheEntry *resultEntry = NULL;
+
 
 		ExecResultCacheGetBatch(scan, tuple, &batchno);
-
-		/*
-		 * decide whether to put the tuple in the hash table or a temp file
-		 */
-	if (batchno == resultcache->curbatch) {
-
-		bool found;
-		/*
-		 * put the tuple in hash table
-		 */
-
-		resultEntry = (ResultCacheEntry *) hash_search(resultcache->hashtable, &hashkey, action, &found);
-
-		if (resultEntry != NULL) {
-			if (!found) {
-				//this works
-				Size entry = MAXALIGN(sizeof(ResultCacheKey)+ (tuple->t_len));
-
-				//this is just for tpch testing
-				//Size entry = MAXALIGN(sizeof(ResultCacheKey))+ HEAPTUPLESIZE + cache->tuple_length;
-
-				MemSet(resultEntry, 0, entry);
-				//MemSet(resultCache, 0, (sizeof(TID) + tpl->t_len));
-				resultEntry->tid = hashkey;
-
-				memcpy(&resultEntry->tuple_data, tuple->t_data, tuple->t_len);
-				if (resultcache->nentries == resultcache->maxentries) {
-					printf(
-							"\nNO MORE PAGES ARE SUPPOSED TO BE ADDED IN THE CACHE. FULL! \n ");
-					resultcache->status = SS_FULL;
-				}
-			}
-
+		Assert(batchno < resultcache->nbatch);
+		return ExecResultCacheInsertByBatch(scan,resultcache,tuple,hashkey,action,batchno);
 		}
-
-
-		return resultEntry;
-	} else {
-		Size entry = MAXALIGN(sizeof(ResultCacheKey)+ (tuple->t_len));
-
-		HashPartitionDesc *hashtable = resultcache->partion_array[batchno];
-		//int curr_file = hashtable->curbatch;
-		/*
-		 * put the tuple into a temp file for later batches
-		 */
-		Assert(batchno > resultcache->curbatch);
-		ExecResultCacheSaveTuple(tuple, hashkey, &hashtable->BatchFile);
-//			ExecHashJoinSaveTuple(tuple,
-//								  hashvalue,
-//								  &hashtable->innerBatchFile[batchno]);
-		resultEntry = (ResultCacheEntry *)palloc0(entry);
-		resultEntry->tid = hashkey;
-		memcpy(&resultEntry->tuple_data, tuple->t_data, tuple->t_len);
-		return resultEntry;
-	}
-}
 static HeapTuple
 ExecResultCacheGetSavedTuple(IndexScanDesc scan, BufFile *file,
 						  ResultCacheKey *hashkey,HeapTuple *tuple){
@@ -2893,8 +2909,11 @@ ExecHashJoinNewBatch(IndexScanDesc scan, int batchindex)
 	SmoothScanOpaque sso = (SmoothScanOpaque)scan->smoothInfo;
 	int			nbatch;
 	int			curbatch;
+	int			prevBatch;
+	BufFile    *prevBufferFile;
 	BufFile    *bufferFile;
 	ResultCacheKey		hashvalue;
+	ResultCacheEntry	*hashEntry;
 	ResultCache * res_cache = sso->result_cache;
 	HeapTuple tuple;
 	HashPartitionDesc  **hashtable = res_cache->partion_array;
@@ -2974,7 +2993,8 @@ ExecHashJoinNewBatch(IndexScanDesc scan, int batchindex)
 
 	if (batchindex >= nbatch)
 		return false;			/* no more batches */
-
+	prevBatch  = res_cache->curbatch;
+	// changing the batch allow us to send the tuples to temp files when swaping
 	res_cache->curbatch = batchindex;
 	res_cache->nentries = 0;
 	//res_cache->status =
@@ -2985,8 +3005,24 @@ ExecHashJoinNewBatch(IndexScanDesc scan, int batchindex)
 	 * Reload the hash table with the new inner batch (which could be empty)
 	 */
 	//ExecHashTableReset(hashtable);
-
+	prevBufferFile =  hashtable[prevBatch]->BatchFile;
 	bufferFile = hashtable[batchindex]->BatchFile;
+
+	HASH_ITER * iter;
+	init_hash_iter(&iter);
+	while (hash_get_next(res_cache->hashtable, iter))
+			{
+				//build a generic heap tuple with the data found
+				hashEntry = (ResultCacheEntry *)iter->curr;
+				HeapTupleData tuple;
+				tuple.t_data = hashEntry->tuple_data;
+
+				/*Send the tuple tothe batch file
+				 */
+
+				ExecResultCacheInsertByBatch(scan,res_cache, &tuple, hashEntry->tid, HASH_ENTER,prevBatch);
+			}
+
 
 	if (bufferFile != NULL)
 	{
