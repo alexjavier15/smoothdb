@@ -3156,7 +3156,7 @@ ExecResultCacheInsertByBatch(IndexScanDesc scan, ResultCache *resultcache,
 
 		HashPartitionDesc hashtable = &resultcache->partition_array[batchno];
 		if (hashtable->status != RC_SWAP){
-			if( resultcache->curbatch < batchno){
+			if( resultcache->curbatch >= batchno){
 				printf(" Erreur batching : %d when %d \n", batchno, resultcache->curbatch);
 				print_heaptuple(RelationGetDescr(scan->heapRelation),tuple);
 				Assert( resultcache->curbatch < batchno);
