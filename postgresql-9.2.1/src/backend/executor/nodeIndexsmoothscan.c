@@ -3155,8 +3155,14 @@ ExecResultCacheInsertByBatch(IndexScanDesc scan, ResultCache *resultcache,
 			size_t entry = RHASHENTRYSIZE+ tuple->t_len;
 
 		HashPartitionDesc hashtable = &resultcache->partition_array[batchno];
-		if (hashtable->status != RC_SWAP)
-			Assert( resultcache->curbatch < batchno);
+		if (hashtable->status != RC_SWAP){
+			if( resultcache->curbatch < batchno){
+				printf(" Erreur batching : %d when %d \n", batchno, resultcache->curbatch);
+				print_heaptuple(RelationGetDescr(scan->heapRelation),tuple);
+				Assert( resultcache->curbatch < batchno);
+			}
+
+		}
 		//int curr_file = hashtable->curbatch;
 			/*
 			 * put the tuple into a temp file for later batches
