@@ -2583,6 +2583,7 @@ bool _readpage(IndexBoundReader readerbuf, Buffer buf, IndexScanDesc scan, ScanD
 
 	Assert (ScanDirectionIsForward(dir));
 		/* load items[] in ascending order */
+		int lastitem = readerbuf->currPos.lastItem;
 		itemIndex = readerbuf->currPos.lastItem  == 0? 0 :readerbuf->currPos.lastItem + 1;
 		firstIndex =itemIndex;
 		offnum = minoff;
@@ -2620,7 +2621,7 @@ bool _readpage(IndexBoundReader readerbuf, Buffer buf, IndexScanDesc scan, ScanD
 			offnum = OffsetNumberNext(offnum) ;
 		}
 
-		Assert(itemIndex <= MaxIndexTuplesPerPage);
+		Assert(itemIndex <= MaxIndexTuplesPerPage + lastitem);
 		readerbuf->currPos.firstItem = 0;
 		readerbuf->currPos.lastItem = itemIndex - 1;
 		readerbuf->currPos.itemIndex = firstIndex;
