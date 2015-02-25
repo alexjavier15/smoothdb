@@ -2583,7 +2583,7 @@ bool _readpage(IndexBoundReader readerbuf, Buffer buf, IndexScanDesc scan, ScanD
 
 	Assert (ScanDirectionIsForward(dir));
 		/* load items[] in ascending order */
-		int lastitem = readerbuf->currPos.lastItem;
+		int lastitem = readerbuf->currPos.lastItem +1 ;
 		itemIndex = readerbuf->currPos.lastItem  == 0? 0 :readerbuf->currPos.lastItem + 1;
 		firstIndex =itemIndex;
 		offnum = minoff;
@@ -2843,7 +2843,7 @@ void print_heaptuple(TupleDesc tupdesc, HeapTuple tup) {
 		int32 intvalue;
 		if (!isnull[j]) {
 			printf(" attno : %d , Type: %u ,", j + 1, (tupdesc->attrs[j])->atttypid);
-			if (attr_form->atttypid == 1700) {
+			if (attr_form->atttypid != 1082) {
 				char *str;
 				Datum attr;
 				Oid type = attr_form->atttypid;
@@ -2908,7 +2908,7 @@ void print_tuple(TupleDesc tupdesc, IndexTuple itup) {
 		int32 intvalue;
 		if (!isnull[j]) {
 			printf(" attno : %d , Type: %u ,", j + 1, (tupdesc->attrs[j])->atttypid);
-			if (attr_form->atttypid == 1700) {
+			if (attr_form->atttypid != 1082) {
 				char *str;
 				Datum attr;
 				Oid type = attr_form->atttypid;
