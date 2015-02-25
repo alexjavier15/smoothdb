@@ -218,9 +218,14 @@ DynaHashAlloc(Size size)
 	return MemoryContextAlloc(CurrentDynaHashCxt, size);
 }
 
-Size hash_header_size(void){
+Size hash_estimate_num_entries(long size, int entrysize){
+	double res = (double)size;
 
-	return MAXALIGN(sizeof(HASHHDR));
+	res -= MAXALIGN(sizeof(HASHHDR));
+	res/= ( (double)sizeof(HASHBUCKET) * DEF_SEGSIZE);
+	res/= (double) MAXALIGN(sizeof(HASHELEMENT)) + MAXALIGN(entrysize);
+	res/=2.0;
+	return floor(res);
 }
 
 /*

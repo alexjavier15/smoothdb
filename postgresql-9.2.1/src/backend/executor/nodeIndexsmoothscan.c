@@ -622,18 +622,17 @@ static void smooth_resultcache_create(IndexScanDesc scan, uint32 tup_length) {
 	}else{
 	double estimate_size;
 
-	size_t entrysize =  (MAXALIGN(sizeof(HASHELEMENT)) + entry ) + (2 * sizeof(uint64));
-	nbuckets = (res_cache->size -  hash_header_size())
-			/entrysize;
+//	size_t entrysize =  (MAXALIGN(sizeof(HASHELEMENT)) + entry ) + (2 * sizeof(uint64));
+	nbuckets = hash_estimate_num_entries(res_cache->size,entry);
 
-	estimate_size = (double)hash_estimate_size(nbuckets,entrysize);
-	estimate_size=(double)(res_cache->size -  hash_header_size())/ estimate_size;
-	if(estimate_size < 1){
-
-		nbuckets = floor((double) nbuckets * estimate_size );
-		Assert(nbuckets > 0);
-
-	}
+//	estimate_size = (double)hash_estimate_size(nbuckets,entrysize);
+//	estimate_size=(double)(res_cache->size -  hash_header_size())/ estimate_size;
+//	if(estimate_size < 1){
+//
+//		nbuckets = floor((double) nbuckets * estimate_size );
+//		Assert(nbuckets > 0);
+//
+//	}
 
 //	//this is just try for tpch
 //	nbuckets = res_cache->size /
@@ -3439,7 +3438,8 @@ bool ExecHashJoinNewBatch(IndexScanDesc scan, int batchindex) {
 		// delete the content
 	}
 	pfree(iter);
-	printf("partition %d stored in file!\n", prevBatch);
+	printf("partition %d stored in file with %d  entries!\n",
+			prevBatch, hash_get_num_entries(res_cache->hashtable));
 	hash_reset(res_cache->hashtable);
 	(&hashtable[prevBatch])->status = RC_INFILE;
 
@@ -3473,7 +3473,10 @@ bool ExecHashJoinNewBatch(IndexScanDesc scan, int batchindex) {
 
 		printf("%d entries loaded \n", hash_get_num_entries(res_cache->hashtable));
 		printf("%d existing entries in partition \n", hashtable[batchindex].nbucket);
+		if( res_cache->nentries < res_cache->maxentries){
+			res_cache->status = SS_HASH;
 
+		}
 		(&hashtable[batchindex])->status = RC_INMEM;
 		/*
 		 * after we build the hash table, the inner batch file is no longer
