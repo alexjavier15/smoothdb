@@ -575,7 +575,7 @@ static void smooth_resultcache_create(IndexScanDesc scan, uint32 tup_length) {
 	SmoothScanOpaque sso = (SmoothScanOpaque) scan->smoothInfo;
 	ResultCache *res_cache = sso->result_cache;
 	int hash_tag = HASH_ELEM | HASH_FUNCTION | HASH_SMOOTH;
-	Size entry =  RHASHENTRYSIZE+ tup_length;
+	Size entry =  RHASHENTRYSIZE + tup_length;
 	long nbuckets;
 	res_cache->tuple_length = tup_length;
 
@@ -622,12 +622,12 @@ static void smooth_resultcache_create(IndexScanDesc scan, uint32 tup_length) {
 	}else{
 	double estimate_size;
 
-	size_t entrysize =  (MAXALIGN(sizeof(HASHELEMENT)) + entry ) + hash_header_size() + sizeof(Pointer);
-	nbuckets = res_cache->size
+	size_t entrysize =  (MAXALIGN(sizeof(HASHELEMENT)) + entry ) + (2 * sizeof(uint64));
+	nbuckets = (res_cache->size -  hash_header_size())
 			/entrysize;
 
 	estimate_size = (double)hash_estimate_size(nbuckets,entrysize);
-	estimate_size=(double)res_cache->size / estimate_size;
+	estimate_size=(double)(res_cache->size -  hash_header_size())/ estimate_size;
 	if(estimate_size < 1){
 
 		nbuckets = floor((double) nbuckets * estimate_size );
