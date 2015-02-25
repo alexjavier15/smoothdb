@@ -2768,8 +2768,9 @@ void get_all_keys(IndexScanDesc scan) {
 	}
 	safe_size = readerBuf->currPos.lastItem + 2;
 	bounds = palloc0(sizeof(IndexTuple)*safe_size);
+	if(sso->moreLeft){
 	bounds[pos] = firsttup;
-	pos++;
+	pos++;}
 
 
 	split_factor = scan_length / partitionsz;
