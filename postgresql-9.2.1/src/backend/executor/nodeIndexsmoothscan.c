@@ -40,21 +40,49 @@
 #include "utils/date.h"
 #include "utils/lsyscache.h"
 
+#define MAX_NUM_PARTITION	40
+
 #define ITUPLE_ARRAY_SIZE(ntuples)	\
 	(offsetof(HashPartitionDesc, itupleArray) + (ntuples) * sizeof(IndexTupleData))
 //void _saveitem(IndexTuple *items, int itemIndex,
 //			 OffsetNumber offnum, IndexTuple itup);
-void _saveitem(BTScanOpaque so, int itemIndex, OffsetNumber offnum, IndexTuple itup);
+typedef struct IndexReaderPrefecther
+{
+	bool	   is_prefetching;		/* tuple storage for currPos */
+	double			split_factor;
 
-void MakeDummyBTScanOpaque( BTScanOpaque *dummy_so, int size);
 
-bool _readpage(BTScanOpaque so, Buffer buf, IndexScanDesc scan, ScanDirection dir);
-void print_tuple(TupleDesc tupdesc, IndexTuple itup);
+} IndexReaderPrefecther;
+typedef struct IndexBoundReaderData
+{
+	char	   *currTuples;		/* tuple storage for currPos */
+	size_t		alloc_size;
+	bool		hasPrefecth;
+	IndexReaderPrefecther prefetcher;
+	/* keep these last in struct for efficiency */
+	BTScanPosData currPos;		/* current position data */
+
+} IndexBoundReaderData;
+
+
+
+typedef IndexBoundReaderData *IndexBoundReader;
+
+void _saveitem(IndexBoundReader readerbuf, int itemIndex, OffsetNumber offnum, IndexTuple itup);
+
+IndexBoundReader MakeIndexBoundReader( int size);
+
+bool _readpage(IndexBoundReader readerbuf, Buffer buf, IndexScanDesc scan, ScanDirection dir) ;
+
+
 static TupleTableSlot *IndexSmoothNext(IndexSmoothScanState *node);
-
-OffsetNumber _binsrch(Relation rel, IndexScanDesc scan,	int keysz, ScanKey scankey);
+bool _findIndexBounds(IndexBoundReader * readerptr, IndexBoundReader * reader_bufferptr, Buffer buf,
+		IndexScanDesc scan, int target_length);
+bool _findIndexBoundsWithPrefetch(IndexBoundReader * readerptr, IndexBoundReader * reader_bufferptr, Buffer buf,
+		IndexScanDesc scan, int target_length);
+static OffsetNumber _binsrch(Relation rel, IndexScanDesc scan,	int keysz, ScanKey scankey);
+void ExecResultCacheInitPartition(IndexScanDesc scan, ResultCache *res_cache);
 void get_all_keys(IndexScanDesc scan);
-static bool ExecHashJoinNewBatch(IndexScanDesc scan, int batchindex);
 ResultCacheEntry *
 ExecResultCacheInsert(IndexScanDesc scan, ResultCache *resultcache,
 					HeapTuple tuple,
@@ -63,11 +91,16 @@ ResultCacheEntry *
 ExecResultCacheInsertByBatch(IndexScanDesc scan, ResultCache *resultcache,
 					HeapTuple tuple,
 					ResultCacheKey hashkey, int batchno , int action);
-void
-ExecResultCacheSaveTuple(HeapTuple tuple, ResultCacheKey hashkey,
-					  BufFile **fileptr);
-void ExecResultCacheGetBatch(IndexScanDesc scan, HeapTuple tuple,  int *batchno);
-void BuildScanKeyFromTuple(SmoothScanOpaque sso, TupleDesc tupdesc, HeapTuple tuple, ScanKey *tuple_sk );
+
+
+ScanKey BuildScanKeyFromTuple(SmoothScanOpaque sso, TupleDesc tupdesc, HeapTuple tuple );
+ScanKey  BuildScanKeyFromIndexTuple(SmoothScanOpaque sso, TupleDesc tupdesc, IndexTuple tuple );
+static void
+ExecResultCacheSaveTuple( BufFile **fileptr, ResultCacheKey *hashkey, HeapTuple tuple);
+static HeapTuple
+ExecResultCacheGetSavedTuple(IndexScanDesc scan, BufFile *file, ResultCacheKey *hashkey);
+
+
 /* renata
  * decladation of additional methods for index smooth scan
  * (mostly for dealing with result hash table)
@@ -415,16 +448,19 @@ void smooth_resultcache_free(ResultCache *cache) {
 	int partitionz = cache->nbatch;
 		// checking//
 		for(j=0; j<partitionz; j++){
-			printf("Number of buckets for partition  %d is %d \n", j, cache->partion_array[j]->nbucket);
+			printf("Number of buckets for partition  %d is %d \n", j, cache->partition_array[j].nbucket);
 
+			printf("Number of buckets hits for partition  %d:%d \n", j, cache->partition_array[j].hits);
 
+			printf("Number of nulls for partition  %d:%d \n", j, cache->partition_array[j].miss);
 
 			printf("************************************************\n");
 
-
 		}
+	pfree(cache->partition_array);
 	pfree(cache->projected_values);
 	pfree(cache->projected_isnull);
+	pfree(cache->bounds);
 	if (!enable_smoothshare) {
 		if (cache->hashtable)
 			hash_destroy(cache->hashtable);
@@ -483,6 +519,9 @@ smooth_resultcache_create_empty(IndexScanDesc scan,int numatt) {
 
 		result = ShmemInitStruct(name3, sizeof(ResultCache), &found);
 		result->type = T_ResultCache;
+		if(!found)
+			smooth_work_mem = smooth_work_mem - MAXALIGN(sizeof(ResultCache));
+		pfree(name3);
 
 	} else {
 
@@ -492,16 +531,16 @@ smooth_resultcache_create_empty(IndexScanDesc scan,int numatt) {
 
 	if (!found) {
 		result->mcxt = CurrentMemoryContext;
-		result->size = maxbytes;
-		result->isCached = false;
+		result->size = work_mem * 1042L;
+
 	}
 	result->status = SS_EMPTY;
 	result->isCached = found;
 	/*space for projection game */
-	MemoryContextSwitchTo(oldctx);
+
 	result->projected_values = (Datum *) palloc(numatt * sizeof(Datum));
 	result->projected_isnull = (bool *) palloc(numatt * sizeof(bool));
-
+	MemoryContextSwitchTo(oldctx);
 	Assert(result!=NULL);
 	return result;
 }
@@ -536,52 +575,30 @@ static void smooth_resultcache_create(IndexScanDesc scan, uint32 tup_length) {
 	SmoothScanOpaque sso = (SmoothScanOpaque) scan->smoothInfo;
 	ResultCache *res_cache = sso->result_cache;
 	int hash_tag = HASH_ELEM | HASH_FUNCTION | HASH_SMOOTH;
-	res_cache->tuple_length = tup_length;
-
+	Size entry =  RHASHENTRYSIZE+ tup_length;
 	long nbuckets;
+	res_cache->tuple_length = tup_length;
 
 	Assert(res_cache != NULL);
 	if (enable_smoothshare) {
 		oldctx = MemoryContextSwitchTo(TopMemoryContext);
 
 		hash_ctl_ptr = ShmemInitStruct("Result HASHCTL", sizeof(HASHCTL), &found);
+		MemoryContextSwitchTo(oldctx);
 		if (found)
 			printf("\nHASHCTL struct for result cache was found\n");
-		else
+		else{
+			printf("memory available : %d\n", smooth_work_mem);
+			smooth_work_mem = smooth_work_mem - MAXALIGN(sizeof(HASHCTL));
+			res_cache->size = smooth_work_mem;
+			printf("final memory for result cache : %d\n", res_cache->size);
 			IsUnderPostmaster = true;
+
+		}
 	} else {
 		hash_ctl_ptr = &hash_ctl;
 		MemSet(hash_ctl_ptr, 0, sizeof(hash_ctl));
 	}
-	sso->creatingBounds = true;
-	get_all_keys(scan);
-	sso->creatingBounds = false;
-	int j;
-	int partitionz = res_cache->nbatch;
-	// checking//
-	for(j=0; j<partitionz; j++){
-		printf("Printing bounds for partition : %d \n", j);
-		printf("Lower Bound: %d \n", j);
-		print_tuple(RelationGetDescr(scan->indexRelation),res_cache->partion_array[j]->lower_bound);
-
-		printf("Upper Bound: %d \n", j);
-		print_tuple(RelationGetDescr(scan->indexRelation),res_cache->partion_array[j]->upper_bound);
-
-		printf("************************************************\n");
-
-
-	}
-
-	/*Crate buffer files*/
-
-	for(j=0; j<partitionz; j++){
-			int nbatch = 0;
-
-			nbatch = res_cache->partion_array[j]->nbatch = 1;
-			res_cache->partion_array[j]->BatchFile = NULL;
-
-	}
-	PrepareTempTablespaces();
 
 
 	/*
@@ -597,9 +614,26 @@ static void smooth_resultcache_create(IndexScanDesc scan, uint32 tup_length) {
 //		(MAXALIGN(sizeof(HASHELEMENT)) + MAXALIGN(sizeof(ResultCacheEntry) + (tup_length))
 //		 + sizeof(Pointer) + sizeof(Pointer));
 //this one works
+	if (enable_smoothshare && found){
+
+		res_cache->maxentries =  hash_ctl_ptr->dsize;
+
+
+	}else{
+	double estimate_size;
+
+	size_t entrysize =  (MAXALIGN(sizeof(HASHELEMENT)) + entry ) + hash_header_size() + sizeof(Pointer);
 	nbuckets = res_cache->size
-			/ (MAXALIGN(sizeof(HASHELEMENT)) + MAXALIGN(sizeof(ResultCacheKey)+ (tup_length)) + sizeof(Pointer)
-					+ sizeof(Pointer));
+			/entrysize;
+
+	estimate_size = (double)hash_estimate_size(nbuckets,entrysize);
+	estimate_size=(double)res_cache->size / estimate_size;
+	if(estimate_size < 1){
+
+		nbuckets = floor((double) nbuckets * estimate_size );
+		Assert(nbuckets > 0);
+
+	}
 
 //	//this is just try for tpch
 //	nbuckets = res_cache->size /
@@ -610,20 +644,22 @@ static void smooth_resultcache_create(IndexScanDesc scan, uint32 tup_length) {
 	nbuckets = Max(nbuckets, 16); /* sanity limit */
 
 	res_cache->maxentries = (int) nbuckets;
-	res_cache->nentries = 0;
+	//res_cache->nentries = 0;
+
+	}
 	res_cache->tuple_length = (tup_length);
-	if (enable_benchmarking || enable_smoothnestedloop)
+	//if (enable_benchmarking || enable_smoothnestedloop)
 		printf("\nMax number of entries in hash table is %ld\n", nbuckets);
 
 	/* Create the hashtable proper */
 //	Size entry = sizeof(ResultCacheEntry)+ (tup_length);
 //this one works!!!
-	Size entry = MAXALIGN(sizeof(ResultCacheKey)+ MAXALIGN(tup_length));
+
 
 	//this is just a try for tpch
 	//Size entry= MAXALIGN(sizeof(ResultCacheKey))  + HEAPTUPLESIZE + MAXALIGN(tup_length);
 	//if (enable_benchmarking || enable_smoothnestedloop)
-		printf("\n to_leng: %d , ResCachEnt : %d, hash table entry size is %d\n", tup_length, sizeof(ResultCacheKey), entry);
+	printf("\n to_leng: %d , ResCachEnt : %d, hash table entry size is %d\n", tup_length, sizeof(ResultCacheKey), entry);
 	//printf("\n Size of result cache entry is %d, tuple length %d \n", sizeof(ResultCacheEntry), tup_length);
 	if (!found) {
 		hash_ctl_ptr->keysize = sizeof(ResultCacheKey);
@@ -631,21 +667,27 @@ static void smooth_resultcache_create(IndexScanDesc scan, uint32 tup_length) {
 		hash_ctl_ptr->hash = tag_hash;
 		hash_ctl_ptr->hcxt = res_cache->mcxt;
 	}
+	//
 
 	Assert(hash_ctl_ptr!=NULL);
 	if (!enable_smoothshare) {
+
 		hash_tag |= HASH_CONTEXT;
 		res_cache->hashtable = hash_create("ResultCache Hash", 128, /* start small and extend */
 		hash_ctl_ptr, hash_tag);
-	} else {
 
+	} else {
+		MemoryContextSwitchTo(TopMemoryContext);
 		res_cache->hashtable = ShmemInitHash("ResultCache Hash", res_cache->maxentries, res_cache->maxentries,
 				hash_ctl_ptr, hash_tag);
 		IsUnderPostmaster = false;
+		MemoryContextSwitchTo(oldctx);
 	}
-	MemoryContextSwitchTo(oldctx);
+
 	res_cache->nentries = hash_get_num_entries(res_cache->hashtable);
 	res_cache->status = SS_HASH;
+
+	ExecResultCacheInitPartition(scan,res_cache);
 }
 
 //renata: add tuple id in tuple cache
@@ -696,7 +738,7 @@ bool smooth_resultcache_add_tuple(IndexScanDesc scan, const BlockNumber blknum, 
 //		//memcpy((char *) &resultEntry->tuple_data, (char *) tpl->t_data, tpl->t_len);
 //		//TODO
 //		memcpy((char *) &resultEntry->tuple_data, (char *) projectedTuple->t_data, projectedTuple->t_len);
-
+		ss->result_cache->nentries++;
 		inserted = true;
 		ss->prefetch_counter++;
 		ss->smooth_counter++;
@@ -709,6 +751,7 @@ bool smooth_resultcache_add_tuple(IndexScanDesc scan, const BlockNumber blknum, 
 		}
 
 	} else {
+		printf("not inserted\n");
 		inserted = false;
 	}
 	/*I am supposed to free projected tuple here */
@@ -822,6 +865,8 @@ bool smooth_tuplecache_find_tuple(TupleIDCache *cache, TID tid) {
 bool smooth_resultcache_find_tuple(IndexScanDesc scan, HeapTuple tpl, BlockNumber blkn) {
 	ResultCacheEntry *resultCache = NULL;
 	SmoothScanOpaque sso = (SmoothScanOpaque)scan->smoothInfo;
+	//HashPartitionDesc  *hashtable = sso->result_cache->partion_array;
+
 	bool found = false;
 
 //	TID tid = form_tuple_id(tpl, blkn);
@@ -835,10 +880,17 @@ bool smooth_resultcache_find_tuple(IndexScanDesc scan, HeapTuple tpl, BlockNumbe
 	/* if we have a bucket for this block */
 	if (resultCache != NULL) {
 		//this works for regular
-		tpl->t_data = ((HeapTupleHeader) (&resultCache->tuple_data));
+		tpl->t_data = (HeapTupleHeader)( resultCache + RHASHENTRYSIZE);
 
 		found = true;
+		sso->result_cache->partition_array[sso->result_cache->curbatch].hits++;
+		//sso->result_cache->curbatch = 0;
 	}
+//	else{
+//
+//		sso->result_cache->partion_array[sso->result_cache->curbatch].miss++;
+//	}
+//	sso->result_cache->curbatch = 0;
 	return found;
 }
 
@@ -867,6 +919,12 @@ smooth_resultcache_find_resultentry(IndexScanDesc scan, ResultCacheKey tid, Heap
 			return NULL;
 		}
 	}
+//	int batchno;
+//	ExecResultCacheGetBatch( scan,  tpl, &batchno);
+//	if(batchno != cache->curbatch){
+//
+//		printf("Error, trying to accessing partition %d from %d\n", batchno,cache->curbatch);
+//	}
 
 	resultCache = (ResultCacheEntry *) hash_search(cache->hashtable, (void *) &tid, HASH_FIND, NULL);
 
@@ -884,7 +942,6 @@ smooth_resultcache_get_resultentry(IndexScanDesc scan, HeapTuple tpl, BlockNumbe
 	bool found;
 	SmoothScanOpaque sso = (SmoothScanOpaque)scan->smoothInfo;
 	ResultCache *cache = sso->result_cache;
-
 //	TID tid = form_tuple_id(tpl, blknum);
 	TID tid;
 	//calling macro
@@ -892,7 +949,10 @@ smooth_resultcache_get_resultentry(IndexScanDesc scan, HeapTuple tpl, BlockNumbe
 
 	if (cache->status == SS_EMPTY) {
 		smooth_resultcache_create(scan, tpl->t_len);
+		printf("\nCreating hash...\n");
 	}
+
+
 	if (cache->status == SS_HASH) {
 
 		resultCache =  ExecResultCacheInsert(scan,cache,tpl,tid,HASH_ENTER);
@@ -929,7 +989,7 @@ smooth_resultcache_get_resultentry(IndexScanDesc scan, HeapTuple tpl, BlockNumbe
 //			}
 //		}
 	} else {
-		printf("\nHash table is full!\n");
+		printf("\nHash table is full in get!\n");
 		cache->status = SS_FULL;
 	}
 
@@ -951,6 +1011,7 @@ IndexSmoothNext(IndexSmoothScanState *node) {
 	HeapTuple tuple;
 	TupleTableSlot *slot;
 	SmoothScanOpaque smootho;
+	int batchno = -1;
 
 	smootho = (SmoothScanOpaque) node->iss_ScanDesc->smoothInfo;
 
@@ -1010,7 +1071,9 @@ IndexSmoothNext(IndexSmoothScanState *node) {
 				InstrCountFiltered2(node, 1);
 				continue;
 			}
+
 		}
+
 
 		return slot;
 	}
@@ -1030,7 +1093,7 @@ IndexSmoothNext(IndexSmoothScanState *node) {
 static bool IndexSmoothRecheck(IndexSmoothScanState *node, TupleTableSlot *slot) {
 	ExprContext *econtext;
 
-	/*
+ 	/*
 	 * extract necessary information from index scan node
 	 */
 	econtext = node->ss.ps.ps_ExprContext;
@@ -1543,6 +1606,7 @@ ExecInitIndexSmoothScan(IndexSmoothScan *node, EState *estate, int eflags) {
 	 */
 	indexstate->iss_ScanDesc = index_beginscan(currentRelation, indexstate->iss_RelationDesc, estate->es_snapshot,
 			indexstate->iss_NumScanKeys, indexstate->iss_NumOrderByKeys);
+	indexstate->iss_ScanDesc->xs_want_itup = true;
 	/**********************************************************/
 	//smooth scan part
 	ss = (SmoothScanOpaque) palloc(sizeof(SmoothScanOpaqueData));
@@ -1624,9 +1688,10 @@ ExecInitIndexSmoothScan(IndexSmoothScan *node, EState *estate, int eflags) {
 	//ss->num_tuples_per_page = BLCKSZ / indexstate->ss.ps.plan->plan_width;  // this is simplification
 
 	if (ss->orderby) {
-
+		//uint32 data_len;
 		ss->result_cache = smooth_resultcache_create_empty(indexstate->iss_ScanDesc,RelationGetDescr(currentRelation)->natts);
-
+		//data_len = heap_compute_data_len(RelationGetDescr(indexstate->iss_ScanDesc->indexRelation));
+		//smooth_resultcache_create(indexstate->iss_ScanDesc,data_len);
 		// we need  to check if there's exist one in shared memory otherwise we start by building
 		// a bitmap in local memory
 		if (enable_smoothshare) {
@@ -1640,9 +1705,11 @@ ExecInitIndexSmoothScan(IndexSmoothScan *node, EState *estate, int eflags) {
 			memcpy(name3 + strlen(name1), name2, strlen(name2)+1);
 			ss->bs_vispages = (Bitmapset*) ShmemInitStruct(name3, bs_size, &found);
 			ss->bs_vispages->nwords = 1024*1024;
-			if(!found)
+			if(!found){
 				memset(ss->bs_vispages->words,0, sizeof(bitmapword)*1024*1024L);
-
+				smooth_work_mem = smooth_work_mem -  MAXALIGN(bs_size);
+			}
+			pfree(name3);
 
 			/*printf("Size of words shared : %d.\n", sizeof(bitmapword) * ss->bs_vispages->nwords);
 			 printf("number of members in shared memory :  %d.\n", bms_num_members(ss->bs_vispages));*/
@@ -2183,7 +2250,7 @@ void ExecIndexBuildSmoothScanKeys(PlanState *planstate, Relation index, List *qu
  * the given page.	_bt_binsrch() has no lock or refcount side effects
  * on the buffer.
  */
-OffsetNumber
+static OffsetNumber
 _binsrch(Relation rel, IndexScanDesc scan,
 			int keysz,
 			ScanKey scankey)
@@ -2196,7 +2263,7 @@ _binsrch(Relation rel, IndexScanDesc scan,
 	SmoothScanOpaque sso = (SmoothScanOpaque)scan->smoothInfo;
 	ResultCache *res_cache = sso->result_cache;
 	int partitionz = res_cache->nbatch;
-	HashPartitionDesc **partion_array = res_cache->partion_array;
+	//HashPartitionDesc **partion_array = res_cache->partion_array;
 	TupleDesc itupdesc = RelationGetDescr(scan->indexRelation);
 
 	low = 0;
@@ -2224,7 +2291,7 @@ _binsrch(Relation rel, IndexScanDesc scan,
 	 *
 	 * We can fall out when high == low.
 	 */
-	high++;						/* establish the loop_binsrch invariant for high */
+							/* establish the loop_binsrch invariant for high */
 
 	//cmpval = nextkey ? 0 : 1;	/* select comparison value */
 	cmpval = 1;
@@ -2233,7 +2300,7 @@ _binsrch(Relation rel, IndexScanDesc scan,
 	{	IndexTuple itup;
 		OffsetNumber mid = low + ((high - low) / 2);
 
-		itup = partion_array[mid]->upper_bound;
+		itup = res_cache->partition_array[mid].upper_bound;
 
 		/* We have low <= mid < high, so mid points at a real slot */
 
@@ -2272,20 +2339,186 @@ _binsrch(Relation rel, IndexScanDesc scan,
 //	}
 //}
 
-void _saveitem(BTScanOpaque so, int itemIndex, OffsetNumber offnum, IndexTuple itup) {
-	BTScanPosItem *currItem = &so->currPos.items[itemIndex];
+void _saveitem(IndexBoundReader readerbuf, int itemIndex, OffsetNumber offnum, IndexTuple itup) {
+	BTScanPosItem *currItem = &readerbuf->currPos.items[itemIndex];
 
 	currItem->heapTid = itup->t_tid;
 	currItem->indexOffset = offnum;
-	if (so->currTuples) {
+	if (readerbuf->currTuples) {
 		Size itupsz = IndexTupleSize(itup);
 
-		currItem->tupleOffset = so->currPos.nextTupleOffset;
-		memcpy(so->currTuples + so->currPos.nextTupleOffset, itup, itupsz);
-		so->currPos.nextTupleOffset += MAXALIGN(itupsz);
+		currItem->tupleOffset = readerbuf->currPos.nextTupleOffset;
+		memcpy(readerbuf->currTuples + readerbuf->currPos.nextTupleOffset, itup, itupsz);
+		readerbuf->currPos.nextTupleOffset += MAXALIGN(itupsz);
 	}
 }
 
+bool _findIndexBoundsWithPrefetch(IndexBoundReader * readerptr, IndexBoundReader * reader_bufferptr, Buffer buf,
+		IndexScanDesc scan, int target_length) {
+	Relation rel = scan->indexRelation;
+	IndexBoundReader reader = *readerptr;
+	IndexBoundReader reader_buffer = *reader_bufferptr;
+	IndexBoundReader tmp_reader;
+	int next = reader->currPos.firstItem;
+	int curr_length = 0;
+	//int target_length;
+
+//  we get a first index tuple list we will iterate all over the list to produce a new list of childs indextuples
+// if the length of the produced list satisfy the required to form n partions we stop (n - 2 indextuples). we use a BSF
+	// in order to get the desired bounds.
+
+	// Make a buffer storage for the reading and pray for we have enough space
+
+	while (next <= reader->currPos.lastItem) {
+		IndexTuple curr_tuple;
+		BTScanPosItem *currItem;
+		BlockNumber blkno;
+		Page page;
+		BTPageOpaque opaque;
+		OffsetNumber minoff;
+		OffsetNumber maxoff;
+
+		currItem = &reader->currPos.items[next];
+		curr_tuple = (IndexTuple) (reader->currTuples + currItem->tupleOffset);
+
+		// Now _readpage need the right buffer in order to read the page so fetch the page
+		// associated to this indextuple.
+
+		blkno = ItemPointerGetBlockNumber(&(curr_tuple->t_tid));
+
+		buf = _bt_relandgetbuf(rel, buf, blkno, BT_READ);
+		// we are rady to read the page so go ahead
+		page = BufferGetPage(buf);
+		opaque = (BTPageOpaque) PageGetSpecialPointer(page);
+
+		minoff = P_FIRSTDATAKEY(opaque);
+		maxoff = PageGetMaxOffsetNumber(page);
+		curr_length += (maxoff - minoff + 1);
+		next++;
+	}
+	printf("Current scan leght with prefetcher : %d\n",curr_length );
+	if (curr_length < target_length) {
+
+		while (next <= reader->currPos.lastItem) {
+			IndexTuple curr_tuple;
+			BTScanPosItem *currItem;
+			BlockNumber blkno;
+
+			currItem = &reader->currPos.items[next];
+			curr_tuple = (IndexTuple) (reader->currTuples + currItem->tupleOffset);
+
+			// Now _readpage need the right buffer in order to read the page so fetch the page
+			// associated to this indextuple.
+
+			blkno = ItemPointerGetBlockNumber(&(curr_tuple->t_tid));
+
+			buf = _bt_relandgetbuf(rel, buf, blkno, BT_READ);
+
+			if (_readpage(reader_buffer, buf, scan, ForwardScanDirection)) {
+				curr_length = reader_buffer->currPos.lastItem;
+				next++;
+			} else {
+				_bt_relbuf(rel, buf);
+				return false;
+			}
+
+		}
+		// we need to reset  the initial BTScanOpaque buffer to reuse;
+		memset(reader->currTuples, 0, reader->alloc_size);
+		memset(&reader->currPos, 0, sizeof(BTScanPosData));
+		//keep the pointer of the bound storage. At this point the reader is buffer and the buffer is the new reader
+		tmp_reader = *reader_bufferptr;
+		*reader_bufferptr = reader;
+		*readerptr = tmp_reader;
+
+		// And pass recursively the new indextuple list;
+		return _findIndexBoundsWithPrefetch(readerptr, reader_bufferptr, buf, scan, target_length);
+
+	} else {
+		int split_factor = 1;
+		// the prefetcher tell us that we will have enough bound in the next page
+		// so  calculate the split factor to only save the desire tuples
+		split_factor = curr_length / target_length;
+		// now do the lecture as always;
+
+		reader_buffer->prefetcher.is_prefetching = true;
+		reader_buffer->prefetcher.split_factor = split_factor;
+		return _findIndexBounds(readerptr, reader_bufferptr, buf, scan, target_length);
+
+	}
+
+}
+
+
+bool _findIndexBounds(IndexBoundReader * readerptr, IndexBoundReader * reader_bufferptr, Buffer buf,
+			IndexScanDesc scan, int target_length) {
+		Relation rel = scan->indexRelation;
+		IndexBoundReader reader = *readerptr;
+		IndexBoundReader reader_buffer = *reader_bufferptr;
+		IndexBoundReader tmp_reader;
+		int next = reader->currPos.firstItem;
+		int curr_length = 0;
+		//int target_length;
+
+//  we get a first index tuple list we will iterate all over the list to produce a new list of childs indextuples
+// if the length of the produced list satisfy the required to form n partions we stop (n - 2 indextuples). we use a BSF
+		// in order to get the desired bounds.
+
+		// Make a buffer storage for the reading and pray for we have enough space
+		while (next <= reader->currPos.lastItem) {
+			IndexTuple curr_tuple;
+			BTScanPosItem *currItem;
+			BlockNumber blkno;
+			currItem = &reader->currPos.items[next];
+			curr_tuple = (IndexTuple) (reader->currTuples + currItem->tupleOffset);
+
+			// Now _readpage need the right buffer in order to read the page so fetch the page
+			// associated to this indextuple.
+
+
+
+			blkno = ItemPointerGetBlockNumber(&(curr_tuple->t_tid));
+			buf = _bt_relandgetbuf(rel, buf, blkno, BT_READ);
+			// we are rady to read the page so go ahead
+
+		if (_readpage(reader_buffer, buf, scan, ForwardScanDirection)) {
+			curr_length = reader_buffer->currPos.lastItem;
+			next++;
+		} else{
+			printf("returning false\n");
+			_bt_relbuf(rel,buf);
+			return false;
+		}
+		}
+
+		// Now check how many tuples we got
+		if (curr_length < target_length) {
+			// we need to reset  the initial BTScanOpaque buffer to reuse;
+			memset(reader->currTuples, 0, reader->alloc_size);
+			memset(&reader->currPos, 0,sizeof(BTScanPosData));
+			//keep the pointer of the bound storage. At this point the reader is buffer and the buffer is the new reader
+			tmp_reader = *reader_bufferptr;
+			*reader_bufferptr = reader;
+			*readerptr = tmp_reader;
+			if(target_length > MAX_NUM_PARTITION){
+				IndexReaderPrefecther *prefetcher = &(*reader_bufferptr)->prefetcher;
+				double 	split_factor = reader_buffer->currPos.lastItem;
+				split_factor = split_factor /(double)target_length;
+				prefetcher->split_factor = split_factor;
+				prefetcher->is_prefetching = true;
+
+			}
+			// And pass recursively the new indextuple list;
+			return _findIndexBounds(readerptr, reader_bufferptr, buf, scan, target_length);
+
+		}
+
+		_bt_relbuf(rel,buf);
+		return true;
+
+
+
+	}
 
 
 /*
@@ -2303,7 +2536,7 @@ void _saveitem(BTScanOpaque so, int itemIndex, OffsetNumber offnum, IndexTuple i
  *
  * Returns true if any matching items found on the page, false if none.
  */
-bool _readpage(BTScanOpaque so, Buffer buf, IndexScanDesc scan, ScanDirection dir) {
+bool _readpage(IndexBoundReader readerbuf, Buffer buf, IndexScanDesc scan, ScanDirection dir) {
 	Page page;
 	BTPageOpaque opaque;
 	OffsetNumber minoff;
@@ -2314,6 +2547,7 @@ bool _readpage(BTScanOpaque so, Buffer buf, IndexScanDesc scan, ScanDirection di
 	IndexTuple itup;
 	bool continuescan;
 	OffsetNumber offnum;
+	int modOffset= 0;
 
 	/* we must have the buffer pinned and locked */
 	Assert(BufferIsValid(buf));
@@ -2322,34 +2556,55 @@ bool _readpage(BTScanOpaque so, Buffer buf, IndexScanDesc scan, ScanDirection di
 
 	page = BufferGetPage(buf);
 	opaque = (BTPageOpaque) PageGetSpecialPointer(page);
+
 	if (P_IGNORE(opaque)) {
 
-		printf("ignoring...\n");
-		return false;
+				printf("ignoring...\n");
+				return true;
+	}
+
+	if (P_ISLEAF(opaque)) {
+		// we are at the and of the tree!
+		        return false;
+
 	}
 
 	minoff = P_FIRSTDATAKEY(opaque);
 	maxoff = PageGetMaxOffsetNumber(page);
 
-	printf("Offset start : %d , end: %d\n", minoff, maxoff);
+	//printf("Offset start : %d , end: %d\n", minoff, maxoff);
+	//printf("prefetcher state  in read page %d\n", readerbuf->prefetcher.is_prefetching);
 
 	/*
 	 * we must save the page's right-link while scanning it; this tells us
 	 * where to step right to after we're done with these items.  There is no
 	 * corresponding need for the left-link, since splits always go right.
 	 */
-	//so->currPos.nextPage = opaque->btpo_next;
-	/* initialize tuple workspace to empty */
-	//so->currPos.nextTupleOffset = 0;
+
 	Assert (ScanDirectionIsForward(dir));
 		/* load items[] in ascending order */
-		itemIndex = so->currPos.lastItem + 1;
+		itemIndex = readerbuf->currPos.lastItem  == 0? 0 :readerbuf->currPos.lastItem + 1;
 		firstIndex =itemIndex;
 		offnum = minoff;
 
 		while (offnum <= maxoff) {
-			//ItemId iid = PageGetItemId(page, offnum);
 
+			//ItemId iid = PageGetItemId(page, offnum);
+			if(readerbuf->prefetcher.is_prefetching){
+				double step;
+				printf("Is prefetching \n");
+				if(readerbuf->prefetcher.split_factor < 1.0){
+				int distance = maxoff -minoff + 1;
+				printf("distance : %d \n", distance);
+				step = distance  * readerbuf->prefetcher.split_factor;
+				readerbuf->prefetcher.split_factor = step;
+				}else
+					step = ( int) readerbuf->prefetcher.split_factor;
+				modOffset = itemIndex %  (int) step;
+
+				if(modOffset !=0)
+					continue;
+			}
 			itup = 	_bt_checkkeys(scan,page,offnum,ForwardScanDirection,&continuescan);
 
 
@@ -2357,63 +2612,39 @@ bool _readpage(BTScanOpaque so, Buffer buf, IndexScanDesc scan, ScanDirection di
 
 				//print_tuple(tupdes, itup);
 				/* tuple passes all scan key conditions, so remember it */
-				_saveitem(so, itemIndex, offnum, itup);
+				_saveitem(readerbuf, itemIndex, offnum, itup);
 				itemIndex++;
 			}
 
 			/*renata: move to next index tuple */
-			offnum = OffsetNumberNext(offnum);
+			offnum = OffsetNumberNext(offnum) ;
 		}
 
 		Assert(itemIndex <= MaxIndexTuplesPerPage);
-		so->currPos.firstItem = 0;
-		so->currPos.lastItem = itemIndex - 1;
-		so->currPos.itemIndex = firstIndex;
-//	} else {
-//		/* load items[] in descending order */
-//		itemIndex = MaxIndexTuplesPerPage;
-//
-//		offnum = maxoff;
-//
-//		while (offnum >= minoff) {
-//			itup = _bt_checkkeys(scan, page, offnum, dir, &continuescan);
-//			if (itup != NULL) {
-//
-//				/* tuple passes all scan key conditions, so remember it */
-//				itemIndex--;
-//				_saveitem(so, itemIndex, offnum, itup);
-//			}
-//
-//			offnum = OffsetNumberPrev(offnum);
-//		}
-//
-//		Assert(itemIndex >= 0);
-//		so->currPos.firstItem = itemIndex;
-//		so->currPos.lastItem = MaxIndexTuplesPerPage - 1;
-//		so->currPos.itemIndex = MaxIndexTuplesPerPage - 1;
-//	}
+		readerbuf->currPos.firstItem = 0;
+		readerbuf->currPos.lastItem = itemIndex - 1;
+		readerbuf->currPos.itemIndex = firstIndex;
 
-	return (so->currPos.firstItem <= so->currPos.lastItem);
+
+	return (readerbuf->currPos.firstItem <= readerbuf->currPos.lastItem);
 }
 // make a dummy  BTScanOpaque
-void MakeDummyBTScanOpaque( BTScanOpaque *dummy_so, int size){
-	BTScanOpaque so = *dummy_so;
-	so = (BTScanOpaque) palloc(sizeof(BTScanOpaqueData));
-	so->currPos.buf = so->markPos.buf = InvalidBuffer;
+IndexBoundReader MakeIndexBoundReader( int size){
+		IndexBoundReader reader;
+		reader = (IndexBoundReader) palloc(sizeof(IndexBoundReaderData));
+		reader->currPos.buf = InvalidBuffer;
 
+		reader->currPos.firstItem = 0;
 
-	so->numKilled = 0;
-	so->currPos.lastItem =0;
-	/*
-	 * We don't know yet whether the scan will be index-only, so we do not
-	 * allocate the tuple workspace arrays until btrescan.	However, we set up
-	 * scan->xs_itupdesc whether we'll need it or not, since that's so cheap.
-	 */
+		reader->currPos.lastItem = 0;
+		reader->currPos.nextTupleOffset = 0;
 
-	so->currPos.nextTupleOffset = 0;
-	so->markPos.nextTupleOffset = 0;
-	so->currTuples = (char *) palloc(size);
-	//*dummy_so->markTuples = dummy_so->currTuples + 2*BLCKSZ;
+		reader->alloc_size = size;
+		reader->prefetcher.is_prefetching = 0;
+		reader->prefetcher.split_factor = 1;
+		reader->currTuples = (char *) palloc0(size);
+		return reader;
+
 
 
 }
@@ -2424,8 +2655,9 @@ void get_all_keys(IndexScanDesc scan) {
 
 	Relation rel = scan->indexRelation;
 	SmoothScanOpaque sso = (SmoothScanOpaque) scan->smoothInfo;
-
-	//ScanKey scanKeys = ss->iss_ScanKeys;
+	Buffer buf;
+	Page page;
+	ResultCache *resultCache =sso->result_cache;
 	double reltuples = rel->rd_rel->reltuples;
 	double aproxtups;
 	int tup_length = sso->result_cache->tuple_length;
@@ -2440,14 +2672,34 @@ void get_all_keys(IndexScanDesc scan) {
 	IndexTuple firsttup = sso->itup_bounds[RightBound];
 	IndexTuple lastttup = sso->itup_bounds[LeftBound];
 	IndexTuple *bounds;
+	IndexTuple curr_tuple;
+	IndexBoundReader reader;
+	IndexBoundReader readerBuf;
+	OffsetNumber offnum;
+	HashPartitionDesc partitions = NULL;
+	int itemIndex = 0;
+	int pos = 0;
+	int split_factor = 1;
+	int np = 0;
+	int safe_size = 1;
+	int next = 0;
+	bool result;
+
 	root_lentgh = max_off - min_off;
 	scan_length = end_off - start_off;
-
+	/*Check the initial number of keys into the scan range*/
+		scan_length = sso->moreLeft ? scan_length + 1.0 : scan_length;
+		scan_length = sso->moreRight ? scan_length + 1.0 : scan_length;
 	rootfrac = scan_length / root_lentgh;
-	printf("\nscan_length : %.2f, root_lentgh = %.2f \n ", scan_length, root_lentgh);
-	printf("\nrootfrac : %.2f, reltuples = %.2f \n ", rootfrac, reltuples);
+
+//	printf("\nscan_length : %.2f, root_lentgh = %.2f \n ", scan_length, root_lentgh);
+//	printf("\nrootfrac : %.2f, reltuples = %.2f \n ", rootfrac, reltuples);
+
 	Assert(rootfrac >0 && rootfrac <= 1);
+
 	aproxtups = reltuples * rootfrac;
+
+
 	Assert(aproxtups > 0);
 	Assert( tup_length > 0);
 	Assert( work_mem > 0);
@@ -2455,170 +2707,192 @@ void get_all_keys(IndexScanDesc scan) {
 	//Simple estimation for header 1Kb
 	Assert( tup_length > 0);
 
-	nbuckets = (work_mem / 250L)
-			/ (MAXALIGN(sizeof(HASHELEMENT)) + MAXALIGN(sizeof(ResultCacheKey)+ (tup_length)) + sizeof(Pointer)
-					+ sizeof(Pointer));
+	nbuckets = resultCache->maxentries;
 	printf("tuples : %.2f, nbuckets = %d \n ", aproxtups, nbuckets);
 
 	partitionsz = ceil(aproxtups / nbuckets);
-	Assert( partitionsz > 0);
 
-	/*Check the initial number of keys into the scan range*/
-	scan_length = sso->moreLeft ? scan_length + 1.0 : scan_length;
-	scan_length = sso->moreRight ? scan_length + 1.0 : scan_length;
+	Assert( partitionsz > 0);
+//
+//	/*Check the initial number of keys into the scan range*/
+//	scan_length = sso->moreLeft ? scan_length + 1.0 : scan_length;
+//	scan_length = sso->moreRight ? scan_length + 1.0 : scan_length;
 
 	printf("scan_length: %.2f\n", scan_length);
 	printf("npartitions: %d\n", partitionsz);
 
-	if (partitionsz <= scan_length) {
+	// in any case we need to fetc the root tuples!
+	reader = MakeIndexBoundReader(2 * BLCKSZ);
+	readerBuf = MakeIndexBoundReader(2 * BLCKSZ);
 
 
-		// we have enough bounds
+	buf = _bt_getroot(rel, BT_READ);
+	page = BufferGetPage(buf);
+	offnum = start_off;
+
+	while (offnum <= end_off) {
+
+		ItemId iid = PageGetItemId(page, offnum);
+
+		curr_tuple = (IndexTuple) PageGetItem(page, iid);
+		_saveitem(reader, itemIndex, offnum, curr_tuple);
+		itemIndex++;
+
+		offnum = OffsetNumberNext(offnum);
+
+	}
+	reader->currPos.firstItem = 0;
+	reader->currPos.lastItem = itemIndex - 1;
+	reader->currPos.itemIndex = 0;
+
+
+	if (partitionsz > scan_length) {
+//		if (partitionsz <= MAX_NUM_PARTITION)
+			result = _findIndexBounds(&reader, &readerBuf, buf, scan, partitionsz);
+
+//		else
+//			result = _findIndexBoundsWithPrefetch(&reader, &readerBuf, buf, scan, partitionsz);
+
+		if (result) {
+			scan_length = readerBuf->currPos.lastItem;
+
+		}
+
+		scan_length = sso->moreLeft ? scan_length + 1.0 : scan_length;
+		scan_length = sso->moreRight ? scan_length + 1.0 : scan_length;
+
 	} else {
-		// we need go down in the index to find suitable bounds
-		Buffer buf;
-		//Buffer buf_root;
-		BTScanOpaque dummy_so = NULL;
-		BlockNumber blkno;
-		int pos = 0;
-		int split_factor = ceil((double) partitionsz / scan_length);
-		int newpartitionz = (scan_length + 2) * ( split_factor + 1); // we can split a  range at most split_fator + 1 i.e. 3/2 = 1
-		OffsetNumber offnum = start_off;
-		IndexTuple curr_roottup;
-		int final_partitionz ;
-		Page page;
-		int split_point = 0;
 
-		HashPartitionDesc **partitions = NULL;
-		int np;
+		_bt_relbuf(rel,buf);
+	}
+	safe_size = readerBuf->currPos.lastItem + 2;
+	bounds = palloc0(sizeof(IndexTuple)*safe_size);
+	bounds[pos] = firsttup;
+	pos++;
 
-		bounds = palloc0(sizeof(IndexTuple)*newpartitionz);
-		/* allocate private workspace */
-		printf("Offset start : %d , end: %d\n", offnum, end_off);
-		buf = _bt_getroot(rel, BT_READ);
-		page = BufferGetPage(buf);
-		printf("split_factor : %d\n", split_factor);
-		printf("has moreleft : %d, hash moreRignt : %d\n", sso->moreLeft,
-				sso->moreRight);
 
-		bounds[pos] = firsttup;
+	split_factor = scan_length / partitionsz;
+	partitionsz = readerBuf->currPos.lastItem;
 
-		printf("left bound %d: \n", offnum);
+	while (next < readerBuf->currPos.lastItem) {
+		BTScanPosItem *currItem;
+
+		currItem = &readerBuf->currPos.items[next];
+
+		bounds[pos] = CopyIndexTuple((IndexTuple) (readerBuf->currTuples + currItem->tupleOffset));
+
 		print_tuple(tupdesc, bounds[pos]);
-		printf("**************************\n");
+		next += split_factor;
 		pos++;
+	}
 
-		MakeDummyBTScanOpaque(&dummy_so, 2 * BLCKSZ);
-//		if (dummy_so != NULL) {
-//			if (scan->numberOfKeys > 0)
-//				dummy_so->keyData =
-//						(ScanKey) palloc(scan->numberOfKeys * sizeof(ScanKeyData));
-//			else
-//				dummy_so->keyData = NULL;
-
-//			dummy_so->arrayKeyData = so->arrayKeyData; /* assume no array keys for now */
-//			dummy_so->numArrayKeys = so->numArrayKeys;
-//			dummy_so->arrayKeys = so->arrayKeys;
-//			dummy_so->arrayContext = so->arrayContext;
-//		}
-
-		while (offnum <= end_off) {
-
-			ItemId iid = PageGetItemId(page, offnum);
-
-			curr_roottup = (IndexTuple) PageGetItem(page, iid);
-
-			if (curr_roottup != NULL) {
-
-				if (offnum != start_off && offnum != end_off) {
-					bounds[pos] = CopyIndexTuple(curr_roottup);
-					printf("root tuple %d: \n", offnum);
-					print_tuple(tupdesc, bounds[pos]);
-					printf("**************************\n");
-					pos++;
-				}
-				blkno = ItemPointerGetBlockNumber(&(curr_roottup->t_tid));
-
-				buf = _bt_relandgetbuf(rel, buf, blkno, BT_READ);
-
-				_readpage(dummy_so, buf, scan, ForwardScanDirection);
-				//Assert(dummy_so->currPos.lastItem >= split_fator);
-				split_point += dummy_so->currPos.lastItem;
-				printf("split_point : %d\n ", split_point);
-				if (split_point > 0) {
-
-					int next = split_point;
-
-					while (next < dummy_so->currPos.lastItem) {
-						BTScanPosItem *currItem;
-
-						currItem = &dummy_so->currPos.items[next];
-
-						bounds[pos] = CopyIndexTuple(
-								(IndexTuple) (dummy_so->currTuples
-										+ currItem->tupleOffset));
-
-						print_tuple(tupdesc, bounds[pos]);
-						next += next;
-						pos++;
-					}
-				}
-
-			}
-			offnum = OffsetNumberNext(offnum);
-
-		}
-		split_point /= split_factor;
-		if (split_point > 0) {
-
-			int next = split_point;
-
-			while (next < dummy_so->currPos.lastItem) {
-				BTScanPosItem *currItem;
-
-				currItem = &dummy_so->currPos.items[next];
-
-				bounds[pos] = CopyIndexTuple(
-						(IndexTuple) (dummy_so->currTuples
-								+ currItem->tupleOffset));
-
-				print_tuple(tupdesc, bounds[pos]);
-				next += next;
-				pos++;
-			}
-		}
-
-		pfree(dummy_so->currTuples);
-		free(dummy_so);
 		bounds[pos]= lastttup;
+		// saving memory
+		bounds =repalloc(bounds,sizeof(IndexTuple)*(pos + 1 ));
+
 		printf("right bound %d: \n", offnum);
 		print_tuple(tupdesc, bounds[pos]);
 		printf("**************************\n");
-		_bt_relbuf(rel, buf);
-		final_partitionz = pos;
+	//	_bt_relbuf(rel, buf);
 
-		partitions = (HashPartitionDesc **)palloc0( sizeof(HashPartitionDesc *)*final_partitionz);
+
+		partitions = palloc0( MAXALIGN(sizeof(HashPartitionData))*pos);
 
 		for(np = pos; np > 0 ; np--){
 			int pindex = np - 1;
-			partitions[pindex] =(HashPartitionDesc *)palloc0(sizeof(HashPartitionDesc));
-			partitions[pindex]->curbatch = 0;
-			partitions[pindex]->lower_bound = bounds[np-1];
-			partitions[pindex]->upper_bound = bounds[np];
-			partitions[pindex]->nbatch = 1;
-			partitions[pindex]->nextBatch= 0;
-			partitions[pindex]->nbucket = 0;
-
+			HashPartitionDesc curr_partition =&partitions[pindex];
+			//partitions[pindex] =(HashPartitionDesc *)palloc0(MAXALIGN(sizeof(HashPartitionDesc)));
+			curr_partition ->curbatch = 0;
+			curr_partition ->nullno= 0;
+			curr_partition ->lower_bound = bounds[np-1];
+			curr_partition ->upper_bound = bounds[np];
+			curr_partition ->nbatch = 1;
+			curr_partition ->nextBatch= 0;
+			curr_partition ->nbucket = 0;
+			curr_partition ->BatchFile = BufFileCreateTemp(false);
+			curr_partition ->status = RC_INFILE;
 
 		}
-		sso->result_cache->partion_array = partitions;
-		sso->result_cache->nbatch = final_partitionz;
-	}
+		resultCache->partition_array =  partitions;
+		resultCache->nbatch = pos;
+		resultCache->bounds = bounds;
+
+		pfree(reader->currTuples);
+		pfree(reader);
+		pfree(readerBuf->currTuples);
+		pfree(readerBuf);
+
+
+
 
 	//
 
 }
+void print_heaptuple(TupleDesc tupdesc, HeapTuple tup) {
+	int nattr = tupdesc->natts;
+	int j;
+	bool isnull[nattr];
+	Datum values[nattr];
 
+	heap_deform_tuple(tup, tupdesc, values, isnull);
+	printf("\ntuple with data : [  ");
+
+	for (j = 0; j < nattr; j++) {
+		Form_pg_attribute attr_form = tupdesc->attrs[j];
+		int32 intvalue;
+		if (!isnull[j]) {
+			printf(" attno : %d , Type: %u ,", j + 1, (tupdesc->attrs[j])->atttypid);
+			if (attr_form->atttypid == 1700) {
+				char *str;
+				Datum attr;
+				Oid type = attr_form->atttypid;
+				Oid typeOut;
+				bool isvarlena;
+				//a = DatumGetNumeric(values[j]);
+				intvalue = DatumGetInt32(values[j]);
+				getTypeOutputInfo(type, &typeOut, &isvarlena);
+				printf("function oid: %d\n", typeOut);
+
+				/*
+				 * If we have a toasted datum, forcibly detoast it here to avoid
+				 * memory leakage inside the type's output routine.
+				 */
+				if (isvarlena)
+					attr = PointerGetDatum(PG_DETOAST_DATUM(values[j]));
+				else
+					attr = values[j];
+
+				str = OidOutputFunctionCall(typeOut, attr);
+
+				printatt((unsigned) j + 1, tupdesc->attrs[j], str);
+
+				pfree(str);
+
+			} else if (attr_form->atttypid == 1082) {
+				DateADT date;
+				struct pg_tm tm;
+				char buf[MAXDATELEN + 1];
+				intvalue = DatumGetInt32(values[j]);
+				date = DatumGetDateADT(values[j]);
+				if (!DATE_NOT_FINITE(date)) {
+
+					j2date(date + POSTGRES_EPOCH_JDATE, &(tm.tm_year), &(tm.tm_mon), &(tm.tm_mday));
+					EncodeDateOnly(&tm, USE_XSD_DATES, buf);
+
+					printf(" value: %s  , ", buf);
+					//pfree(str);
+					printf(" value: %d  ", intvalue);
+				}
+
+			}
+
+		}else
+			continue;
+
+	}
+	printf("  ]   \n");
+
+}
 void print_tuple(TupleDesc tupdesc, IndexTuple itup) {
 	int nattr = tupdesc->natts;
 	int j;
@@ -2690,7 +2964,42 @@ void print_tuple(TupleDesc tupdesc, IndexTuple itup) {
 
  }*/
 
-void BuildScanKeyFromTuple(SmoothScanOpaque sso, TupleDesc tupdesc, HeapTuple tuple, ScanKey *tuple_sk ){
+ScanKey  BuildScanKeyFromIndexTuple(SmoothScanOpaque sso, TupleDesc tupdesc, IndexTuple tuple ){
+	ScanKey this_scan_key;
+	ScanKey scankeys;
+	int	keyz = sso->keyz;
+	int i = 0;
+	bool isNull;
+
+
+	Assert(sso->keyz <= INDEX_MAX_KEYS);
+	Assert(sso->search_keyData != NULL);
+	scankeys = sso->search_keyData;
+
+	this_scan_key = (ScanKey) palloc(sso->keyz * sizeof(ScanKeyData));
+
+	for (i = 0; i < keyz; i++) {
+			int attnum = scankeys[i].sk_attno;
+			memcpy(&this_scan_key[i], &scankeys[i], sizeof(ScanKeyData));
+
+
+		//	printf("atton : %d ", attnum);
+			if (attnum > 0) {
+				Datum value = index_getattr(tuple,attnum,tupdesc,&isNull);
+				if (((scankeys[i].sk_flags & SK_ISNULL) && isNull)
+						|| (!(scankeys[i].sk_flags & SK_ISNULL) && !isNull)) /* key is NULL */
+				{
+					//printf(" old value: %u ", this_scan_key[i].sk_argument);
+
+					this_scan_key[i].sk_argument = value;
+					//printf("  %u  ", this_scan_key[i].sk_argument);
+				}
+
+			}
+		}
+	return this_scan_key;
+}
+ScanKey  BuildScanKeyFromTuple(SmoothScanOpaque sso, TupleDesc tupdesc, HeapTuple tuple ){
 	ScanKey this_scan_key;
 	ScanKey scankeys;
 	int	keyz = sso->keyz;
@@ -2720,21 +3029,44 @@ void BuildScanKeyFromTuple(SmoothScanOpaque sso, TupleDesc tupdesc, HeapTuple tu
 					this_scan_key[i].sk_argument = value;
 					//printf("  %u  ", this_scan_key[i].sk_argument);
 				}
+
 			}
 		}
-	*tuple_sk = this_scan_key;
+	return this_scan_key;
 }
+void ExecResultCacheGetBatchFromIndex(IndexScanDesc scan, IndexTuple tuple,  int *batchno){
+	Relation rel = scan->indexRelation;
+	SmoothScanOpaque sso = (SmoothScanOpaque) scan->smoothInfo;
+	OffsetNumber offnum;
+	ScanKey scankeys;
+	//MemoryContextStats(CurrentMemoryContext);
+	scankeys  = BuildScanKeyFromIndexTuple(sso,RelationGetDescr(rel),tuple);
 
+
+	offnum = _binsrch(rel, scan, sso->keyz, scankeys);
+	pfree(scankeys);
+	//printf("Go to batch: %d\n", offnum);
+	//MemoryContextStats(CurrentMemoryContext);
+
+
+	*batchno = offnum;
+
+
+}
 void ExecResultCacheGetBatch(IndexScanDesc scan, HeapTuple tuple,  int *batchno){
 	Relation rel = scan->indexRelation;
 	SmoothScanOpaque sso = (SmoothScanOpaque) scan->smoothInfo;
 	OffsetNumber offnum;
 	ScanKey scankeys;
-
-	BuildScanKeyFromTuple(sso,RelationGetDescr(rel),tuple,&scankeys);
+	//MemoryContextStats(CurrentMemoryContext);
+	scankeys  = BuildScanKeyFromTuple(sso,RelationGetDescr(scan->heapRelation),tuple);
 
 
 	offnum = _binsrch(rel, scan, sso->keyz, scankeys);
+	pfree(scankeys);
+	//printf("Go to batch: %d\n", offnum);
+	//MemoryContextStats(CurrentMemoryContext);
+
 
 	*batchno = offnum;
 
@@ -2755,45 +3087,29 @@ void ExecResultCacheGetBatch(IndexScanDesc scan, HeapTuple tuple,  int *batchno)
  * context, not in a shorter-lived context; else the temp file buffers
  * will get messed up.
  */
-void
-ExecResultCacheSaveTuple(HeapTuple tuple, ResultCacheKey hashkey,
-					  BufFile **fileptr)
-{
-	BufFile    *file = *fileptr;
-	size_t		written;
 
-	if (file == NULL)
-	{
-		/* First write to this batch file, so open it. */
-		file = BufFileCreateTemp(false);
-		*fileptr = file;
-	}
-
-	written = BufFileWrite(file, (void *) &hashkey, sizeof(uint64));
-	if (written != sizeof(uint64))
-		ereport(ERROR,
-				(errcode_for_file_access(),
-				 errmsg("could not write to result-cache temporary file: %m")));
-
-	written = BufFileWrite(file, (void *) tuple, tuple->t_len);
-	if (written != tuple->t_len)
-		ereport(ERROR,
-				(errcode_for_file_access(),
-				 errmsg("could not write to result-cache temporary file: %m")));
-
-}
 ResultCacheEntry *
 ExecResultCacheInsertByBatch(IndexScanDesc scan, ResultCache *resultcache,
 					HeapTuple tuple,
 					ResultCacheKey hashkey, int batchno , int action)
 {
 	ResultCacheEntry *resultEntry = NULL;
-			/*
+	SmoothScanOpaque sso = (SmoothScanOpaque) scan->smoothInfo;
+			ResultCache *cache = sso->result_cache;
+			MemoryContext oldcxt;
+			oldcxt = CurrentMemoryContext;
+			//MemoryContextSwitchTo(cache->mcxt);
+
+			//ExecResultCacheGetBatch(scan, tuple, &batchno);
+	/*
 			 * decide whether to put the tuple in the hash table or a temp file
 			 */
 		if (batchno == resultcache->curbatch) {
-
+//
+//	if (batchno >= 0) {
 			bool found;
+			HashPartitionDesc hashpdesc  = &resultcache->partition_array[batchno];
+
 			/*
 			 * put the tuple in hash table
 			 */
@@ -2803,7 +3119,7 @@ ExecResultCacheInsertByBatch(IndexScanDesc scan, ResultCache *resultcache,
 			if (resultEntry != NULL) {
 				if (!found) {
 					//this works
-					Size entry = MAXALIGN(sizeof(ResultCacheKey)+ (tuple->t_len));
+					size_t entry = RHASHENTRYSIZE+ tuple->t_len;
 
 					//this is just for tpch testing
 					//Size entry = MAXALIGN(sizeof(ResultCacheKey))+ HEAPTUPLESIZE + cache->tuple_length;
@@ -2811,36 +3127,49 @@ ExecResultCacheInsertByBatch(IndexScanDesc scan, ResultCache *resultcache,
 					MemSet(resultEntry, 0, entry);
 					//MemSet(resultCache, 0, (sizeof(TID) + tpl->t_len));
 					resultEntry->tid = hashkey;
+					if(hashpdesc->status != RC_SWAP)
+						hashpdesc->nbucket++;
 
-					memcpy(&resultEntry->tuple_data, tuple->t_data, tuple->t_len);
+					memcpy((char *)(resultEntry +RHASHENTRYSIZE), (char *)tuple->t_data, tuple->t_len);
+
 					if (resultcache->nentries == resultcache->maxentries) {
 						printf(
 								"\nNO MORE PAGES ARE SUPPOSED TO BE ADDED IN THE CACHE. FULL! \n ");
 						resultcache->status = SS_FULL;
 					}
+				}else{
+					hashpdesc->hits++;
+
 				}
+			//	printf("return result entry");
 
-			}
-
+			}else{
+			hashpdesc->nullno++;}
+			//MemoryContextSwitchTo(oldcxt);
 
 			return resultEntry;
 		} else {
-			Size entry = MAXALIGN(sizeof(ResultCacheKey)+ (tuple->t_len));
 
-			HashPartitionDesc *hashtable = resultcache->partion_array[batchno];
-			//int curr_file = hashtable->curbatch;
+		//	printf("Saving tuple in file... \n");
+			size_t entry = RHASHENTRYSIZE+ tuple->t_len;
+
+		HashPartitionDesc hashtable = &resultcache->partition_array[batchno];
+		if (hashtable->status != RC_SWAP)
+			Assert( resultcache->curbatch < batchno);
+		//int curr_file = hashtable->curbatch;
 			/*
 			 * put the tuple into a temp file for later batches
 			 */
-			Assert(batchno > resultcache->curbatch);
-			ExecResultCacheSaveTuple(tuple, hashkey, &hashtable->BatchFile);
-	//			ExecHashJoinSaveTuple(tuple,
-	//								  hashvalue,
-	//								  &hashtable->innerBatchFile[batchno]);
-			resultEntry = (ResultCacheEntry *)palloc0(entry);
-			resultEntry->tid = hashkey;
-			memcpy(&resultEntry->tuple_data, tuple->t_data, tuple->t_len);
-			return resultEntry;
+			//Assert(batchno > resultcache->curbatch);
+			ExecResultCacheSaveTuple( &hashtable->BatchFile, &hashkey,tuple);
+
+			//resultEntry = (ResultCacheEntry *)palloc0(entry);
+			//resultEntry->tid = hashkey;
+			if(hashtable->status != RC_SWAP)
+				hashtable->nbucket++;
+		///	memcpy((char *)(resultEntry +RHASHENTRYSIZE), (char *)tuple->t_data, tuple->t_len);
+			//MemoryContextSwitchTo(oldcxt);
+			return tuple;
 		}
 
 
@@ -2848,23 +3177,100 @@ ExecResultCacheInsertByBatch(IndexScanDesc scan, ResultCache *resultcache,
 
 }
 ResultCacheEntry *
-ExecResultCacheInsert(IndexScanDesc scan, ResultCache *resultcache,
-					HeapTuple tuple,
-					ResultCacheKey hashkey, int action)
-{
-		int			batchno;
-
+ExecResultCacheInsert(IndexScanDesc scan, ResultCache *resultcache, HeapTuple tuple, ResultCacheKey hashkey, int action) {
+	int batchno;
+	SmoothScanOpaque sso = (SmoothScanOpaque) scan->smoothInfo;
+		ResultCache *cache = sso->result_cache;
+		MemoryContext oldcxt;
+		oldcxt = CurrentMemoryContext;
+		//MemoryContextSwitchTo(cache->mcxt);
 
 		ExecResultCacheGetBatch(scan, tuple, &batchno);
-		Assert(batchno < resultcache->nbatch);
-		return ExecResultCacheInsertByBatch(scan,resultcache,tuple,hashkey,action,batchno);
-		}
-static HeapTuple
-ExecResultCacheGetSavedTuple(IndexScanDesc scan, BufFile *file,
-						  ResultCacheKey *hashkey,HeapTuple *tuple){
+		//resultcache->curbatch = batchno;
+
+		//MemoryContextSwitchTo(oldcxt);
+	Assert(batchno < resultcache->nbatch);
+	return ExecResultCacheInsertByBatch(scan, resultcache, tuple, hashkey, batchno, action);
+}
+
+void ExecResultCacheInitPartition(IndexScanDesc scan, ResultCache *res_cache) {
+	SmoothScanOpaque sso = (SmoothScanOpaque) scan->smoothInfo;
+
+	sso->creatingBounds = true;
+
+	get_all_keys(scan);
+	sso->creatingBounds = false;
+	int j;
+	int partitionz = res_cache->nbatch;
+	// checking//
+	for (j = 0; j < partitionz; j++) {
+		printf("Printing bounds for partition : %d \n", j);
+		printf("Lower Bound: %d \n", j);
+		print_tuple(RelationGetDescr(scan->indexRelation), res_cache->partition_array[j].lower_bound);
+
+		printf("Upper Bound: %d \n", j);
+		print_tuple(RelationGetDescr(scan->indexRelation), res_cache->partition_array[j].upper_bound);
+
+		printf("************************************************\n");
+
+	}
+
+	res_cache->curbatch = 0;
+	PrepareTempTablespaces();
+
+}
+static
+void ExecResultCacheSaveTuple( BufFile **fileptr, ResultCacheKey *hashkey, HeapTuple tuple)
+{
+	BufFile    *file = *fileptr;
+	size_t		written;
+	MemoryContext oldcxt;
+	int offset;
+	if (file == NULL)
+	{	oldcxt = CurrentMemoryContext;
+		//MemoryContextSwitchTo(CacheMemoryContext);
+		/* First write to this batch file, so open it. */
+		printf("Creating file.....\n");
+		file = BufFileCreateTemp(false);
+		*fileptr = file;
+		//MemoryContextSwitchTo(oldcxt);
+	}
+
+	written = BufFileWrite(file, (char *) hashkey, sizeof(uint64));
+	offset += written;
+	if (written != sizeof(uint64))
+		ereport(ERROR,
+				(errcode_for_file_access(),
+				 errmsg("could not write to result-cache temporary file: %m")));
+
+	written = BufFileWrite(file, (char *) &(tuple->t_len),sizeof(uint32));
+		if (written != sizeof(uint32))
+			ereport(ERROR,
+					(errcode_for_file_access(),
+					 errmsg("could not write to result-cache temporary file: %m")));
+
+		offset += written;
+
+	written = BufFileWrite(file, (char *)tuple->t_data, tuple->t_len);
+		if (written != tuple->t_len)
+		ereport(ERROR,
+				(errcode_for_file_access(),
+				 errmsg("could not write to result-cache temporary file: %m")));
+
+		offset += written;
+		offset = offset % 56;
+		//printf("write in file : %X\n", file);
+		Assert(offset == 0);
+
+
+}
+static HeapTuple ExecResultCacheGetSavedTuple(IndexScanDesc scan, BufFile *file, ResultCacheKey *hashkey) {
 
 		uint32		header[3];
 		size_t		nread;
+		uint32		tuplen;
+		size_t      tup_size;
+		HeapTuple tuple;
 
 
 		/*
@@ -2872,29 +3278,52 @@ ExecResultCacheGetSavedTuple(IndexScanDesc scan, BufFile *file,
 		 * we can read them both in one BufFileRead() call without any type
 		 * cheating.
 		 */
-		nread = BufFileRead(file, (void *) header, sizeof(header));
+		nread = BufFileRead(file, hashkey, sizeof(ResultCacheKey));
 		if (nread == 0)				/* end of file */
 		{
 
-			return NULL;
+			return false;
 		}
-		if (nread != sizeof(header))
+
+		if (nread != sizeof(ResultCacheKey))
 			ereport(ERROR,
 					(errcode_for_file_access(),
-					 errmsg("could not read from result-cache temporary file: %m")));
-		*hashkey = header[0];
-		*tuple = (HeapTuple) palloc(header[2]);
-		(*tuple)->t_len = header[2];
-		nread = BufFileRead(file, &(*tuple)->t_data ,
-							header[2] - sizeof(uint32));
+					 errmsg("could not read hashkey from result-cache temporary file: %m")));
 
+		nread = BufFileRead(file, (void *) &tuplen, sizeof(uint32));
 
-		if (nread != header[2] - sizeof(uint32))
+	if (nread != sizeof(uint32))
+		ereport(ERROR,
+				(errcode_for_file_access(),
+					errmsg("could not read  tup len from result-cache temporary file: %m")));
+
+		//memcpy(hashkey,header, sizeof(ResultCacheKey));
+		//*hashkey = header[0];
+		tup_size =  HEAPTUPLESIZE + tuplen;
+		tuple = palloc(tup_size);
+		tuple->t_len = tuplen;
+		Assert(tuple->t_len == 44);
+		tuple->t_data = (HeapTupleHeader) ((char *) tuple + HEAPTUPLESIZE);
+		//*tuple_length = header[2];
+		//(*tuple)->t_data = (HeapTupleHeader)(*tuple) + HEAPTUPLESIZE;
+	//	HeapTupleHeader t_data =
+		//(*tuple)->t_data = (HeapTupleHeader) ((char *) *tuple + HEAPTUPLESIZE);
+		//*tuple_data = palloc(*tuple_length);
+		//memset(*tuple_data, 0,*tuple_length);
+
+		//printf("HEader address : ")
+		nread = BufFileRead(file,(char *)tuple->t_data ,tuple->t_len );
+		//memcpy(&(*tuple)->t_data,(char *) t_data,header[2] );
+
+		if (nread != tuple->t_len ){
+			printf("error in file : %X\n",file);
 			ereport(ERROR,
 					(errcode_for_file_access(),
-					 errmsg("could not read from result-cache temporary file: %m")));
-		return *tuple;
-	return NULL;
+					 errmsg("could not read  tup data from result-cache temporary file: %m")));}
+		//pfree(t_data);
+
+		return tuple;
+//	return t;
 
 }
 /*
@@ -2903,26 +3332,26 @@ ExecResultCacheGetSavedTuple(IndexScanDesc scan, BufFile *file,
  *
  * Returns true if successful, false if there are no more batches.
  */
-static bool
-ExecHashJoinNewBatch(IndexScanDesc scan, int batchindex)
-{
-	SmoothScanOpaque sso = (SmoothScanOpaque)scan->smoothInfo;
-	int			nbatch;
-	int			curbatch;
-	int			prevBatch;
-	BufFile    *prevBufferFile;
-	BufFile    *bufferFile;
-	ResultCacheKey		hashvalue;
-	ResultCacheEntry	*hashEntry;
+bool ExecHashJoinNewBatch(IndexScanDesc scan, int batchindex) {
+	SmoothScanOpaque sso = (SmoothScanOpaque) scan->smoothInfo;
+	int nbatch;
+	int curbatch;
+	int prevBatch;
+	BufFile *prevBufferFile;
+	BufFile *bufferFile;
+	//MemoryContext oldcxt;
+	ResultCacheKey hashvalue;
+	//ResultCacheEntry *hashEntry;
 	ResultCache * res_cache = sso->result_cache;
-	HeapTuple tuple;
-	HashPartitionDesc  **hashtable = res_cache->partion_array;
+//	HeapTuple tuple;
+	HashPartitionDesc hashtable = res_cache->partition_array;
+	HASH_ITER * iter;
 
 	nbatch = res_cache->nbatch;
 	curbatch = res_cache->curbatch;
 
-	if (curbatch > 0)
-	{
+	if (batchindex > 3) {
+//	return true;
 //		/*
 //		 * We no longer need the previous outer batch file; close it right
 //		 * away to free disk space.
@@ -2930,8 +3359,7 @@ ExecHashJoinNewBatch(IndexScanDesc scan, int batchindex)
 //		if (hashtable->outerBatchFile[curbatch])
 //			BufFileClose(hashtable->outerBatchFile[curbatch]);
 //		hashtable->outerBatchFile[curbatch] = NULL;
-	}
-	else	/* we just finished the first batch */
+	} else /* we just finished the first batch */
 	{
 //		/*
 //		 * Reset some of the skew optimization state variables, since we no
@@ -2945,127 +3373,118 @@ ExecHashJoinNewBatch(IndexScanDesc scan, int batchindex)
 //		hashtable->nSkewBuckets = 0;
 //		hashtable->spaceUsedSkew = 0;
 	}
+	printf("Initial Memory stats\n");
 
-	/*
-	 * We can always skip over any batches that are completely empty on both
-	 * sides.  We can sometimes skip over batches that are empty on only one
-	 * side, but there are exceptions:
-	 *
-	 * 1. In a left/full outer join, we have to process outer batches even if
-	 * the inner batch is empty.  Similarly, in a right/full outer join, we
-	 * have to process inner batches even if the outer batch is empty.
-	 *
-	 * 2. If we have increased nbatch since the initial estimate, we have to
-	 * scan inner batches since they might contain tuples that need to be
-	 * reassigned to later inner batches.
-	 *
-	 * 3. Similarly, if we have increased nbatch since starting the outer
-	 * scan, we have to rescan outer batches in case they contain tuples that
-	 * need to be reassigned.
-	 */
+	MemoryContextStats(CurrentMemoryContext);
 
-//	while (curbatch < nbatch &&
-//		   (hashtable->outerBatchFile[curbatch] == NULL ||
-//			hashtable->innerBatchFile[curbatch] == NULL))
-//	{
-//		if (hashtable->outerBatchFile[curbatch] &&
-//			HJ_FILL_OUTER(hjstate))
-//			break;				/* must process due to rule 1 */
-//		if (hashtable->innerBatchFile[curbatch] &&
-//			HJ_FILL_INNER(hjstate))
-//			break;				/* must process due to rule 1 */
-//		if (hashtable->innerBatchFile[curbatch] &&
-//			nbatch != hashtable->nbatch_original)
-//			break;				/* must process due to rule 2 */
-//		if (hashtable->outerBatchFile[curbatch] &&
-//			nbatch != hashtable->nbatch_outstart)
-//			break;				/* must process due to rule 3 */
-//		/* We can ignore this batch. */
-//		/* Release associated temp files right away. */
-//		if (hashtable->innerBatchFile[curbatch])
-//			BufFileClose(hashtable->innerBatchFile[curbatch]);
-//		hashtable->innerBatchFile[curbatch] = NULL;
-//		if (hashtable->outerBatchFile[curbatch])
-//			BufFileClose(hashtable->outerBatchFile[curbatch]);
-//		hashtable->outerBatchFile[curbatch] = NULL;
-//		curbatch++;
-//	}
+	if (batchindex >= nbatch) {
+		return false; /* no more batches */
 
-	if (batchindex >= nbatch)
-		return false;			/* no more batches */
-	prevBatch  = res_cache->curbatch;
+	}
+	//MemoryContextSwitchTo(res_cache->mcxt);
+	prevBatch = curbatch;
 	// changing the batch allow us to send the tuples to temp files when swaping
 	res_cache->curbatch = batchindex;
 	res_cache->nentries = 0;
 	//res_cache->status =
 
-
+	printf("Switching from partition : %d to partition : %d\n", prevBatch, res_cache->curbatch);
 
 	/*
 	 * Reload the hash table with the new inner batch (which could be empty)
 	 */
 	//ExecHashTableReset(hashtable);
-	prevBufferFile =  hashtable[prevBatch]->BatchFile;
-	bufferFile = hashtable[batchindex]->BatchFile;
+	prevBufferFile = hashtable[prevBatch].BatchFile;
+	bufferFile = hashtable[batchindex].BatchFile;
 
-	HASH_ITER * iter;
 	init_hash_iter(&iter);
-	while (hash_get_next(res_cache->hashtable, iter))
-			{
-				//build a generic heap tuple with the data found
-				hashEntry = (ResultCacheEntry *)iter->curr;
-				HeapTupleData tuple;
-				tuple.t_data = hashEntry->tuple_data;
 
-				/*Send the tuple tothe batch file
-				 */
+	if (prevBufferFile == NULL) {
+		//oldcxt = CacheMemoryContext;
 
-				ExecResultCacheInsertByBatch(scan,res_cache, &tuple, hashEntry->tid, HASH_ENTER,prevBatch);
-			}
+		printf("Creating file.....\n");
+		hashtable[prevBatch].BatchFile = BufFileCreateTemp(false);
+		prevBufferFile = hashtable[prevBatch].BatchFile;
+		//
+	}
 
+	if (BufFileSeek(prevBufferFile, 0, 0L, SEEK_SET))
+		ereport(ERROR, (errcode_for_file_access(), errmsg("could not rewind hash-resultCache temporary file: %m")));
 
-	if (bufferFile != NULL)
-	{
+	(&hashtable[prevBatch])->status = RC_SWAP;
+
+	while (hash_get_next(res_cache->hashtable, iter)) {
+		HeapTupleData tuple;
+		ResultCacheEntry *hashEntry;
+
+		//build a generic heap tuple with the data found
+		hashEntry = (ResultCacheEntry *) hash_get_element_key(iter->curr);
+		tuple.t_data = (HeapTupleHeader) (hashEntry + RHASHENTRYSIZE);
+		tuple.t_len = res_cache->tuple_length;
+
+		/*Send the tuple tothe batch file
+		 */
+		hashEntry = ExecResultCacheInsertByBatch(scan, res_cache, &tuple, hashEntry->tid, prevBatch, HASH_ENTER);
+
+		//if(hashEntry)
+	//		pfree(hashEntry);
+		// delete the content
+	}
+	pfree(iter);
+	printf("partition %d stored in file!\n", prevBatch);
+	hash_reset(res_cache->hashtable);
+	(&hashtable[prevBatch])->status = RC_INFILE;
+
+	if (bufferFile != NULL) {
+		HeapTuple tuple;
+		//MemoryContext oldctx;
+		//uint32 size;
+		//bool found;
 		if (BufFileSeek(bufferFile, 0, 0L, SEEK_SET))
-			ereport(ERROR,
-					(errcode_for_file_access(),
-				   errmsg("could not rewind hash-resultCache temporary file: %m")));
+			ereport(ERROR, (errcode_for_file_access(), errmsg("could not rewind hash-resultCache temporary file: %m")));
 
-		while ((tuple = ExecResultCacheGetSavedTuple(scan,
-												bufferFile,
-												 &hashvalue,
-												 &tuple)))
-		{
-			/*
-			 * NOTE: some tuples may be sent to future batches.  Also, it is
-			 * possible for hashtable->nbatch to be increased here!
-			 */
-			ExecResultCacheInsert(scan,res_cache, tuple, hashvalue, HASH_ENTER);
+		(&hashtable[batchindex])->status = RC_SWAP;
+		//int batch_last = batchindex;
+	//	int counter = 0;
+
+
+		while ((tuple = ExecResultCacheGetSavedTuple(scan, bufferFile, &hashvalue))) {
+		//	int old_batch = batch_last;
+			//
+
+		//	counter++;
+
+			ExecResultCacheInsertByBatch(scan, res_cache, tuple, hashvalue, res_cache->curbatch, HASH_ENTER);
+
+			res_cache->nentries++;
+
+			pfree(tuple);
 		}
 
+		printf("%d cache entries \n", res_cache->nentries);
+
+		printf("%d entries loaded \n", hash_get_num_entries(res_cache->hashtable));
+		printf("%d existing entries in partition \n", hashtable[batchindex].nbucket);
+
+		(&hashtable[batchindex])->status = RC_INMEM;
 		/*
 		 * after we build the hash table, the inner batch file is no longer
 		 * needed
 		 */
 //		BufFileClose(innerFile);
 //		hashtable->innerBatchFile[curbatch] = NULL;
-	}else{
+	} else {
+//		MemoryContextSwitchTo(oldcxt);
+
 		return false;
 	}
-
-	/*
-	 * Rewind outer batch file (if present), so that we can start reading it.
-	 */
-//	if (hashtable->outerBatchFile[curbatch] != NULL)
-//	{
-//		if (BufFileSeek(hashtable->outerBatchFile[curbatch], 0, 0L, SEEK_SET))
-//			ereport(ERROR,
-//					(errcode_for_file_access(),
-//				   errmsg("could not rewind hash-join temporary file: %m")));
-//	}
+	printf("Final Memory stats\n");
+	MemoryContextStats(CurrentMemoryContext);
 
 	return true;
 }
+
+
 /***************************************************************************************************/
 //previous version that partially worked
 //in statement didn't work

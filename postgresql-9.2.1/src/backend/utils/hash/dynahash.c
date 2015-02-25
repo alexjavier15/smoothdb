@@ -204,7 +204,7 @@ static void hash_corrupted(HTAB *hashp);
 static void register_seq_scan(HTAB *hashp);
 static void deregister_seq_scan(HTAB *hashp);
 static bool has_seq_scans(HTAB *hashp);
-
+static int hash_next_bucket(HTAB *hashp, HASH_ITER * iter);
 
 /*
  * memory allocation support
@@ -218,6 +218,10 @@ DynaHashAlloc(Size size)
 	return MemoryContextAlloc(CurrentDynaHashCxt, size);
 }
 
+Size hash_header_size(void){
+
+	return MAXALIGN(sizeof(HASHHDR));
+}
 
 /*
  * HashCompareFunc for string keys
@@ -926,7 +930,9 @@ hash_search_with_hash_value(HTAB *hashp,
 			{
 				/* out of memory */
 				if (action == HASH_ENTER_NULL || hashp->issmooth)
-					return NULL;
+					ereport(ERROR,
+												(errcode(ERRCODE_OUT_OF_MEMORY),
+												 errmsg("out of shared memory")));
 				/* report a generic message */
 				if (hashp->isshared)
 					ereport(ERROR,
@@ -1014,6 +1020,61 @@ get_hash_entry(HTAB *hashp)
 
 	return newElement;
 }
+void * hash_get_element_key( void * helem){
+
+
+	return ELEMENTKEY(helem);
+}
+
+void hash_reset(HTAB *hashp){
+	volatile HASHHDR *hctlv = hashp->hctl;
+	Size		elementSize;
+	HASHELEMENT *firstElement;
+	HASHELEMENT *tmpElement;
+	HASHELEMENT *prevElement;
+
+	int			i;
+	/* if partitioned, must lock to touch nentries and freeList */
+	if (IS_PARTITIONED(hctlv))
+		SpinLockAcquire(&hctlv->mutex);
+
+	elementSize = MAXALIGN(sizeof(HASHELEMENT)) + MAXALIGN(hctlv->entrysize);
+
+		firstElement = (HASHELEMENT *) hashp->alloc(hctlv->nelem_alloc * elementSize);
+	/* prepare to link all the new entries into the freelist */
+		prevElement = NULL;
+		tmpElement = firstElement;
+	for ( i = 0; i< hctlv->nsegs ; i++){
+		HASHSEGMENT segp =hashp->dir[i];
+		MemSet(segp,0, sizeof(HASHBUCKET) * hashp->ssize);
+
+
+
+	}
+
+	for (i = 0; i < hctlv->nelem_alloc; i++)
+		{
+			tmpElement->link = prevElement;
+			prevElement = tmpElement;
+			tmpElement = (HASHELEMENT *) (((char *) tmpElement) + elementSize);
+		}
+
+		/* if partitioned, must lock to touch freeList */
+		if (IS_PARTITIONED(hctlv))
+			SpinLockAcquire(&hctlv->mutex);
+
+		/* freelist could be nonempty if two backends did this concurrently */
+		firstElement->link = hctlv->freeList;
+		hctlv->freeList = prevElement;
+
+		if (IS_PARTITIONED(hctlv))
+			SpinLockRelease(&hctlv->mutex);
+
+
+	hctlv->nentries=0;
+
+
+}
 
 
 void init_hash_iter(HASH_ITER ** iter){
@@ -1024,37 +1085,34 @@ void init_hash_iter(HASH_ITER ** iter){
 	(*iter)->currSegm = 0;
 
 }
+static int hash_next_bucket(HTAB *hashp, HASH_ITER * iter){
+	iter->currBucket++;
+	if(iter->currBucket == hashp->hctl->max_bucket) {
+		iter->currBucket = 0;
+		return -1;
+	}
+	return iter->currBucket;
+
+
+
+}
+
+
 bool hash_get_next(HTAB *hashp, HASH_ITER * iter){
-	Assert(iter->currBucket >0);
-	Assert(iter->currSegm < hashp->hctl->nsegs);
 
-	// try to get a new element of not more element are found in the chain
-	if(iter->next == NULL){
-		// fetch the next bucket in the actual segment or the next segment of possible
-		int currSegmIdx =  iter->currSegm;
-		while(currSegmIdx < hashp->hctl->nsegs){
-			HASHSEGMENT currSegm = hashp->dir[currSegmIdx];
-			HASHBUCKET nextBucket;
-			nextBucket = currSegm[++iter->currBucket];
-			if(nextBucket != NULL){
-				iter->curr = (void *) ELEMENTKEY(nextBucket);
-				iter->next = nextBucket->link;
-				return true;
-			}
-			currSegmIdx++;
-			iter->currSegm++;
+	int nextBucketIdx = hash_next_bucket(hashp, iter);
+	if(nextBucketIdx == -1){
 
-		}
-		// if we get here we get the end of the chain not more buckets left
-		iter->curr = NULL;
-		iter->next = NULL;
 		return false;
 	}else{
-		// base case: update iter->next with the next element and return the prev one
-		iter->curr = iter->next;
-		iter->next = ((HASHSEGMENT)iter->next)->link;
+		int segmIdx = iter->currBucket >> hashp->sshift;
+		int bucketIdx= MOD(nextBucketIdx, hashp->ssize);
+		iter->curr = (hashp->dir[segmIdx])[bucketIdx];
+		if(iter->curr == NULL)
+			return hash_get_next(hashp,iter);
+		else
+		//iter->next = (hashp->dir[segmIdx])[++bucketIdx];
 		return true;
-
 	}
 
 

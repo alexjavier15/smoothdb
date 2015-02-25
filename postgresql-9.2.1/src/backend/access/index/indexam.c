@@ -84,9 +84,11 @@
 #include "utils/tqual.h"
 /*renata */
 #include "optimizer/cost.h"
+#include "executor/execdebug.h"
 #include "access/nbtree.h"
 #include "access/valid.h"
 #include "smooth/smoothscanopaque.h"
+#include "executor/nodeIndexsmoothscan.h"
 #include "executor/executor.h"
 
 /* ----------------------------------------------------------------
@@ -964,10 +966,24 @@ HeapTuple SmoothProcessOnePageOrder(IndexScanDesc scan, BlockNumber page, ScanDi
 
 		/*we have obtained the tuple we needed*/
 		if (copyTuple) {
+//			int batchno = -1;
+//			ExecResultCacheGetBatch(scan, tuple, &batchno);
+//							if (smoothDesc->result_cache->curbatch != batchno) {
+//
+//								//	print_tuple(RelationGetDescr(scan->heapRelation),heapTuple);
+//								ExecHashJoinNewBatch(scan, batchno);
+//							}
+
 			/* copy tuple is the one we need to return */
 			heap_copytuple_with_tuple(copyTuple, tuple);
-			/* free copy, since we don't need it anymore */
 			heap_freetuple(copyTuple);
+			//print_slot(slot);
+
+			//fflush(stdout);
+
+
+			/* free copy, since we don't need it anymore */
+
 			LockBuffer(scan->xs_cbuf, BUFFER_LOCK_UNLOCK);
 
 		} else {
@@ -1426,17 +1442,63 @@ HeapTuple index_smoothfetch_heap(IndexScanDesc scan, ScanDirection direction, do
 				/* if the page is in the cache - fill tuple with it*/
 				/* NO ORDER BY - return all tuples from a page */
 				page = ItemPointerGetBlockNumber(tid);
+				//Maybe we are already outside of the partitionM
+
 				if (smooth_resultcache_find_tuple(scan, tuple, page)) {
 
 					smoothDesc->num_result_cache_hits++;
 					return tuple;
-				} else
-					smoothDesc->num_result_cache_misses++;
+				} else {
+					if (smoothDesc->result_cache->status != SS_EMPTY) {
+						int batchno;
+						ExecResultCacheGetBatch(scan, tuple, &batchno);
+						smoothDesc->num_result_cache_misses++;
+
+						(&smoothDesc->result_cache->partition_array[batchno])->miss++;
+
+					}
+				}
 			}
 
 			/*check FOR CASE WHEN WE HAVE UPDATES - SINCE UPDATES KEEP OLD POINTERS TO NOTHING*/
-			if (bms_is_member(page, smoothDesc->bs_vispages) && !smoothDesc->result_cache->isCached) {
+			if (bms_is_member(page, smoothDesc->bs_vispages) ) {
+				int batchno;
 				/*page is already considered and all the qualifying tuples are already produced */
+				// Or maybe find tuple return false because we are out of boud of the current batch
+
+//				if (smoothDesc->result_cache->status != SS_EMPTY) {
+//					Page dp;
+//					ItemId lpp;
+//					HeapTuple tup = &(scan->xs_ctup);
+//					ItemPointerData originalTupleID = tup->t_self;
+//					bool valid;
+//					OffsetNumber offset;
+//
+//					//LockBuffer(scan->xs_cbuf, BUFFER_LOCK_SHARE);
+//					/* get page information */
+//					dp = (Page) BufferGetPage(scan->xs_cbuf);
+//					offset = originalTupleID.ip_posid;
+//
+//					lpp = PageGetItemId(dp,offset );
+//					valid = false;
+//					if (ItemIdIsNormal(lpp)) {
+//						tup->t_data = (HeapTupleHeader) PageGetItem((Page) dp, lpp);
+//						tup->t_len = ItemIdGetLength(lpp);
+//						tup->t_tableOid = scan->heapRelation->rd_id;
+//						ItemPointerSet(&(tup->t_self), page, offset);
+//					}
+//
+//					int batchno = -1;
+//					print_tuple(RelationGetDescr(scan->indexRelation), tup);
+//
+//					ExecResultCacheGetBatch(scan, tup, &batchno);
+//					if (smoothDesc->result_cache->curbatch != batchno) {
+//
+//						//	print_tuple(RelationGetDescr(scan->heapRelation),heapTuple);
+//						ExecHashJoinNewBatch(scan, batchno);
+//					}
+//				}
+
 
 				ItemPointerSetInvalid(&(tuple->t_self));
 				tuple->t_tableOid = InvalidOid;
@@ -2254,7 +2316,9 @@ HeapTuple indexsmooth_getnext(IndexScanDesc scan, ScanDirection direction, doubl
 		ScanKey orig_smooth_keys, List *allqual, ExprContext *econtext, TupleTableSlot *slot) {
 	HeapTuple heapTuple;
 	ItemPointer tid;
-	int batchno;
+	SmoothScanOpaque sso = (SmoothScanOpaque) scan->smoothInfo;
+
+	//int batchno;
 
 	for (;;) { /* we are either processing current page, or have more pages in prefetcher
 	 In any case, I should not fetch next TID from the index, until I don't consume all prefetched pages
@@ -2274,7 +2338,8 @@ HeapTuple indexsmooth_getnext(IndexScanDesc scan, ScanDirection direction, doubl
 			tid = index_getnext_tid(scan, direction);
 
 			/* If we're out of index entries, we're done */
-
+			if (tid == NULL)
+				break;
 
 
 
@@ -2289,14 +2354,19 @@ HeapTuple indexsmooth_getnext(IndexScanDesc scan, ScanDirection direction, doubl
 		 * in this method we will fetch heaptuple -but we will also fill scan->smoothdescriptor->items with the rest of tuples
 		 *
 		 * */
+	//	print_tuple(RelationGetDescr(scan->indexRelation), scan->xs_itup);
+		if(sso->result_cache->status!=SS_EMPTY){
+		int batchno = -1;
+		ExecResultCacheGetBatchFromIndex(scan, scan->xs_itup, &batchno);
+		if (sso->result_cache->curbatch != batchno) {
+
+			print_tuple(RelationGetDescr(scan->indexRelation),scan->xs_itup);
+			ExecHashJoinNewBatch(scan, batchno);
+		}
+		}
 		heapTuple = index_smoothfetch_heap(scan, direction, plan_rows, no_orig_keys, orig_keys, target_list, qual_list,
 				index, no_orig_smooth_keys, orig_smooth_keys, allqual, econtext, slot);
 		if (heapTuple != NULL) {
-			SmoothScanOpaque sso =(SmoothScanOpaque) scan->smoothInfo;
-			// time to verify the current batch:
-
-			ExecResultCacheGetBatch(scan,heapTuple,&batchno);
-			if(sso->result_cache->curbatch !=batchno ){}
 
 			sso->num_result_tuples++;
 			return heapTuple;

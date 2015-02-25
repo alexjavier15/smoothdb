@@ -524,7 +524,8 @@ debugtup(TupleTableSlot *slot, DestReceiver *self)
 	bool		isnull;
 	Oid			typoutput;
 	bool		typisvarlena;
-
+	int counter = 0;
+	Assert(natts>0);
 	for (i = 0; i < natts; ++i)
 	{
 		origattr = slot_getattr(slot, i + 1, &isnull);
@@ -545,13 +546,14 @@ debugtup(TupleTableSlot *slot, DestReceiver *self)
 		value = OidOutputFunctionCall(typoutput, attr);
 
 		printatt((unsigned) i + 1, typeinfo->attrs[i], value);
-
+		counter++;
 		pfree(value);
 
 		/* Clean up detoasted copy, if any */
 		if (DatumGetPointer(attr) != DatumGetPointer(origattr))
 			pfree(DatumGetPointer(attr));
 	}
+	Assert(counter>0);
 	printf("\t----\n");
 }
 

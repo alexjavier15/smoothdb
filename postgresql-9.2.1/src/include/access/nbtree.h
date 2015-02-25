@@ -601,6 +601,13 @@ typedef enum
 } CacheStatus;
 
 
+typedef enum
+{
+	RC_INFILE,			/* no hashtable, nentries == 0 */
+	RC_SWAP,				/* we have has table */
+	RC_INMEM 				/* hash table is full - we cannot add more tuples to it
+	 	 	 	 	 	 	 in that case we are switching to a classical procedure */
+} HashPartitionStatus;
 typedef uint64 TID;
 #define form_tuple_id(tpl, blknum, tid)\
 	TID __temp = (TID) (blknum); \
@@ -642,18 +649,24 @@ typedef struct ResultCacheEntry
 	HeapTupleHeader tuple_data;			/* tuple = value*/
 } ResultCacheEntry;
 
-typedef struct HashPartitionDesc
+#define RHASHENTRYSIZE	MAXALIGN(sizeof(ResultCacheEntry))
+typedef struct HashPartitionData
 {
 	int			nbatch;			/* number of batches */
+	HashPartitionStatus status;
 	int			nbucket;
+	int			hits;
+	int			miss;
+	int			nullno;
 	int			curbatch;		/* current batch #; 0 during 1st pass */
 	BufFile   	*BatchFile;      /*Array of batch files pointers;*/;
 	int			nextBatch;
+	HashPartitionStatus satus;
 	IndexTuple	lower_bound;    /*lower bound index tuple*/
-	IndexTuple	upper_bound;    /*upper bound index tuple*/
-}HashPartitionDesc;
+	IndexTuple	upper_bound;    /*upHashPartitionDescper bound index tuple*/
+}HashPartitionData;
 
-
+typedef struct HashPartitionData *HashPartitionDesc;
 struct ResultCache
 {
 	NodeTag		type;			/* to make it a valid Node */
@@ -673,14 +686,9 @@ struct ResultCache
 	// Alex: for patined mode
 	int			curbatch;		/* current batch #; 0 during 1st pass */
 	int			nbatch;			/* number of batches */
-	int			curpartition;		/* current batch #; 0 during 1st pass */
-	HashPartitionDesc   **partion_array;      /*Array of batch files;*/
-
-
+	HashPartitionDesc   partition_array;      /*Array of batch files;*/
+	IndexTuple *bounds ; //shorcut for easy free;z
 };
-
-
-
 
 
 typedef struct ResultCache ResultCache;

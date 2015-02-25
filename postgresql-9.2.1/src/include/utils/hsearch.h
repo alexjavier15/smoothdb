@@ -142,6 +142,7 @@ extern void hash_seq_init(HASH_SEQ_STATUS *status, HTAB *hashp);
 extern void *hash_seq_search(HASH_SEQ_STATUS *status);
 extern void hash_seq_term(HASH_SEQ_STATUS *status);
 extern void hash_freeze(HTAB *hashp);
+extern Size hash_header_size(void);
 extern Size hash_estimate_size(long num_entries, Size entrysize);
 extern long hash_select_dirsize(long num_entries);
 extern Size hash_get_shared_size(HASHCTL *info, int flags);
@@ -162,4 +163,6 @@ extern int	bitmap_match(const void *key1, const void *key2, Size keysize);
  */
 extern bool hash_get_next(HTAB *hashp, HASH_ITER * iter);
 extern void init_hash_iter(HASH_ITER ** iter);
+extern void hash_reset(HTAB *hashp );
+void * hash_get_element_key( void * helem);
 #endif   /* HSEARCH_H */

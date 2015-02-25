@@ -1243,7 +1243,7 @@ if(HasSmoothInfo(scan)){
 
 	/*Alex: Save the boundary infos in the SmoothScanOpaque sctruct*/
 
-	if (HasSmoothInfo(scan)) {
+	if (HasSmoothInfo(scan) ) {
 
 		Buffer buf_root;
 		Page rootpage;

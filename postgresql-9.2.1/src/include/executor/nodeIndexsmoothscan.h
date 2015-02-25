@@ -19,9 +19,13 @@ extern void ExecEndIndexSmoothScan(IndexSmoothScanState *node);
 extern void ExecIndexSmoothMarkPos(IndexSmoothScanState *node);
 extern void ExecIndexSmoothRestrPos(IndexSmoothScanState *node);
 extern void ExecReScanIndexSmoothScan(IndexSmoothScanState *node);
+extern bool ExecHashJoinNewBatch(IndexScanDesc scan, int batchindex);
+extern void ExecResultCacheGetBatch(IndexScanDesc scan, HeapTuple tuple,  int *batchno);
+extern void ExecResultCacheGetBatchFromIndex(IndexScanDesc scan, IndexTuple tuple,  int *batchno);
 /* renata: this is added because with smooth scan with have to follow ScanKeys for Heap Scan and not Index Scan
  * attno = 1 is actually first attribute in the table and not in the index */
-
+extern void print_tuple(TupleDesc tupdesc, IndexTuple itup);
+extern void print_heaptuple(TupleDesc tupdesc, HeapTuple tup);
 extern void ExecIndexBuildSmoothScanKeys(PlanState *planstate, Relation index,
 					   List *quals, bool isorderby,
 					   ScanKey *scanKeys, int *numScanKeys,

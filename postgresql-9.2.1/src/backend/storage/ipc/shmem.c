@@ -282,10 +282,7 @@ ShmemInitHash(const char *name, /* table string name for shmem index */
 	 * new space
 	 */
 	if (found){
-		if( !strcmp(name,"ResultCache Hash")){
-			printf("\n Going to attach ResultCache Hash\n");
 
-		}
 		hash_flags |= HASH_ATTACH;}
 
 	/* Pass location of hashtable header to hash_create */
