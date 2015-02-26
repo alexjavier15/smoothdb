@@ -620,7 +620,7 @@ static void smooth_resultcache_create(IndexScanDesc scan, uint32 tup_length) {
 
 
 	}else{
-	double estimate_size;
+//	double estimate_size;
 
 //	size_t entrysize =  (MAXALIGN(sizeof(HASHELEMENT)) + entry ) + (2 * sizeof(uint64));
 	nbuckets = hash_estimate_num_entries(res_cache->size,entry);
@@ -2756,6 +2756,8 @@ void get_all_keys(IndexScanDesc scan) {
 		if (result) {
 			scan_length = readerBuf->currPos.lastItem;
 
+		}else{
+			sso->moreLeft  = true;
 		}
 
 		scan_length = sso->moreLeft ? scan_length + 1.0 : scan_length;
@@ -2769,7 +2771,9 @@ void get_all_keys(IndexScanDesc scan) {
 	bounds = palloc0(sizeof(IndexTuple)*safe_size);
 	if(sso->moreLeft){
 	bounds[pos] = firsttup;
-	pos++;}
+	pos++;
+
+	}
 
 
 	split_factor = scan_length / partitionsz;

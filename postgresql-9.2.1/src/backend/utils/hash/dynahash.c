@@ -219,13 +219,21 @@ DynaHashAlloc(Size size)
 }
 
 Size hash_estimate_num_entries(long size, int entrysize){
-	double res = (double)size;
 
-	res -= MAXALIGN(sizeof(HASHHDR));
-	res/= ( (double)sizeof(HASHBUCKET) * DEF_SEGSIZE);
-	res/= (double) MAXALIGN(sizeof(HASHELEMENT)) + MAXALIGN(entrysize);
-	res/=2.0;
-	return floor(res);
+	long nentries;
+
+
+
+	nentries =size /  MAXALIGN(sizeof(HASHELEMENT)) + MAXALIGN(entrysize);
+	if( !nentries)
+		return 0;
+
+	while (hash_estimate_size(nentries, entrysize) > size){
+		nentries--;
+
+	}
+	return nentries / 2;
+
 }
 
 /*
