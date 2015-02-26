@@ -220,19 +220,53 @@ DynaHashAlloc(Size size)
 
 Size hash_estimate_num_entries(long size, int entrysize){
 
-	long nentries;
+	int nentries;
+	//, initial_size, allocLeft, nsegs, elementSize, newnsegs, nbuckets, newnbuckets;
+
+	//elementSize = MAXALIGN(sizeof(HASHELEMENT)) + MAXALIGN(entrysize);
+
+	nentries = (size* DEF_SEGSIZE)    /  ( DEF_SEGSIZE * (MAXALIGN(sizeof(HASHELEMENT)) +
+			MAXALIGN(entrysize)  + sizeof(HASHBUCKET))) + sizeof(HASHSEGMENT) ;
 
 
+	nentries = 1 << my_log2(nentries);
 
-	nentries =size /  MAXALIGN(sizeof(HASHELEMENT)) + MAXALIGN(entrysize);
-	if( !nentries)
-		return 0;
+	// this is well enough.  we eed to cap the greater power of 2;
 
-	while (hash_estimate_size(nentries, entrysize) > size){
-		nentries--;
+		while ( hash_estimate_size(nentries , entrysize) > size){
+			nentries  = nentries >> 1;
 
-	}
-	return nentries / 2;
+
+		}
+//		nbuckets = nentries;
+	// Compute the initial allocation ofor the hash table
+//
+//	initial_size =hash_select_dirsize(nentries) * sizeof(HASHSEGMENT) + sizeof(HASHHDR);
+//	// Compute the number of segments need with the bounded number of entries
+//	nsegs = (nentries - 1) / hash_select_dirsize(nentries) + 1;
+//	nsegs = 1 << my_log2(nsegs);
+//	// add the buckets sizes per segments
+//	initial_size+= nsegs * DEF_SEGSIZE * sizeof(HASHBUCKET);
+//
+//	allocLeft = size - initial_size;
+//	printf("Remaing memory _ %ld\n", allocLeft);
+//	// we divide the remaing size per element allocation;
+//	nentries = allocLeft / elementSize;
+//
+//	newnbuckets = nentries;
+//	newnbuckets = 1 << my_log1(newnbuckets);
+//	nentries =newnbuckets;
+//
+//	newnsegs = (nentries - 1) / hash_select_dirsize(nentries) + 1;
+//	newnsegs = 1 << my_log2(nsegs);
+//
+//	initial_size += nentries *  elementSize;
+//
+//
+//	printf("nseg before : %ld, now_ %ld \n", nsegs, newnsegs);
+//	printf("nbuckets before : %ld, now_ %ld \n", nbuckets, nentries);
+//	printf("Allocated memory will be %ld\n", initial_size);
+	return nentries;
 
 }
 
@@ -1519,6 +1553,18 @@ my_log2(long num)
 	for (i = 0, limit = 1; limit < num; i++, limit <<= 1)
 		;
 	return i;
+}
+
+/* calculate floor(log base 2) of num */
+int
+my_log1(long num)
+{
+	int			i;
+	long		limit;
+
+	for (i = 0, limit = 1; limit < num; i++, limit <<= 1)
+		;
+	return --i;
 }
 
 

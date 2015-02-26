@@ -614,12 +614,7 @@ static void smooth_resultcache_create(IndexScanDesc scan, uint32 tup_length) {
 //		(MAXALIGN(sizeof(HASHELEMENT)) + MAXALIGN(sizeof(ResultCacheEntry) + (tup_length))
 //		 + sizeof(Pointer) + sizeof(Pointer));
 //this one works
-	if (enable_smoothshare && found){
-
-		res_cache->maxentries =  hash_ctl_ptr->dsize;
-
-
-	}else{
+	if (!enable_smoothshare ||  !found){
 //	double estimate_size;
 
 //	size_t entrysize =  (MAXALIGN(sizeof(HASHELEMENT)) + entry ) + (2 * sizeof(uint64));
@@ -679,6 +674,7 @@ static void smooth_resultcache_create(IndexScanDesc scan, uint32 tup_length) {
 		MemoryContextSwitchTo(TopMemoryContext);
 		res_cache->hashtable = ShmemInitHash("ResultCache Hash", res_cache->maxentries, res_cache->maxentries,
 				hash_ctl_ptr, hash_tag);
+
 		IsUnderPostmaster = false;
 		MemoryContextSwitchTo(oldctx);
 	}
@@ -2673,8 +2669,8 @@ void get_all_keys(IndexScanDesc scan) {
 	IndexTuple lastttup = sso->itup_bounds[LeftBound];
 	IndexTuple *bounds;
 	IndexTuple curr_tuple;
-	IndexBoundReader reader;
-	IndexBoundReader readerBuf;
+	IndexBoundReader reader = NULL;
+	IndexBoundReader readerBuf = NULL;
 	OffsetNumber offnum;
 	HashPartitionDesc partitions = NULL;
 	int itemIndex = 0;
@@ -2683,6 +2679,7 @@ void get_all_keys(IndexScanDesc scan) {
 	int np = 0;
 	int safe_size = 1;
 	int next = 0;
+	int lastItem= 0;
 	bool result;
 
 	root_lentgh = max_off - min_off;
@@ -2721,6 +2718,11 @@ void get_all_keys(IndexScanDesc scan) {
 	printf("scan_length: %.2f\n", scan_length);
 	printf("npartitions: %d\n", partitionsz);
 
+	if( partitionsz == 1){
+		sso->moreLeft  = true;
+		goto set_bounds;
+	}
+
 	// in any case we need to fetc the root tuples!
 	reader = MakeIndexBoundReader(2 * BLCKSZ);
 	readerBuf = MakeIndexBoundReader(2 * BLCKSZ);
@@ -2758,6 +2760,7 @@ void get_all_keys(IndexScanDesc scan) {
 
 		}else{
 			sso->moreLeft  = true;
+			goto set_bounds;
 		}
 
 		scan_length = sso->moreLeft ? scan_length + 1.0 : scan_length;
@@ -2765,10 +2768,22 @@ void get_all_keys(IndexScanDesc scan) {
 
 	} else {
 
+		readerBuf = reader;
 		_bt_relbuf(rel,buf);
 	}
-	safe_size = readerBuf->currPos.lastItem + 2;
+
+	lastItem = readerBuf->currPos.lastItem;
+
+
+
+	set_bounds:
+
+	safe_size = lastItem+ 2;
 	bounds = palloc0(sizeof(IndexTuple)*safe_size);
+
+
+
+
 	if(sso->moreLeft){
 	bounds[pos] = firsttup;
 	pos++;
@@ -2777,9 +2792,9 @@ void get_all_keys(IndexScanDesc scan) {
 
 
 	split_factor = scan_length / partitionsz;
-	partitionsz = readerBuf->currPos.lastItem;
+	partitionsz =lastItem == 0 ? partitionsz : lastItem;
 
-	while (next < readerBuf->currPos.lastItem) {
+	while (next < lastItem) {
 		BTScanPosItem *currItem;
 
 		currItem = &readerBuf->currPos.items[next];
@@ -2821,11 +2836,14 @@ void get_all_keys(IndexScanDesc scan) {
 		resultCache->partition_array =  partitions;
 		resultCache->nbatch = pos;
 		resultCache->bounds = bounds;
-
+	if (reader) {
 		pfree(reader->currTuples);
 		pfree(reader);
+	}
+	if (readerBuf) {
 		pfree(readerBuf->currTuples);
 		pfree(readerBuf);
+	}
 
 
 
