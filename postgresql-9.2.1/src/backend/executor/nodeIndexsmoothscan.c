@@ -1691,7 +1691,8 @@ ExecInitIndexSmoothScan(IndexSmoothScan *node, EState *estate, int eflags) {
 		// a bitmap in local memory
 		if (enable_smoothshare) {
 			bool found;
-			Size bs_size = sizeof(ss->bs_vispages) + (sizeof(bitmapword) * (1024*1024L - 1));
+
+			Size bs_size = BITMAPSET_SIZE(ss->rel_nblocks  + 1);
 
 			char * name1 = RelationGetRelationName(indexstate->iss_ScanDesc->indexRelation);
 			char * name2 = "Bitmap vispages ";
@@ -1699,10 +1700,15 @@ ExecInitIndexSmoothScan(IndexSmoothScan *node, EState *estate, int eflags) {
 			memcpy(name3, name1, strlen(name1));
 			memcpy(name3 + strlen(name1), name2, strlen(name2)+1);
 			ss->bs_vispages = (Bitmapset*) ShmemInitStruct(name3, bs_size, &found);
-			ss->bs_vispages->nwords = 1024*1024;
+
 			if(!found){
 				memset(ss->bs_vispages->words,0, sizeof(bitmapword)*1024*1024L);
-				smooth_work_mem = smooth_work_mem -  MAXALIGN(bs_size);
+				ss->bs_vispages->nwords =ss->rel_nblocks  + 1;
+				smooth_work_mem = smooth_work_mem -  bs_size;
+			}else{
+
+				printf("Found bitmap with : %d words\n", bms_num_members(ss->bs_vispages));
+
 			}
 			pfree(name3);
 
