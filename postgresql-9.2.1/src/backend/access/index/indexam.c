@@ -1448,15 +1448,6 @@ HeapTuple index_smoothfetch_heap(IndexScanDesc scan, ScanDirection direction, do
 
 					smoothDesc->num_result_cache_hits++;
 					return tuple;
-				} else {
-					if (smoothDesc->result_cache->status != SS_EMPTY) {
-						int batchno;
-						ExecResultCacheGetBatch(scan, tuple, &batchno);
-						smoothDesc->num_result_cache_misses++;
-
-						(&smoothDesc->result_cache->partition_array[batchno])->miss++;
-
-					}
 				}
 			}
 
