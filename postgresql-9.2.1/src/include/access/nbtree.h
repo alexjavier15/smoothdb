@@ -652,16 +652,14 @@ typedef struct ResultCacheEntry
 #define RHASHENTRYSIZE	MAXALIGN(sizeof(ResultCacheEntry))
 typedef struct HashPartitionData
 {
-	int			nbatch;			/* number of batches */
+	Index		batchIdx;;			/* number of batches */
 	HashPartitionStatus status;
+	CacheStatus	cache_status;
 	int			nbucket;
 	int			hits;
 	int			miss;
 	int			nullno;
-	int			curbatch;		/* current batch #; 0 during 1st pass */
 	BufFile   	*BatchFile;      /*Array of batch files pointers;*/;
-	int			nextBatch;
-	HashPartitionStatus satus;
 	IndexTuple	lower_bound;    /*lower bound index tuple*/
 	IndexTuple	upper_bound;    /*upHashPartitionDescper bound index tuple*/
 }HashPartitionData;
@@ -670,11 +668,17 @@ typedef struct HashPartitionData *HashPartitionDesc;
 struct ResultCache
 {
 	NodeTag		type;			/* to make it a valid Node */
+	char 	    name[3+NAMEDATALEN];		/* "RC_ appened bythe relation
+											name associated to this cache"*/
 	MemoryContext mcxt;			/* memory context containing me */
 	CacheStatus	status;			/* see codes above */
-	long 		size;
-	int			nentries;		/* number of entries in hastable */
-	int			maxentries;		/* limit on same to meet maxbytes */
+	Size 		size;
+
+	int			nentries;		/* number of entries in hastable. If partitioned the vale will  be equal
+								to the total of tuples stored arou nd the partitions */
+	int			maxentries;		/* limit on same to meet maxbytes. */
+	int			maxtuples;		/* number max of tuples ot be stored.
+	 	 	 	 	 	 	 	 If only one partition it will be equal to maxentries*/
 	uint32     tuple_length;
 
 	HTAB	   *hashtable;		/* hash table of PagetableEntry's */
@@ -687,6 +691,7 @@ struct ResultCache
 	int			curbatch;		/* current batch #; 0 during 1st pass */
 	int			nbatch;			/* number of batches */
 	HashPartitionDesc   partition_array;      /*Array of batch files;*/
+	HashPartitionDesc	curr_partition;		  /*shortcut to the current partition*/
 	IndexTuple *bounds ; //shorcut for easy free;z
 };
 

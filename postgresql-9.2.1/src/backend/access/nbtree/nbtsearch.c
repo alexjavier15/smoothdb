@@ -1026,9 +1026,12 @@ _bt_first(IndexScanDesc scan, ScanDirection dir)
 	 */
 
 if(HasSmoothInfo(scan)){
+	Size size =keysCount * sizeof(ScanKeyData);
 	sso = (SmoothScanOpaque)scan->smoothInfo;
 
-	sso->search_keyData=scankeys;
+	sso->search_keyData=  palloc(size);
+	memcpy(sso->search_keyData,scankeys, size);
+
 	sso->keyz = keysCount;
 	sso->strat_total= strat_total;
 }

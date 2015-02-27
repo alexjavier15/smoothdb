@@ -737,12 +737,13 @@ HeapTuple SmoothProcessOnePageOrder(IndexScanDesc scan, BlockNumber page, ScanDi
 	int itemIndex = 0;
 
 	SmoothScanOpaque smoothDesc = (SmoothScanOpaque) scan->smoothInfo;
+	ResultCache *resultcache = smoothDesc->result_cache;
 
 	LockBuffer(scan->xs_cbuf, BUFFER_LOCK_SHARE);
 	/* get page information */
 	dp = (Page) BufferGetPage(scan->xs_cbuf);
 
-	if (smoothDesc->result_cache->status != SS_FULL) {
+	if (resultcache->status != SS_FULL) {
 
 		if (ScanDirectionIsForward(direction)) {
 			/* start from the first tuple */
@@ -926,8 +927,8 @@ HeapTuple SmoothProcessOnePageOrder(IndexScanDesc scan, BlockNumber page, ScanDi
 								itemIndex++;
 
 							} else {
-								/*hash table is full no more this behavior*/
-								break;
+								if(resultcache->status == SS_FULL)
+									break;
 							}
 
 						}
@@ -1520,7 +1521,7 @@ HeapTuple index_smoothfetch_heap(IndexScanDesc scan, ScanDirection direction, do
 			/* if hash table exist */
 			if (smoothDesc->result_cache->maxentries > 0)
 				/* -1 because we are about to process one page which will increase number of entries */
-				max_number_of_pages = smoothDesc->result_cache->maxentries - smoothDesc->result_cache->nentries - 1;
+				max_number_of_pages = smoothDesc->result_cache->maxtuples - smoothDesc->result_cache->nentries - 1;
 			else
 				/* hash table not yet created*/
 				max_number_of_pages = smooth_prefetch_target;
@@ -2325,12 +2326,28 @@ HeapTuple indexsmooth_getnext(IndexScanDesc scan, ScanDirection direction, doubl
 				Assert(ItemPointerGetBlockNumber(&scan->xs_ctup.t_self) == BufferGetBlockNumber(scan->xs_cbuf));
 			}
 		} else {
+			HeapTuple tuple;
+			Buffer buf =  InvalidBuffer;
 			/* Time to fetch the next TID from the index */
 			tid = index_getnext_tid(scan, direction);
 
 			/* If we're out of index entries, we're done */
 			if (tid == NULL)
-				break;
+					break;
+
+			if (!visibilitymap_test(scan->heapRelation,
+											ItemPointerGetBlockNumber(tid),
+											&buf)) {
+				/*
+				 * Rats, we have to visit the heap to check visibility.
+				 */
+
+				tuple = index_fetch_heap(scan);
+				/* no visible tuple, try next index entry */
+
+			}
+
+
 
 
 
@@ -2345,16 +2362,8 @@ HeapTuple indexsmooth_getnext(IndexScanDesc scan, ScanDirection direction, doubl
 		 * in this method we will fetch heaptuple -but we will also fill scan->smoothdescriptor->items with the rest of tuples
 		 *
 		 * */
-	//	print_tuple(RelationGetDescr(scan->indexRelation), scan->xs_itup);
-		if(sso->result_cache->status!=SS_EMPTY){
-		int batchno = -1;
-		ExecResultCacheGetBatchFromIndex(scan, scan->xs_itup, &batchno);
-		if (sso->result_cache->curbatch != batchno) {
-
-			print_tuple(RelationGetDescr(scan->indexRelation),scan->xs_itup);
-			ExecHashJoinNewBatch(scan, batchno);
-		}
-		}
+		//	print_tuple(RelationGetDescr(scan->indexRelation), scan->xs_itup);
+				ExecResultCacheSwitchPartition(scan,sso,scan->xs_itup);
 		heapTuple = index_smoothfetch_heap(scan, direction, plan_rows, no_orig_keys, orig_keys, target_list, qual_list,
 				index, no_orig_smooth_keys, orig_smooth_keys, allqual, econtext, slot);
 		if (heapTuple != NULL) {

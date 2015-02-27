@@ -1504,7 +1504,7 @@ _bt_checkkeys(IndexScanDesc scan,
 	 * else
 	 * 	check keys */
 
-	if(enable_indexsmoothscan && smoothDesc != NULL && !smoothDesc->orderby)
+	if(enable_indexsmoothscan && smoothDesc != NULL && !smoothDesc->orderby && !smoothDesc->creatingBounds)
 	{
 		/*get TID*/
 		heapTid = &tuple->t_tid;
