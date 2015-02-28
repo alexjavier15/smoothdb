@@ -2671,8 +2671,10 @@ void get_all_keys(IndexScanDesc scan) {
 	root_lentgh = max_off - min_off;
 	scan_length = end_off - start_off;
 	/*Check the initial number of keys into the scan range*/
+	if (scan_length < root_lentgh) {
 		scan_length = sso->moreLeft ? scan_length + 1.0 : scan_length;
 		scan_length = sso->moreRight ? scan_length + 1.0 : scan_length;
+	}
 	rootfrac = scan_length / root_lentgh;
 
 //	printf("\nscan_length : %.2f, root_lentgh = %.2f \n ", scan_length, root_lentgh);
