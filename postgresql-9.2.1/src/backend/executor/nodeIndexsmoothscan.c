@@ -2752,6 +2752,7 @@ void get_all_keys(IndexScanDesc scan) {
 			curr_buf = reader;
 			partitionsz = 1;
 			next = readerBuf->currPos.lastItem + 1;
+			//readerBuf->currPos.lastItem  0;
 			goto set_bounds;
 		}
 
@@ -3437,13 +3438,14 @@ bool ExecHashJoinNewBatch(IndexScanDesc scan, int batchindex) {
 	int prevBatch;
 	BufFile *prevBufferFile;
 	BufFile *bufferFile;
+	ResultCacheEntry *hashEntry = NULL;
 	//MemoryContext oldcxt;
 	ResultCacheKey hashvalue;
 	//ResultCacheEntry *hashEntry;
 	ResultCache * res_cache = sso->result_cache;
 //	HeapTuple tuple;
 	HashPartitionDesc hashtable = res_cache->partition_array;
-	HASH_ITER * iter;
+	HASH_ITER iter;
 
 	nbatch = res_cache->nbatch;
 	curbatch = res_cache->curbatch;
@@ -3496,7 +3498,8 @@ bool ExecHashJoinNewBatch(IndexScanDesc scan, int batchindex) {
 	prevBufferFile = hashtable[prevBatch].BatchFile;
 	bufferFile = res_cache->curr_partition->BatchFile;
 
-	init_hash_iter(&iter);
+
+
 
 	if (prevBufferFile == NULL) {
 		//oldcxt = CacheMemoryContext;
@@ -3511,18 +3514,13 @@ bool ExecHashJoinNewBatch(IndexScanDesc scan, int batchindex) {
 		ereport(ERROR, (errcode_for_file_access(), errmsg("could not rewind hash-resultCache temporary file: %m")));
 
 	(&hashtable[prevBatch])->status = RC_SWAP;
-
-	while (hash_get_next(res_cache->hashtable, iter)) {
+	iter.elemindex = 0;
+	while ((hashEntry = (ResultCacheEntry *)hash_get_next(res_cache->hashtable, &iter))) {
 		HeapTupleData tuple;
-		ResultCacheEntry *hashEntry;
-		bool found;
 
-		//build a generic heap tuple with the data found
-		hashEntry = (ResultCacheEntry *) hash_get_element_key(iter->curr);
 		tuple.t_data = (HeapTupleHeader) (hashEntry + RHASHENTRYSIZE);
 		tuple.t_len = res_cache->tuple_length;
-		hash_search(res_cache->hashtable, &hashEntry->tid,HASH_REMOVE, &found);
-		Assert(found == true);
+
 		/*Send the tuple tothe batch file
 		 */
 		hashEntry = ExecResultCacheInsertByBatch(scan, res_cache, &tuple, hashEntry->tid, prevBatch, HASH_ENTER);
@@ -3531,10 +3529,12 @@ bool ExecHashJoinNewBatch(IndexScanDesc scan, int batchindex) {
 	//		pfree(hashEntry);
 		// delete the content
 	}
-	pfree(iter);
-	printf("partition %d stored in file with %d  entries!\n",
+
+	printf("partition %d stored in file with %ld  entries!\n",
 			prevBatch, hash_get_num_entries(res_cache->hashtable));
-	//hash_reset(res_cache->hashtable);
+	printf("preview num of entries for partition  %d was %d !\n",
+				prevBatch, (&hashtable[prevBatch])->nbucket);
+	hash_reset(res_cache->hashtable);
 	(&hashtable[prevBatch])->status = RC_INFILE;
 
 	if (bufferFile != NULL) {

@@ -80,12 +80,11 @@ typedef struct HASHCTL
 } HASHCTL;
 
 typedef struct HASH_ITER
-{	int	currSegm;
-	int currBucket;
-	void * curr;
-	void * next;
-
+{
+	uint32 elemindex;
 } HASH_ITER;
+
+
 
 /* Flags to indicate which parameters are supplied */
 #define HASH_PARTITION	0x001	/* Hashtable is used w/partitioned locking */
@@ -161,7 +160,7 @@ extern int	bitmap_match(const void *key1, const void *key2, Size keysize);
 /* Alex : fontion for iterating the hash table
  *
  */
-extern bool hash_get_next(HTAB *hashp, HASH_ITER * iter);
+extern void * hash_get_next(HTAB *hashp, HASH_ITER * iter);
 extern void init_hash_iter(HASH_ITER ** iter);
 extern void hash_reset(HTAB *hashp );
 void * hash_get_element_key( void * helem);

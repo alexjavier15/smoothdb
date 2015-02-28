@@ -113,6 +113,7 @@ struct HASHHDR
 	/* These fields change during entry addition/deletion */
 	long		nentries;		/* number of entries in hash table */
 	HASHELEMENT *freeList;		/* linked list of free elements */
+	HASHELEMENT *firstElement;  /*element allocated */
 
 	/* These fields can change, but not in a partitioned table */
 	/* Also, dsize can't change in a shared table, even if unpartitioned */
@@ -204,7 +205,6 @@ static void hash_corrupted(HTAB *hashp);
 static void register_seq_scan(HTAB *hashp);
 static void deregister_seq_scan(HTAB *hashp);
 static bool has_seq_scans(HTAB *hashp);
-static int hash_next_bucket(HTAB *hashp, HASH_ITER * iter);
 
 /*
  * memory allocation support
@@ -1077,92 +1077,78 @@ void * hash_get_element_key( void * helem){
 	return ELEMENTKEY(helem);
 }
 
-void hash_reset(HTAB *hashp){
-	volatile HASHHDR *hctlv = hashp->hctl;
-	Size		elementSize;
-	HASHELEMENT *firstElement;
-	HASHELEMENT *tmpElement;
-	HASHELEMENT *prevElement;
 
-	int			i;
-	/* if partitioned, must lock to touch nentries and freeList */
-	if (IS_PARTITIONED(hctlv))
-		SpinLockAcquire(&hctlv->mutex);
 
-	elementSize = MAXALIGN(sizeof(HASHELEMENT)) + MAXALIGN(hctlv->entrysize);
+void hash_reset(HTAB *hashp ){
+	/* use volatile pointer to prevent code rearrangement */
+		volatile HASHHDR *hctlv = hashp->hctl;
+		Size		elementSize;
+		HASHELEMENT *firstElement;
+		HASHELEMENT *tmpElement;
+		HASHELEMENT *prevElement;
+		int			i;
+		int nelem = hctlv->nelem_alloc;
 
-		firstElement = (HASHELEMENT *) &(hashp->dir[0])[0];
-	/* prepare to link all the new entries into the freelist */
+
+		/* Each element has a HASHELEMENT header plus user data. */
+		elementSize = MAXALIGN(sizeof(HASHELEMENT)) + MAXALIGN(hctlv->entrysize);
+
+		firstElement = hctlv->firstElement;
+
+
+
+		hctlv->firstElement = firstElement;
+		/* prepare to link all the new entries into the freelist */
 		prevElement = NULL;
 		tmpElement = firstElement;
-
-
-	for (i = 0; i < hctlv->nelem_alloc; i++)
+		for (i = 0; i < nelem; i++)
 		{
 			tmpElement->link = prevElement;
-			tmpElement->hashvalue =0;
-			memset((char *) tmpElement + MAXALIGN(sizeof(HASHELEMENT)),0, MAXALIGN(hctlv->entrysize));
 			prevElement = tmpElement;
 			tmpElement = (HASHELEMENT *) (((char *) tmpElement) + elementSize);
 		}
 
-		/* if partitioned, must lock to touch freeList */
-		if (IS_PARTITIONED(hctlv))
-			SpinLockAcquire(&hctlv->mutex);
+
 
 		/* freelist could be nonempty if two backends did this concurrently */
 		firstElement->link = hctlv->freeList;
 		hctlv->freeList = prevElement;
-
-		if (IS_PARTITIONED(hctlv))
-			SpinLockRelease(&hctlv->mutex);
-
-
-	hctlv->nentries=0;
+		hctlv->nentries = 0;
 
 
 }
 
+void * hash_get_next(HTAB *hashp, HASH_ITER * iter){
 
-void init_hash_iter(HASH_ITER ** iter){
-*iter = (HASH_ITER *)palloc0(sizeof(HASH_ITER));
-	(*iter)->curr = 0;
-	(*iter)->next = 0;
-	(*iter)->currBucket=0;
-	(*iter)->currSegm = 0;
-
-}
-static int hash_next_bucket(HTAB *hashp, HASH_ITER * iter){
-	iter->currBucket++;
-	if(iter->currBucket == hashp->hctl->max_bucket) {
-		iter->currBucket = 0;
-		return -1;
-	}
-	return iter->currBucket;
+	volatile HASHHDR *hctlv = hashp->hctl;
+	Size		elementSize;
+	HASHELEMENT *firstElement;
+	HASHELEMENT *nextElement;
+	void *hashentry;
+	int nelem = hctlv->max_bucket;
 
 
+	elementSize = MAXALIGN(sizeof(HASHELEMENT)) + MAXALIGN(hctlv->entrysize);
 
-}
+	for(;;){
+		if (iter->elemindex > nelem)
+			return NULL;
+
+		firstElement = hctlv->firstElement;
+
+		nextElement =(HASHELEMENT *) ((char *)firstElement + (iter->elemindex * elementSize));
+		iter->elemindex++;
+
+		hashentry = (void *) ELEMENTKEY(nextElement);
+
+		if (hashentry != NULL)
+			return hashentry;
 
 
-bool hash_get_next(HTAB *hashp, HASH_ITER * iter){
 
-	int nextBucketIdx = hash_next_bucket(hashp, iter);
-	if(nextBucketIdx == -1){
-
-		return false;
-	}else{
-		int segmIdx = iter->currBucket >> hashp->sshift;
-		int bucketIdx= MOD(nextBucketIdx, hashp->ssize);
-		iter->curr = (hashp->dir[segmIdx])[bucketIdx];
-		if(iter->curr == NULL)
-			return hash_get_next(hashp,iter);
-		else
-		//iter->next = (hashp->dir[segmIdx])[++bucketIdx];
-		return true;
 	}
 
-
+	return NULL;
 
 }
 /*
@@ -1505,6 +1491,7 @@ element_alloc(HTAB *hashp, int nelem)
 	if (!firstElement)
 		return false;
 
+	hctlv->firstElement = firstElement;
 	/* prepare to link all the new entries into the freelist */
 	prevElement = NULL;
 	tmpElement = firstElement;
