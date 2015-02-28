@@ -2822,7 +2822,7 @@ void get_all_keys(IndexScanDesc scan) {
 		print_tuple(tupdesc, resultCache->bounds [pos]);
 		printf("**************************\n");
 	//	_bt_relbuf(rel, buf);
-		MemoryContextStats(CurrentMemoryContext);
+	//	MemoryContextStats(CurrentMemoryContext);
 		if (readerBuf) {
 			pfree(readerBuf->currTuples);
 			pfree(readerBuf);
