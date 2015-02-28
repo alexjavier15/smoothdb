@@ -2778,22 +2778,17 @@ void get_all_keys(IndexScanDesc scan) {
 
 	split_factor = scan_length / partitionsz;
 
-
 	set_bounds:
 
-
-
-
-
-	safe_size =partitionsz + 1;
+	safe_size = partitionsz + 1;
 	resultCache->bounds = palloc0(sizeof(IndexTuple)*safe_size);
 
 	int left = safe_size;
 
-	if(sso->moreLeft){
-		resultCache->bounds [pos] = firsttup;
-	pos++;
-	left--;
+	if (sso->moreLeft) {
+		resultCache->bounds[pos] = firsttup;
+		pos++;
+		left--;
 	}
 
 
