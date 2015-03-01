@@ -1415,6 +1415,164 @@ _bt_mark_scankey_required(ScanKey skey)
 	}
 }
 
+IndexTuple _bt_checkkey_tuple(IndexScanDesc scan, ScanDirection dir, bool *continuescan,
+		IndexTuple tuple, bool tuple_alive) {
+
+	BTScanOpaque so;
+	SmoothScanOpaque smoothDesc;
+	TupleDesc tupdesc;
+	ItemPointer heapTid = NULL;
+
+	BlockNumber heappage;
+	ScanKey key;
+	int keysz;
+	int ikey;
+
+	tupdesc = RelationGetDescr(scan->indexRelation);
+	so = (BTScanOpaque) scan->opaque;
+	keysz = so->numberOfKeys;
+	smoothDesc = (SmoothScanOpaque) scan->smoothInfo;
+	/* renata todo:
+	 * before I check keys I should check whether pageID of a tuple is already considered
+	 * */
+	/* if (enable_indexsmoothscan)
+	 * 	check if at least one tuple from that pageID (from heap is already considered)
+	 * 	if yes
+	 * 		don't do any comparison go to next key
+	 * 	if not go to key comparison
+	 * else
+	 * 	check keys */
+
+	if (enable_indexsmoothscan && smoothDesc != NULL && !smoothDesc->orderby && !smoothDesc->creatingBounds) {
+		/*get TID*/
+		heapTid = &tuple->t_tid;
+		/* get heap pageID from TID */
+		heappage = ItemPointerGetBlockNumber(heapTid);
+		//if(bms_is_member(heappage, smoothDesc->bs_tovispages)||bms_is_member(heappage, smoothDesc->bs_vispages)){
+		if (bms_is_member(heappage, smoothDesc->bs_vispages) /*&& !smoothDesc->result_cache->isCached */) {
+			/* this page is already marked as the one that needs to be accessed
+			 * nothing to be done now, move to next tuple from INDEX LEAF page */
+
+			return NULL;
+		}
+		/* else it's not a member do all the work with key checks */
+	}
+
+	for (key = so->keyData, ikey = 0; ikey < keysz; key++, ikey++) {
+		Datum datum;
+		bool isNull;
+		Datum test;
+
+		/* row-comparison keys need special processing */
+		if (key->sk_flags & SK_ROW_HEADER) {
+			if (_bt_check_rowcompare(key, tuple, tupdesc, dir, continuescan))
+				continue;
+			return NULL;
+		}
+
+		datum = index_getattr(tuple,
+				key->sk_attno,
+				tupdesc,
+				&isNull);
+
+		if (key->sk_flags & SK_ISNULL) {
+			/* Handle IS NULL/NOT NULL tests */
+			if (key->sk_flags & SK_SEARCHNULL) {
+				if (isNull)
+					continue; /* tuple satisfies this qual */
+			} else {
+				Assert(key->sk_flags & SK_SEARCHNOTNULL);
+				if (!isNull)
+					continue; /* tuple satisfies this qual */
+			}
+
+			/*
+			 * Tuple fails this qual.  If it's a required qual for the current
+			 * scan direction, then we can conclude no further tuples will
+			 * pass, either.
+			 */
+			if ((key->sk_flags & SK_BT_REQFWD) && ScanDirectionIsForward(dir))
+				*continuescan = false;
+			else if ((key->sk_flags & SK_BT_REQBKWD) && ScanDirectionIsBackward(dir))
+				*continuescan = false;
+
+			/*
+			 * In any case, this indextuple doesn't match the qual.
+			 */
+			return NULL;
+		}
+
+		if (isNull) {
+			if (key->sk_flags & SK_BT_NULLS_FIRST) {
+				/*
+				 * Since NULLs are sorted before non-NULLs, we know we have
+				 * reached the lower limit of the range of values for this
+				 * index attr.	On a backward scan, we can stop if this qual
+				 * is one of the "must match" subset.  We can stop regardless
+				 * of whether the qual is > or <, so long as it's required,
+				 * because it's not possible for any future tuples to pass. On
+				 * a forward scan, however, we must keep going, because we may
+				 * have initially positioned to the start of the index.
+				 */
+				if ((key->sk_flags & (SK_BT_REQFWD | SK_BT_REQBKWD)) && ScanDirectionIsBackward(dir))
+					*continuescan = false;
+			} else {
+				/*
+				 * Since NULLs are sorted after non-NULLs, we know we have
+				 * reached the upper limit of the range of values for this
+				 * index attr.	On a forward scan, we can stop if this qual is
+				 * one of the "must match" subset.	We can stop regardless of
+				 * whether the qual is > or <, so long as it's required,
+				 * because it's not possible for any future tuples to pass. On
+				 * a backward scan, however, we must keep going, because we
+				 * may have initially positioned to the end of the index.
+				 */
+				if ((key->sk_flags & (SK_BT_REQFWD | SK_BT_REQBKWD)) && ScanDirectionIsForward(dir))
+					*continuescan = false;
+			}
+
+			/*
+			 * In any case, this indextuple doesn't match the qual.
+			 */
+			return NULL;
+		}
+
+		test = FunctionCall2Coll(&key->sk_func, key->sk_collation, datum, key->sk_argument);
+
+		if (!DatumGetBool(test)) {
+			/*
+			 * Tuple fails this qual.  If it's a required qual for the current
+			 * scan direction, then we can conclude no further tuples will
+			 * pass, either.
+			 *
+			 * Note: because we stop the scan as soon as any required equality
+			 * qual fails, it is critical that equality quals be used for the
+			 * initial positioning in _bt_first() when they are available. See
+			 * comments in _bt_first().
+			 */
+			if ((key->sk_flags & SK_BT_REQFWD) && ScanDirectionIsForward(dir))
+				*continuescan = false;
+			else if ((key->sk_flags & SK_BT_REQBKWD) && ScanDirectionIsBackward(dir))
+				*continuescan = false;
+
+			/*
+			 * In any case, this indextuple doesn't match the qual.
+			 */
+			return NULL;
+		}
+	}
+
+	/* Check for failure due to it being a killed tuple. */
+	if (!tuple_alive)
+		return NULL;
+
+//	/* If we get here, the tuple passes all index quals. */
+//	if (enable_indexsmoothscan && smoothDesc != NULL)
+//	{
+//		smoothDesc->bs_tovispages = bms_add_member(smoothDesc->bs_tovispages, heappage);
+//	}
+	return tuple;
+}
 /*
  * Test whether an indextuple satisfies all the scankey conditions.
  *
@@ -1442,15 +1600,9 @@ _bt_checkkeys(IndexScanDesc scan,
 	ItemId		iid = PageGetItemId(page, offnum);
 	bool		tuple_alive;
 	IndexTuple	tuple;
-	TupleDesc	tupdesc;
-	BTScanOpaque so;
-	int			keysz;
-	int			ikey;
-	ScanKey		key;
+
     /*for index smooth scan */
-	ItemPointer heapTid = NULL;	/* TID of referenced heap item */
-	BlockNumber heappage;
-	SmoothScanOpaque  smoothDesc = NULL;
+
 	*continuescan = true;		/* default assumption */
 
 	/*
@@ -1488,171 +1640,8 @@ _bt_checkkeys(IndexScanDesc scan,
 
 	tuple = (IndexTuple) PageGetItem(page, iid);
 
-	tupdesc = RelationGetDescr(scan->indexRelation);
-	so = (BTScanOpaque) scan->opaque;
-	keysz = so->numberOfKeys;
-	smoothDesc =  (SmoothScanOpaque)scan->smoothInfo;
 
-	/* renata todo:
-	 * before I check keys I should check whether pageID of a tuple is already considered
-	 * */
-	/* if (enable_indexsmoothscan)
-	 * 	check if at least one tuple from that pageID (from heap is already considered)
-	 * 	if yes
-	 * 		don't do any comparison go to next key
-	 * 	if not go to key comparison
-	 * else
-	 * 	check keys */
-
-	if(enable_indexsmoothscan && smoothDesc != NULL && !smoothDesc->orderby && !smoothDesc->creatingBounds)
-	{
-		/*get TID*/
-		heapTid = &tuple->t_tid;
-		/* get heap pageID from TID */
-		heappage = ItemPointerGetBlockNumber(heapTid);
-		//if(bms_is_member(heappage, smoothDesc->bs_tovispages)||bms_is_member(heappage, smoothDesc->bs_vispages)){
-		if(bms_is_member(heappage, smoothDesc->bs_vispages) /*&& !smoothDesc->result_cache->isCached */){
-			/* this page is already marked as the one that needs to be accessed
-			 * nothing to be done now, move to next tuple from INDEX LEAF page */
-
-			return NULL;
-		}
-		/* else it's not a member do all the work with key checks */
-	}
-
-
-	for (key = so->keyData, ikey = 0; ikey < keysz; key++, ikey++)
-	{
-		Datum		datum;
-		bool		isNull;
-		Datum		test;
-
-		/* row-comparison keys need special processing */
-		if (key->sk_flags & SK_ROW_HEADER)
-		{
-			if (_bt_check_rowcompare(key, tuple, tupdesc, dir, continuescan))
-				continue;
-			return NULL;
-		}
-
-		datum = index_getattr(tuple,
-							  key->sk_attno,
-							  tupdesc,
-							  &isNull);
-
-		if (key->sk_flags & SK_ISNULL)
-		{
-			/* Handle IS NULL/NOT NULL tests */
-			if (key->sk_flags & SK_SEARCHNULL)
-			{
-				if (isNull)
-					continue;	/* tuple satisfies this qual */
-			}
-			else
-			{
-				Assert(key->sk_flags & SK_SEARCHNOTNULL);
-				if (!isNull)
-					continue;	/* tuple satisfies this qual */
-			}
-
-			/*
-			 * Tuple fails this qual.  If it's a required qual for the current
-			 * scan direction, then we can conclude no further tuples will
-			 * pass, either.
-			 */
-			if ((key->sk_flags & SK_BT_REQFWD) &&
-				ScanDirectionIsForward(dir))
-				*continuescan = false;
-			else if ((key->sk_flags & SK_BT_REQBKWD) &&
-					 ScanDirectionIsBackward(dir))
-				*continuescan = false;
-
-			/*
-			 * In any case, this indextuple doesn't match the qual.
-			 */
-			return NULL;
-		}
-
-		if (isNull)
-		{
-			if (key->sk_flags & SK_BT_NULLS_FIRST)
-			{
-				/*
-				 * Since NULLs are sorted before non-NULLs, we know we have
-				 * reached the lower limit of the range of values for this
-				 * index attr.	On a backward scan, we can stop if this qual
-				 * is one of the "must match" subset.  We can stop regardless
-				 * of whether the qual is > or <, so long as it's required,
-				 * because it's not possible for any future tuples to pass. On
-				 * a forward scan, however, we must keep going, because we may
-				 * have initially positioned to the start of the index.
-				 */
-				if ((key->sk_flags & (SK_BT_REQFWD | SK_BT_REQBKWD)) &&
-					ScanDirectionIsBackward(dir))
-					*continuescan = false;
-			}
-			else
-			{
-				/*
-				 * Since NULLs are sorted after non-NULLs, we know we have
-				 * reached the upper limit of the range of values for this
-				 * index attr.	On a forward scan, we can stop if this qual is
-				 * one of the "must match" subset.	We can stop regardless of
-				 * whether the qual is > or <, so long as it's required,
-				 * because it's not possible for any future tuples to pass. On
-				 * a backward scan, however, we must keep going, because we
-				 * may have initially positioned to the end of the index.
-				 */
-				if ((key->sk_flags & (SK_BT_REQFWD | SK_BT_REQBKWD)) &&
-					ScanDirectionIsForward(dir))
-					*continuescan = false;
-			}
-
-			/*
-			 * In any case, this indextuple doesn't match the qual.
-			 */
-			return NULL;
-		}
-
-		test = FunctionCall2Coll(&key->sk_func, key->sk_collation,
-								 datum, key->sk_argument);
-
-		if (!DatumGetBool(test))
-		{
-			/*
-			 * Tuple fails this qual.  If it's a required qual for the current
-			 * scan direction, then we can conclude no further tuples will
-			 * pass, either.
-			 *
-			 * Note: because we stop the scan as soon as any required equality
-			 * qual fails, it is critical that equality quals be used for the
-			 * initial positioning in _bt_first() when they are available. See
-			 * comments in _bt_first().
-			 */
-			if ((key->sk_flags & SK_BT_REQFWD) &&
-				ScanDirectionIsForward(dir))
-				*continuescan = false;
-			else if ((key->sk_flags & SK_BT_REQBKWD) &&
-					 ScanDirectionIsBackward(dir))
-				*continuescan = false;
-
-			/*
-			 * In any case, this indextuple doesn't match the qual.
-			 */
-			return NULL;
-		}
-	}
-
-	/* Check for failure due to it being a killed tuple. */
-	if (!tuple_alive)
-		return NULL;
-
-//	/* If we get here, the tuple passes all index quals. */
-//	if (enable_indexsmoothscan && smoothDesc != NULL)
-//	{
-//		smoothDesc->bs_tovispages = bms_add_member(smoothDesc->bs_tovispages, heappage);
-//	}
-	return tuple;
+ return _bt_checkkey_tuple(scan,dir,continuescan,tuple, tuple_alive);
 }
 
 /*

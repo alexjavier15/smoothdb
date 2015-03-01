@@ -495,6 +495,10 @@ hash_create(const char *tabname, long nelem, HASHCTL *info, int flags)
 	if (flags & HASH_SMOOTH)
 		hashp->issmooth = true;
 
+	if ((flags & HASH_SHARED_MEM) &&  (flags & HASH_SMOOTH)){
+		 hctl->nelem_alloc = nelem;
+
+	}
 	return hashp;
 }
 

@@ -854,6 +854,7 @@ typedef struct SmoothScanOpaqueData
 	/*Alex: Information about boundaries and root used for partitioning */
 	OffsetNumber	root_offbounds[3];  /*Alex: root offset used for tuple count aprox. using root*/
 	IndexTuple		itup_bounds[3];  /*Alex: storage for index tuples (Leaf ) bounds used for partitioning*/
+
 	/*Alex : Max and min offset in root used for tuple count aprox. using root*/
 	OffsetNumber	min_offset;
 	OffsetNumber    max_offset;
@@ -974,6 +975,8 @@ extern void _bt_preprocess_keys(IndexScanDesc scan);
 extern IndexTuple _bt_checkkeys(IndexScanDesc scan,
 			  Page page, OffsetNumber offnum,
 			  ScanDirection dir, bool *continuescan);
+extern IndexTuple _bt_checkkey_tuple(IndexScanDesc scan, ScanDirection dir, bool *continuescan,
+		IndexTuple tuple, bool tuple_alive);
 extern void _bt_killitems(IndexScanDesc scan, bool haveLock);
 extern BTCycleId _bt_vacuum_cycleid(Relation rel);
 extern BTCycleId _bt_start_vacuum(Relation rel);

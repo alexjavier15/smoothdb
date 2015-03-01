@@ -1267,19 +1267,7 @@ if(HasSmoothInfo(scan)){
 		iid = PageGetItemId(page,offnum );
 		ituporig =  (IndexTuple) PageGetItem(page, iid);
 		sso->itup_bounds[pos] = CopyIndexTuple(ituporig);
-		result = _bt_compare_tup(ituporig,RelationGetDescr(scan->indexRelation),keysCount,scankeys);
 
-
-		if (ScanDirectionIsForward(dir) && result < 0)
-			{
-				sso->moreLeft = true;
-
-
-			}
-		if (ScanDirectionIsBackward(dir) && result >= 0)
-			{
-				sso->moreRight = true;
-			}
 
 
 		if (BufferIsValid(buf_root)) {
@@ -1290,13 +1278,12 @@ if(HasSmoothInfo(scan)){
 			sso->min_offset = P_FIRSTDATAKEY(opaque);
 			sso->max_offset = PageGetMaxOffsetNumber(rootpage);
 
-
-
 		}
 
 		//
 //		printf("Max and min bounds set!\n");
 		sso->root_offbounds[pos] = root_offset;
+
 
 		_bt_relbuf(rel, buf_root);
 	}

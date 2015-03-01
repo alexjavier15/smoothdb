@@ -325,58 +325,8 @@ btgettuple(PG_FUNCTION_ARGS)
 				int cter = 0;
 				for (i = 0; i < 3; i++) {
 					if (sso->itup_bounds[i] != 0) {
+						print_tuple(RelationGetDescr(scan->indexRelation),sso->itup_bounds[i]);
 
-						IndexTuple itup = sso->itup_bounds[i];
-						int nattrs = tupdesc->natts;
-						int j = 0;
-						Datum		values[INDEX_MAX_KEYS];
-						bool		isnull[INDEX_MAX_KEYS];
-						printf("\ntuple with data : [  ");
-						index_deform_tuple(itup, tupdesc,values,isnull);
-
-						for (j = 0; j < nattrs; j++) {
-							Form_pg_attribute attr_form= tupdesc->attrs[j];
-							int32 intvalue;
-							if (!isnull[j]) {
-
-								printf(" attno : %d , Type: %u ,", j+1 , (tupdesc->attrs[j])->atttypid);
-								if(attr_form->atttypid == 1700){
-									char *str;
-									Oid type = attr_form->atttypid;
-									Oid typeOut;
-									bool isvarlena;
-									intvalue =  DatumGetInt32(values[j]);
-									getTypeOutputInfo(type, &typeOut, &isvarlena);
-
-
-									str = OidOutputFunctionCall(typeOut, values[j]);
-								printf(" value: %s  , ", str );
-								printf(" int value: %x", intvalue);
-								}else if(attr_form->atttypid == 1082){
-									DateADT		date;
-									struct pg_tm tm;
-									char		buf[MAXDATELEN + 1];
-									intvalue = DatumGetInt32(values[j]);
-									date = DatumGetDateADT(values[j]);
-									if (!DATE_NOT_FINITE(date)){
-
-														j2date(date + POSTGRES_EPOCH_JDATE,
-															   &(tm.tm_year), &(tm.tm_mon), &(tm.tm_mday));
-														EncodeDateOnly(&tm, USE_XSD_DATES, buf);
-
-
-
-									printf(" value: %s  , ", buf );
-									printf(" value: %d  ", intvalue );
-									}
-
-								}
-								low[cter]=intvalue;
-								cter++;
-							}
-
-						}
-						printf("  ]   \n");
 					}
 
 				}
