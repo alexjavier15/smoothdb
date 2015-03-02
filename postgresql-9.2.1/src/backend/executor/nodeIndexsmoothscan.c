@@ -2806,7 +2806,7 @@ void get_all_keys(IndexScanDesc scan) {
 
 		printf("for debugging: \n");
 		iid = PageGetItemId(page, offnum);
-			rint_tuple(tupdesc,(IndexTuple) PageGetItem(page, iid));
+			print_tuple(tupdesc,(IndexTuple) PageGetItem(page, iid));
 	}
 
 
