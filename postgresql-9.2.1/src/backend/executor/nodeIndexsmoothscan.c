@@ -2764,16 +2764,15 @@ void get_all_keys(IndexScanDesc scan) {
 
 	firstRootTup =  lastRootTup = NULL;
 	reader = readerBuf = curr_buf =NULL;
-	scan_length = 1;
+	scan_length = 0;
 
 
 
 	root_lentgh = max_off - min_off;
 
-	if(end_off != start_off ){
 		scan_length = end_off - start_off;
 
-	}
+
 	pos =  np = next =  cmp = lastItem =  itemIndex = 0;
 	split_factor =   safe_size =1;
 	// in any case we need to fetc the root tuples!
