@@ -2335,7 +2335,7 @@ void _saveitem(IndexBoundReader readerbuf, int itemIndex, OffsetNumber offnum, I
 	itupsz = IndexTupleSize(itup);
 	if (readerbuf->currTuples && readerbuf->avaible_size >=  MAXALIGN(itupsz)) {
 
-		printf("saving %d tuple \n", itemIndex);
+		//printf("saving %d tuple \n", itemIndex);
 		currItem->tupleOffset = readerbuf->currPos.nextTupleOffset;
 		memcpy(readerbuf->currTuples + readerbuf->currPos.nextTupleOffset, itup, MAXALIGN(itupsz));
 		readerbuf->currPos.nextTupleOffset += MAXALIGN(itupsz);
@@ -2680,8 +2680,8 @@ bool _readpage(IndexBoundReader readerbuf, Buffer buf, IndexScanDesc scan, ScanD
 		else
 			readerbuf->prefetcher.last_item = itemIndexdiv + 1;
 
-		printf("readr buffer lastItemDev : %d, itemIndex :%d, lastItem: %d  \n"
-				,readerbuf->prefetcher.last_item , itemIndex,readerbuf->currPos.lastItem );
+//		printf("readr buffer lastItemDev : %d, itemIndex :%d, lastItem: %d  \n"
+//				,readerbuf->prefetcher.last_item , itemIndex,readerbuf->currPos.lastItem );
 	}
 	readerbuf->currPos.itemIndex = firstIndex;
 
