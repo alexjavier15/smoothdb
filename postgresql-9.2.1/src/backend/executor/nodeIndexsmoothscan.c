@@ -2804,6 +2804,9 @@ void get_all_keys(IndexScanDesc scan) {
 		print_tuple(tupdesc,curr_tuple);
 		offnum = OffsetNumberNext(offnum);
 
+		printf("for debugging: \n");
+		iid = PageGetItemId(page, offnum);
+			rint_tuple(tupdesc,(IndexTuple) PageGetItem(page, iid));
 	}
 
 
