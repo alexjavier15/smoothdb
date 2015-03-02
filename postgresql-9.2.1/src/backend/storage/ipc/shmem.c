@@ -425,7 +425,7 @@ add_size(Size s1, Size s2)
 	if (result < s1 || result < s2)
 		ereport(ERROR,
 				(errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
-				 errmsg("requested shared memory size overflows size_t %ld, %ld",s1,s2)));
+				 errmsg("requested shared memory size overflows size_t %lu, %lu",s1,s2)));
 	return result;
 }
 
