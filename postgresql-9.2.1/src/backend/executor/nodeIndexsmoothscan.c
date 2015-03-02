@@ -2930,16 +2930,19 @@ void get_all_keys(IndexScanDesc scan) {
 	} else {
 
 
+		if(sso->moreRight){
+			lastItem++;
 
+		}
 
 		curr_buf = reader;
 
 		_bt_relbuf(rel, buf);
 	}
 	if (!readerBuf->prefetcher.is_prefetching)
-		lastItem = curr_buf->currPos.lastItem;
+		lastItem += curr_buf->currPos.lastItem;
 	else
-		lastItem = curr_buf->prefetcher.last_item;
+		lastItem += curr_buf->prefetcher.last_item;
 
 
 
