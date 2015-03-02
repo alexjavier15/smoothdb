@@ -1828,10 +1828,10 @@ static struct config_int ConfigureNamesInt[] =
 			gettext_noop("This much memory can be used by each smooth  internal "
 										 " hash table before switching to "
 										 "temporary disk files."),
-			GUC_UNIT_KB
+		GUC_UNIT_BLOCKS
 		},
 		&smooth_work_mem,
-		1024, 64, MAX_KILOBYTES,
+		1024, 64, INT_MAX / 2,
 		NULL, NULL, NULL
 	},
 
