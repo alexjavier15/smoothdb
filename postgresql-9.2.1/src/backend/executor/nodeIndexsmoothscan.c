@@ -466,6 +466,7 @@ void smooth_resultcache_free(ResultCache *cache) {
 			BufFileClose(file);
 
 	}
+	fflush(stdout);
 	pfree(cache->partition_array);
 	pfree(cache->projected_values);
 	pfree(cache->projected_isnull);
@@ -3478,6 +3479,7 @@ void ExecResultCacheInitPartition(IndexScanDesc scan, ResultCache *res_cache) {
 	res_cache->curbatch = INIT_PARTITION_NUM;
 	res_cache->curr_partition = &res_cache->partition_array[INIT_PARTITION_NUM];
 	PrepareTempTablespaces();
+	fflush(stdout);
 
 }
 static
@@ -3746,7 +3748,7 @@ bool ExecHashJoinNewBatch(IndexScanDesc scan, int batchindex) {
 	}
 //	printf("Final Memory stats\n");
 //	MemoryContextStats(CurrentMemoryContext);
-
+	fflush(stdout);
 	return true;
 }
 
