@@ -2770,7 +2770,7 @@ void get_all_keys(IndexScanDesc scan) {
 
 	root_lentgh = max_off - min_off;
 
-		scan_length = end_off - start_off;
+	scan_length = end_off - start_off + 1;
 
 
 	pos =  np = next =  cmp = lastItem =  itemIndex = 0;
@@ -2804,9 +2804,9 @@ void get_all_keys(IndexScanDesc scan) {
 		print_tuple(tupdesc,curr_tuple);
 		offnum = OffsetNumberNext(offnum);
 
-		printf("for debugging: \n");
-		iid = PageGetItemId(page, offnum);
-			print_tuple(tupdesc,(IndexTuple) PageGetItem(page, iid));
+//		printf("for debugging: \n");
+//		iid = PageGetItemId(page, offnum);
+//			print_tuple(tupdesc,(IndexTuple) PageGetItem(page, iid));
 	}
 
 
@@ -2819,16 +2819,24 @@ void get_all_keys(IndexScanDesc scan) {
 
 
 	/*Check the initial number of keys into the scan range*/
-	cmp =  _comp_tuples(firstRootTup, firstTup,scan, sso);
-	sso->moreLeft = (cmp > 0);
-	cmp = _comp_tuples(lastTup, lastRootTup,scan, sso);
-	sso->moreRight = (cmp > 0);
-	if (cmp < 0 && start_off != end_off) {
+//	cmp =  _comp_tuples(firstRootTup, firstTup,scan, sso);
+//	sso->moreLeft = (cmp > 0);
+	if(start_off != end_off){
+		cmp = _comp_tuples(lastTup, lastRootTup, scan, sso);
+		if(cmp > 0){
+			sso->moreRight = true;
 
-		BTScanPosItem *currItem;
-		reader->currPos.lastItem--;
-		currItem = &reader->currPos.items[reader->currPos.lastItem];
-		lastRootTup = (IndexTuple) (reader->currTuples + currItem->tupleOffset);
+		}
+		else {
+
+			BTScanPosItem *currItem;
+			reader->currPos.lastItem--;
+			currItem = &reader->currPos.items[reader->currPos.lastItem];
+			lastRootTup = (IndexTuple) (reader->currTuples + currItem->tupleOffset);
+			scan_length--;
+		}
+
+
 	}
 	/*TO-DO: Check for backwarddirection
 	 *
@@ -2846,10 +2854,7 @@ void get_all_keys(IndexScanDesc scan) {
 
 
 
-	if (scan_length < root_lentgh) {
-		scan_length = sso->moreLeft ? scan_length + 1.0 : scan_length;
-		scan_length = sso->moreRight ? scan_length + 1.0 : scan_length;
-	}
+
 	rootfrac = scan_length / root_lentgh;
 
 //	printf("\nscan_length : %.2f, root_lentgh = %.2f \n ", scan_length, root_lentgh);
@@ -2884,7 +2889,7 @@ void get_all_keys(IndexScanDesc scan) {
 	printf("nhas more left : %d, has more right : %d \n", sso->moreLeft , sso->moreRight);
 
 	if( partitionsz == 1){
-		sso->moreLeft  = true;
+	//	sso->moreLeft  = true;
 		next =  1;
 		_bt_relbuf(rel,buf);
 		goto set_bounds;
@@ -2956,11 +2961,11 @@ void get_all_keys(IndexScanDesc scan) {
 
 	left = safe_size;
 
-	if (sso->moreLeft) {
+
 		resultCache->bounds[pos] = firstTup;
 		pos++;
 		left--;
-	}
+
 
 
 
