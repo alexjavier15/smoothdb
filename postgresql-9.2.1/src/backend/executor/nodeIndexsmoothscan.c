@@ -2768,7 +2768,7 @@ void get_all_keys(IndexScanDesc scan) {
 
 
 
-	root_lentgh = max_off - min_off;
+	root_lentgh = max_off - min_off + 1;
 
 	scan_length = end_off - start_off + 1;
 
