@@ -530,7 +530,7 @@ smooth_resultcache_create_empty(IndexScanDesc scan,int numatt) {
 		result = ShmemInitStruct(str.data, sizeof(ResultCache), &found);
 		result->type = T_ResultCache;
 		if(!found)
-			smooth_work_mem = smooth_work_mem - MAXALIGN(sizeof(ResultCache));
+			smooth_work_mem =  smooth_work_mem - (Size)MAXALIGN(sizeof(ResultCache));
 
 
 	} else {
@@ -611,10 +611,10 @@ static void smooth_resultcache_create(IndexScanDesc scan, uint32 tup_length) {
 		if (found)
 			printf("\nHASHCTL struct for result cache was found\n");
 		else {
-			printf("memory available : %d\n", smooth_work_mem);
-			smooth_work_mem = smooth_work_mem - MAXALIGN(sizeof(HASHCTL));
+			printf("memory available : %ld\n", smooth_work_mem);
+			smooth_work_mem = smooth_work_mem - (Size)MAXALIGN(sizeof(HASHCTL));
 			res_cache->size = smooth_work_mem;
-			printf("final memory for result cache : %d\n", res_cache->size);
+			printf("final memory for result cache : %ld\n", res_cache->size);
 			IsUnderPostmaster = true;
 
 		}
@@ -1688,7 +1688,7 @@ ExecInitIndexSmoothScan(IndexSmoothScan *node, EState *estate, int eflags) {
 			if(!found){
 				memset(ss->bs_vispages->words,0, bs_size);
 				ss->bs_vispages->nwords =ss->rel_nblocks  + 1;
-				smooth_work_mem = smooth_work_mem -  bs_size;
+				smooth_work_mem = smooth_work_mem -  (Size)bs_size;
 			}else{
 
 				printf("Found bitmap with : %d words\n", bms_num_members(ss->bs_vispages));
@@ -2743,7 +2743,7 @@ void get_all_keys(IndexScanDesc scan) {
 	double aproxtups;
 	int tup_length = sso->result_cache->tuple_length;
 	int partitionsz;
-	int nbuckets;
+	long nbuckets;
 	TupleDesc tupdesc = RelationGetDescr(rel);
 	long work_mem = sso->work_mem;
 	int min_off = sso->min_offset;

@@ -676,7 +676,7 @@ struct ResultCache
 
 	int			nentries;		/* number of entries in hastable. If partitioned the vale will  be equal
 								to the total of tuples stored arou nd the partitions */
-	int			maxentries;		/* limit on same to meet maxbytes. */
+	long		maxentries;		/* limit on same to meet maxbytes. */
 	int			maxtuples;		/* number max of tuples ot be stored.
 	 	 	 	 	 	 	 	 If only one partition it will be equal to maxentries*/
 	uint32     tuple_length;
