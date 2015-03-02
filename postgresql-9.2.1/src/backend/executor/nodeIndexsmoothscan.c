@@ -2723,7 +2723,7 @@ IndexBoundReader MakeIndexBoundReader( int size){
 		reader->prefetcher.is_prefetching = 0;
 		reader->prefetcher.split_factor = 1;
 		reader->avaible_size = size;
-		reader->currTuples = (char *) palloc(size);
+		reader->currTuples = (char *) palloc0(size);
 		return reader;
 
 
@@ -2934,12 +2934,16 @@ void get_all_keys(IndexScanDesc scan) {
 
 	} else {
 
-
+		//If thelast tuple is greqter the the last qualifying root tuple
+		// use all the root tuples
 		if(sso->moreRight){
 			lastItem++;
 
 		}
-
+		// we expect to use the fist tuple as lower bound so skip the first
+		//qualifyng root tuple < = first tuple.
+		next++;
+		//set the root reader as current reader
 		curr_buf = reader;
 
 		_bt_relbuf(rel, buf);
