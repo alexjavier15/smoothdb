@@ -2883,6 +2883,7 @@ void get_all_keys(IndexScanDesc scan) {
 	if( partitionsz == 1){
 		sso->moreLeft  = true;
 		next =  1;
+		_bt_relbuf(rel,buf);
 		goto set_bounds;
 	}
 
