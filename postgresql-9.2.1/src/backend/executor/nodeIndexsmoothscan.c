@@ -2616,7 +2616,7 @@ bool _readpage(IndexBoundReader readerbuf, Buffer buf, IndexScanDesc scan, ScanD
 	int itemIndex;
 	int itemIndexdiv;
 	int firstIndex;
-	bool pr= true;
+//	bool pr= true;
 	//TupleDesc tupdes = RelationGetDescr(scan->indexRelation);
 	IndexTuple itup;
 	bool continuescan;
@@ -2663,7 +2663,7 @@ bool _readpage(IndexBoundReader readerbuf, Buffer buf, IndexScanDesc scan, ScanD
 	offnum = minoff;
 
 	itemIndexdiv = readerbuf->prefetcher.last_item;
-	printf("min offset : %d, max offset = %d \n", offnum,maxoff);
+	//printf("min offset : %d, max offset = %d \n", offnum,maxoff);
 
 	Assert(BufferIsValid(buf));
 	while (offnum <= maxoff) {
@@ -2673,11 +2673,11 @@ bool _readpage(IndexBoundReader readerbuf, Buffer buf, IndexScanDesc scan, ScanD
 		itup = _bt_checkkeys(scan, page, offnum, ForwardScanDirection, &continuescan);
 
 		if (itup != NULL) {
-			if(pr){
-
-						print_tuple(RelationGetDescr(scan->indexRelation),itup);
-						pr = false;
-					}
+//			if(pr){
+//
+//						print_tuple(RelationGetDescr(scan->indexRelation),itup);
+//						pr = false;
+//					}
 
 			//_check_tuple(RelationGetDescr(scan->indexRelation),itup);
 			/* tuple passes all scan key conditions, so remember it */
@@ -2906,7 +2906,8 @@ void get_all_keys(IndexScanDesc scan) {
 	printf("nhas more left : %d, has more right : %d \n", sso->moreLeft, sso->moreRight);
 
 	if (partitionsz == 1) {
-		//	sso->moreLeft  = true;
+
+		curr_buf = reader;
 		next = 1;
 		lastItem = partitionsz;
 		_bt_relbuf(rel, buf);
