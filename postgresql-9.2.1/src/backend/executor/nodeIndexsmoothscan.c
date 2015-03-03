@@ -2762,16 +2762,15 @@ void get_all_keys(IndexScanDesc scan) {
 	int end_off = sso->root_offbounds[LeftBound];
 	IndexTuple firstTup = sso->itup_bounds[RightBound];
 	IndexTuple lastTup = sso->itup_bounds[LeftBound];
-	IndexTuple firstRootTup, lastRootTup;
+	IndexTuple  lastRootTup;
 
 	IndexTuple curr_tuple;
 	IndexBoundReader reader, readerBuf, curr_buf;
 	int pos, np, next, cmp, lastItem, split_factor, safe_size, itemIndex, left;
 	OffsetNumber offnum = 0;
 	bool result;
-	bool continuescan;
 
-	firstRootTup = lastRootTup = NULL;
+	lastRootTup = NULL;
 	reader = readerBuf = curr_buf = NULL;
 	scan_length = 0;
 
@@ -2799,8 +2798,7 @@ void get_all_keys(IndexScanDesc scan) {
 		ItemId iid = PageGetItemId(page, offnum);
 
 		curr_tuple = (IndexTuple) PageGetItem(page, iid);
-		if (offnum == start_off)
-			firstRootTup = curr_tuple;
+
 		if (offnum == end_off)
 			lastRootTup = curr_tuple;
 
@@ -2981,12 +2979,18 @@ void get_all_keys(IndexScanDesc scan) {
 		left--;
 	}
 
-	cmp = _comp_tuples(lastTup, resultCache->bounds[pos - 1], scan, sso);
-	if (cmp > 0 || start_off != end_off) {
-		resultCache->bounds[pos] = lastTup;
-	} else
-		pos--;
+	if (start_off != end_off) {
 
+		cmp = _comp_tuples(lastTup, resultCache->bounds[pos - 1], scan, sso);
+		if (cmp > 0) {
+			resultCache->bounds[pos] = lastTup;
+		} else
+			pos--;
+	} else {
+
+		resultCache->bounds[pos] = lastTup;
+
+	}
 	// saving memory
 
 	printf("right bound %d: \n", offnum);
