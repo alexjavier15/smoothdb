@@ -2762,7 +2762,7 @@ void get_all_keys(IndexScanDesc scan) {
 	IndexTuple firstTup = sso->itup_bounds[RightBound];
 	IndexTuple lastTup = sso->itup_bounds[LeftBound];
 	IndexTuple  lastRootTup;
-
+	MemoryContext new , old;
 	IndexTuple curr_tuple;
 	IndexBoundReader reader, readerBuf, curr_buf;
 	int pos, np, next, cmp, lastItem, split_factor, safe_size, itemIndex, left;
@@ -2780,8 +2780,10 @@ void get_all_keys(IndexScanDesc scan) {
 	pos = np = next = cmp = lastItem = itemIndex = 0;
 	split_factor = safe_size = 1;
 	// in any case we need to fetc the root tuples!
-	reader = MakeIndexBoundReader((scan_length +2) * IndexTupleSize(lastTup));
+	new = AllocSetContextCreate(CurrentMemoryContext,"Bound", ALLOCSET_DEFAULT_MAXSIZE, ALLOCSET_DEFAULT_MAXSIZE, ALLOCSET_DEFAULT_MAXSIZE);
+	old = MemoryContextSwitchTo(new);
 
+	reader = MakeIndexBoundReader((scan_length +2) * IndexTupleSize(lastTup));
 
 	buf = _bt_getroot(rel, BT_READ);
 	page = BufferGetPage(buf);
@@ -2888,7 +2890,10 @@ void get_all_keys(IndexScanDesc scan) {
 		_bt_relbuf(rel, buf);
 		goto set_bounds;
 	}
+
+
 	readerBuf = MakeIndexBoundReader(8 * BLCKSZ);
+
 	if (partitionsz > scan_length) {
 		int target_length = 1;
 		target_length = partitionsz;
@@ -2952,6 +2957,7 @@ void get_all_keys(IndexScanDesc scan) {
 	set_bounds:
 
 	safe_size = partitionsz + 1;
+	MemoryContextSwitchTo(old);
 	resultCache->bounds = palloc0(sizeof(IndexTuple)*(safe_size+2));
 
 	left = safe_size;
@@ -2972,7 +2978,7 @@ void get_all_keys(IndexScanDesc scan) {
 //			left = nelemLeft;
 //		}
 
-		resultCache->bounds[pos] =/* CopyIndexTuple(*/(IndexTuple) (curr_buf->currTuples + currItem->tupleOffset);
+		resultCache->bounds[pos] =CopyIndexTuple((IndexTuple) (curr_buf->currTuples + currItem->tupleOffset));
 		//print_tuple(tupdesc, resultCache->bounds [pos]);
 		//print_tuple(tupdesc, bounds[pos]);
 		next += split_factor;
@@ -2999,14 +3005,15 @@ void get_all_keys(IndexScanDesc scan) {
 	printf("**************************\n");
 	//	_bt_relbuf(rel, buf);
 	//	MemoryContextStats(CurrentMemoryContext);
-	if (readerBuf) {
-		pfree(readerBuf->currTuples);
-		pfree(readerBuf);
-	}
-	if (reader) {
-		pfree(reader->currTuples);
-		pfree(reader);
-	}
+	MemoryContextDelete(new);
+//	if (readerBuf) {
+//		pfree(readerBuf->currTuples);
+//		pfree(readerBuf);
+//	}
+//	if (reader) {
+//		pfree(reader->currTuples);
+//		pfree(reader);
+//	}
 
 	resultCache->partition_array = palloc0( MAXALIGN(sizeof(HashPartitionData))*pos);
 
