@@ -2781,8 +2781,8 @@ void get_all_keys(IndexScanDesc scan) {
 	pos = np = next = cmp = lastItem = itemIndex = 0;
 	split_factor = safe_size = 1;
 	// in any case we need to fetc the root tuples!
-	reader = MakeIndexBoundReader((scan_length + 2) * BLCKSZ);
-	readerBuf = MakeIndexBoundReader((scan_length + 2) * BLCKSZ);
+	reader = MakeIndexBoundReader((scan_length +2) * IndexTupleSize(lastTup));
+	readerBuf = MakeIndexBoundReader((scan_length * 2) * IndexTupleSize(lastTup));
 
 	buf = _bt_getroot(rel, BT_READ);
 	page = BufferGetPage(buf);
