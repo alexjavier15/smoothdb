@@ -2348,7 +2348,7 @@ void _saveitem(IndexBoundReader readerbuf, int itemIndex, OffsetNumber offnum, I
 	itupsz = IndexTupleSize(itup);
 	//Assert (readerbuf->firstItem && readerbuf->avaible_size >= MAXALIGN(itupsz));
 
-	printf("saving %d tuple  with size :%ld\n", itemIndex, MAXALIGN(itupsz));
+	//printf("saving %d tuple  with size :%ld\n", itemIndex, MAXALIGN(itupsz));
 
 	newItem = (IndexBound) palloc0(INDEXBOUNDSIZE);
 	newItem->tuple = CopyIndexTuple(itup);
