@@ -2972,7 +2972,7 @@ void get_all_keys(IndexScanDesc scan) {
 //			left = nelemLeft;
 //		}
 
-		resultCache->bounds[pos] = CopyIndexTuple((IndexTuple) (curr_buf->currTuples + currItem->tupleOffset));
+		resultCache->bounds[pos] =/* CopyIndexTuple(*/(IndexTuple) (curr_buf->currTuples + currItem->tupleOffset);
 		//print_tuple(tupdesc, resultCache->bounds [pos]);
 		//print_tuple(tupdesc, bounds[pos]);
 		next += split_factor;
