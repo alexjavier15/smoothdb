@@ -2888,7 +2888,7 @@ void get_all_keys(IndexScanDesc scan) {
 		_bt_relbuf(rel, buf);
 		goto set_bounds;
 	}
-	readerBuf = MakeIndexBoundReader((partitionsz) * 2 *IndexTupleSize(lastTup));
+	readerBuf = MakeIndexBoundReader(8 * BLCKSZ);
 	if (partitionsz > scan_length) {
 		int target_length = 1;
 		target_length = partitionsz;
