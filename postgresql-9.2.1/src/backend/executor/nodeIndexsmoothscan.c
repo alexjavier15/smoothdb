@@ -2780,7 +2780,7 @@ void get_all_keys(IndexScanDesc scan) {
 	split_factor = safe_size = 1;
 	// in any case we need to fetc the root tuples!
 	reader = MakeIndexBoundReader((scan_length +2) * IndexTupleSize(lastTup));
-	readerBuf = MakeIndexBoundReader((scan_length +2) * 1024);
+
 
 	buf = _bt_getroot(rel, BT_READ);
 	page = BufferGetPage(buf);
@@ -2887,7 +2887,7 @@ void get_all_keys(IndexScanDesc scan) {
 		_bt_relbuf(rel, buf);
 		goto set_bounds;
 	}
-
+	readerBuf = MakeIndexBoundReader((partitionsz +2) * 1024);
 	if (partitionsz > scan_length) {
 		int target_length = 1;
 		target_length = partitionsz;
