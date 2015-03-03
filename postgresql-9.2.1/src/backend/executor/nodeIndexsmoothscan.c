@@ -2454,7 +2454,7 @@ bool _findIndexBoundsWithPrefetch(IndexBoundReader * readerptr, IndexBoundReader
 
 	next = reader->currPos.firstItem;
 	firstItem = next;
-
+	reader_buffer->currPos.nextTupleOffset = 0;
 
 	while (next <= reader->currPos.lastItem) {
 		//bool skip = (next == 0);
@@ -2792,7 +2792,7 @@ void get_all_keys(IndexScanDesc scan) {
 //
 //	}
 	printf("Printing root... start : %d, end: %d\n", start_off, end_off);
-
+	reader->currPos.nextTupleOffset = 0;
 	while (offnum <= end_off) {
 
 		ItemId iid = PageGetItemId(page, offnum);
