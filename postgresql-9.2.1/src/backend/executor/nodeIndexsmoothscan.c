@@ -77,7 +77,7 @@ static void _saveitem(IndexBoundReader readerbuf, int itemIndex, OffsetNumber of
 
 static IndexBoundReader MakeIndexBoundReader( int size);
 void ExecResultCacheCheckStatus(ResultCache *resultCache, HashPartitionDesc partition);
-static bool _readpage(IndexBoundReader readerbuf, Buffer buf, IndexScanDesc scan, ScanDirection dir) ;
+static bool _readpage(IndexBoundReader readerbuf, Buffer buf, IndexScanDesc scan, ScanDirection dir, bool skipFirst) ;
 
 
 static TupleTableSlot *IndexSmoothNext(IndexSmoothScanState *node);
@@ -2373,6 +2373,7 @@ bool _findIndexBoundsWithPrefetch(IndexBoundReader * readerptr, IndexBoundReader
 	int next = reader->currPos.firstItem;
 	int curr_length = 0;
 	int split_factor = 1;
+	int firstItem = 0;
 
 	//int target_length;
 
@@ -2411,8 +2412,8 @@ bool _findIndexBoundsWithPrefetch(IndexBoundReader * readerptr, IndexBoundReader
 		maxoff = PageGetMaxOffsetNumber(page);
 		offnum = minoff;
 
-		if (_bt_checkkey_tuple(scan, ForwardScanDirection, &continuescan, curr_tuple, true) != NULL)
-			curr_length++;
+//		if (_bt_checkkey_tuple(scan, ForwardScanDirection, &continuescan, curr_tuple, true) != NULL)
+//			curr_length++;
 
 		while (offnum <= maxoff) {
 			if (_bt_checkkeys(scan, page, offnum, ForwardScanDirection, &continuescan)) {
@@ -2452,8 +2453,10 @@ bool _findIndexBoundsWithPrefetch(IndexBoundReader * readerptr, IndexBoundReader
 	// set loop invariants
 
 	next = reader->currPos.firstItem;
+	firstItem = next;
 
 	while (next <= reader->currPos.lastItem) {
+		//bool skip = (next == 0);
 		IndexTuple curr_tuple;
 		BTScanPosItem *currItem;
 		BlockNumber blkno;
@@ -2467,16 +2470,16 @@ bool _findIndexBoundsWithPrefetch(IndexBoundReader * readerptr, IndexBoundReader
 		blkno = ItemPointerGetBlockNumber(&(curr_tuple->t_tid));
 		buf = _bt_relandgetbuf(rel, buf, blkno, BT_READ);
 		// we are rady to read the page so go ahead
-		if (_bt_checkkey_tuple(scan, ForwardScanDirection, &continuescan, curr_tuple, true) != NULL){
-			int lastItem = 0;
-			if(reader_buffer->prefetcher.is_prefetching)
-				lastItem= ++reader_buffer->prefetcher.last_item;
-			else
-				lastItem= ++reader_buffer->currPos.lastItem;
-
-			_saveitem(reader_buffer,lastItem, currItem->tupleOffset,curr_tuple);
-		}
-		if (_readpage(reader_buffer, buf, scan, ForwardScanDirection)) {
+//		if (next && _bt_checkkey_tuple(scan, ForwardScanDirection, &continuescan, curr_tuple, true) != NULL){
+//			int lastItem = 0;
+//			if(reader_buffer->prefetcher.is_prefetching)
+//				lastItem= ++reader_buffer->prefetcher.last_item;
+//			else
+//				lastItem= ++reader_buffer->currPos.lastItem;
+//
+//			_saveitem(reader_buffer,lastItem, currItem->tupleOffset,curr_tuple);
+//		}
+		if (_readpage(reader_buffer, buf, scan, ForwardScanDirection ,(firstItem == next)) ) {
 			curr_length = reader_buffer->currPos.lastItem;
 			next++;
 		} else {
@@ -2522,7 +2525,7 @@ bool _findIndexBounds(IndexBoundReader * readerptr, IndexBoundReader * reader_bu
 			buf = _bt_relandgetbuf(rel, buf, blkno, BT_READ);
 			// we are rady to read the page so go ahead
 
-		if (_readpage(reader_buffer, buf, scan, ForwardScanDirection)) {
+		if (_readpage(reader_buffer, buf, scan, ForwardScanDirection, false)) {
 			curr_length = reader_buffer->currPos.lastItem;
 			next++;
 		} else{
@@ -2578,7 +2581,7 @@ bool _findIndexBounds(IndexBoundReader * readerptr, IndexBoundReader * reader_bu
  *
  * Returns true if any matching items found on the page, false if none.
  */
-bool _readpage(IndexBoundReader readerbuf, Buffer buf, IndexScanDesc scan, ScanDirection dir) {
+bool _readpage(IndexBoundReader readerbuf, Buffer buf, IndexScanDesc scan, ScanDirection dir, bool skipFirst) {
 	Page page;
 	BTPageOpaque opaque;
 	OffsetNumber minoff;
@@ -2630,6 +2633,7 @@ bool _readpage(IndexBoundReader readerbuf, Buffer buf, IndexScanDesc scan, ScanD
 	itemIndex = readerbuf->currPos.lastItem == 0 ? 0 : readerbuf->currPos.lastItem + 1;
 	firstIndex = itemIndex;
 	offnum = minoff;
+
 	itemIndexdiv = readerbuf->prefetcher.last_item;
 	printf("min offset : %d, max offset = %d \n", offnum,maxoff);
 	bool pr= true;
@@ -2653,7 +2657,10 @@ bool _readpage(IndexBoundReader readerbuf, Buffer buf, IndexScanDesc scan, ScanD
 
 				modOffset = itemIndex % readerbuf->prefetcher.split_factor;
 
-				if (modOffset != 0) {
+				//continue the iteration if we have to skip this position
+				// split factor or it's the first item and caller tell
+				//us so
+				if (modOffset != 0 ||(itemIndex == 0 && skipFirst) ) {
 					offnum = OffsetNumberNext(offnum);
 
 					itemIndex++;
