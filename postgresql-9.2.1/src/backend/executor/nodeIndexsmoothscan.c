@@ -2455,6 +2455,7 @@ bool _findIndexBoundsWithPrefetch(IndexBoundReader * readerptr, IndexBoundReader
 	next = reader->currPos.firstItem;
 	firstItem = next;
 
+
 	while (next <= reader->currPos.lastItem) {
 		//bool skip = (next == 0);
 		IndexTuple curr_tuple;
@@ -2464,6 +2465,7 @@ bool _findIndexBoundsWithPrefetch(IndexBoundReader * readerptr, IndexBoundReader
 		currItem = &reader->currPos.items[next];
 		curr_tuple = (IndexTuple) (reader->currTuples + currItem->tupleOffset);
 
+		print_tuple(RelationGetDescr(scan->indexRelation), curr_tuple);
 		// Now _readpage need the right buffer in order to read the page so fetch the page
 		// associated to this indextuple.
 
@@ -2637,8 +2639,9 @@ bool _readpage(IndexBoundReader readerbuf, Buffer buf, IndexScanDesc scan, ScanD
 	itemIndexdiv = readerbuf->prefetcher.last_item;
 	printf("min offset : %d, max offset = %d \n", offnum,maxoff);
 	bool pr= true;
+	Assert(BufferIsValid(buf));
 	while (offnum <= maxoff) {
-		Assert(BufferIsValid(buf));
+
 		//ItemId iid = PageGetItemId(page, offnum);
 
 		itup = _bt_checkkeys(scan, page, offnum, ForwardScanDirection, &continuescan);
@@ -2660,7 +2663,7 @@ bool _readpage(IndexBoundReader readerbuf, Buffer buf, IndexScanDesc scan, ScanD
 				//continue the iteration if we have to skip this position
 				// split factor or it's the first item and caller tell
 				//us so
-				if (modOffset != 0 ||(itemIndex == 0 && skipFirst) ) {
+				if (modOffset != 0 ) {
 					offnum = OffsetNumberNext(offnum);
 
 					itemIndex++;
@@ -2926,6 +2929,9 @@ void get_all_keys(IndexScanDesc scan) {
 				scan_length = readerBuf->currPos.lastItem;
 			else
 				scan_length = readerBuf->prefetcher.last_item;
+
+			next++;
+
 			curr_buf = readerBuf;
 		}else{
 			sso->moreLeft  = true;
