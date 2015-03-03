@@ -3004,7 +3004,8 @@ void get_all_keys(IndexScanDesc scan) {
 	print_tuple(tupdesc, resultCache->bounds[pos]);
 	printf("**************************\n");
 	//	_bt_relbuf(rel, buf);
-	//	MemoryContextStats(CurrentMemoryContext);
+	MemoryContextStats(CurrentMemoryContext);
+	fflush(stdout);
 	MemoryContextDelete(new);
 	new = AllocSetContextCreate(CurrentMemoryContext,"Bound 2", ALLOCSET_DEFAULT_MAXSIZE, ALLOCSET_DEFAULT_MAXSIZE, ALLOCSET_DEFAULT_MAXSIZE);
 //	if (readerBuf) {
