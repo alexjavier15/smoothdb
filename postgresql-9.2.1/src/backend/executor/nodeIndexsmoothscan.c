@@ -2465,7 +2465,7 @@ bool _findIndexBoundsWithPrefetch(IndexBoundReader * readerptr, IndexBoundReader
 		currItem = &reader->currPos.items[next];
 		curr_tuple = (IndexTuple) (reader->currTuples + currItem->tupleOffset);
 
-		print_tuple(RelationGetDescr(scan->indexRelation), curr_tuple);
+		//print_tuple(RelationGetDescr(scan->indexRelation), curr_tuple);
 		// Now _readpage need the right buffer in order to read the page so fetch the page
 		// associated to this indextuple.
 
@@ -2748,7 +2748,7 @@ void get_all_keys(IndexScanDesc scan) {
 	SmoothScanOpaque sso = (SmoothScanOpaque) scan->smoothInfo;
 	Buffer buf;
 	Page page;
-	ResultCache *resultCache =sso->result_cache;
+	ResultCache *resultCache = sso->result_cache;
 	double reltuples = rel->rd_rel->reltuples;
 	double aproxtups;
 	int tup_length = sso->result_cache->tuple_length;
@@ -2762,29 +2762,25 @@ void get_all_keys(IndexScanDesc scan) {
 	int end_off = sso->root_offbounds[LeftBound];
 	IndexTuple firstTup = sso->itup_bounds[RightBound];
 	IndexTuple lastTup = sso->itup_bounds[LeftBound];
-	IndexTuple firstRootTup , lastRootTup;
+	IndexTuple firstRootTup, lastRootTup;
 
 	IndexTuple curr_tuple;
-	IndexBoundReader reader , readerBuf,curr_buf;
+	IndexBoundReader reader, readerBuf, curr_buf;
 	int pos, np, next, cmp, lastItem, split_factor, safe_size, itemIndex, left;
 	OffsetNumber offnum = 0;
 	bool result;
 	bool continuescan;
 
-
-	firstRootTup =  lastRootTup = NULL;
-	reader = readerBuf = curr_buf =NULL;
+	firstRootTup = lastRootTup = NULL;
+	reader = readerBuf = curr_buf = NULL;
 	scan_length = 0;
-
-
 
 	root_lentgh = max_off - min_off + 1;
 
 	scan_length = end_off - start_off + 1;
 
-
-	pos =  np = next =  cmp = lastItem =  itemIndex = 0;
-	split_factor =   safe_size =1;
+	pos = np = next = cmp = lastItem = itemIndex = 0;
+	split_factor = safe_size = 1;
 	// in any case we need to fetc the root tuples!
 	reader = MakeIndexBoundReader((scan_length + 2) * BLCKSZ);
 	readerBuf = MakeIndexBoundReader((scan_length + 2) * BLCKSZ);
@@ -2796,29 +2792,27 @@ void get_all_keys(IndexScanDesc scan) {
 //		end_off--;
 //
 //	}
-	printf("Printing root... start : %d, end: %d\n",start_off, end_off);
+	printf("Printing root... start : %d, end: %d\n", start_off, end_off);
 
 	while (offnum <= end_off) {
-
 
 		ItemId iid = PageGetItemId(page, offnum);
 
 		curr_tuple = (IndexTuple) PageGetItem(page, iid);
-		if(offnum == start_off)
+		if (offnum == start_off)
 			firstRootTup = curr_tuple;
-		if(offnum == end_off)
+		if (offnum == end_off)
 			lastRootTup = curr_tuple;
 
 		_saveitem(reader, itemIndex, offnum, curr_tuple);
 		itemIndex++;
-		print_tuple(tupdesc,curr_tuple);
+		print_tuple(tupdesc, curr_tuple);
 		offnum = OffsetNumberNext(offnum);
 
 //		printf("for debugging: \n");
 //		iid = PageGetItemId(page, offnum);
 //			print_tuple(tupdesc,(IndexTuple) PageGetItem(page, iid));
 	}
-
 
 	printf("End Printing root... \n");
 
@@ -2827,17 +2821,15 @@ void get_all_keys(IndexScanDesc scan) {
 	reader->currPos.itemIndex = 0;
 	/*Check the last  and first item*/
 
-
 	/*Check the initial number of keys into the scan range*/
 //	cmp =  _comp_tuples(firstRootTup, firstTup,scan, sso);
 //	sso->moreLeft = (cmp > 0);
-	if(start_off != end_off){
+	if (start_off != end_off) {
 		cmp = _comp_tuples(lastTup, lastRootTup, scan, sso);
-		if(cmp > 0){
+		if (cmp > 0) {
 			sso->moreRight = true;
 
-		}
-		else {
+		} else {
 
 			BTScanPosItem *currItem;
 			reader->currPos.lastItem--;
@@ -2845,7 +2837,6 @@ void get_all_keys(IndexScanDesc scan) {
 			lastRootTup = (IndexTuple) (reader->currTuples + currItem->tupleOffset);
 			scan_length--;
 		}
-
 
 	}
 	/*TO-DO: Check for backwarddirection
@@ -2860,11 +2851,6 @@ void get_all_keys(IndexScanDesc scan) {
 	//			firstRootTup = (IndexTuple) (reader->currTuples + currItem->tupleOffset);
 	//		}
 
-
-
-
-
-
 	rootfrac = scan_length / root_lentgh;
 
 //	printf("\nscan_length : %.2f, root_lentgh = %.2f \n ", scan_length, root_lentgh);
@@ -2874,7 +2860,6 @@ void get_all_keys(IndexScanDesc scan) {
 
 	aproxtups = reltuples * rootfrac;
 
-
 	Assert(aproxtups > 0);
 	Assert( tup_length > 0);
 	Assert( work_mem > 0);
@@ -2883,7 +2868,7 @@ void get_all_keys(IndexScanDesc scan) {
 	Assert( tup_length > 0);
 
 	nbuckets = resultCache->maxentries;
-	printf("tuples : %.2f, nbuckets = %d \n ", aproxtups, nbuckets);
+	printf("tuples : %.2f, nbuckets = %ld \n ", aproxtups, nbuckets);
 
 	partitionsz = ceil(aproxtups / nbuckets);
 
@@ -2896,45 +2881,41 @@ void get_all_keys(IndexScanDesc scan) {
 	printf("scan_length: %.2f\n", scan_length);
 	printf("npartitions: %d\n", partitionsz);
 
-	printf("nhas more left : %d, has more right : %d \n", sso->moreLeft , sso->moreRight);
+	printf("nhas more left : %d, has more right : %d \n", sso->moreLeft, sso->moreRight);
 
-	if( partitionsz == 1){
-	//	sso->moreLeft  = true;
-		next =  1;
-		_bt_relbuf(rel,buf);
+	if (partitionsz == 1) {
+		//	sso->moreLeft  = true;
+		next = 1;
+		_bt_relbuf(rel, buf);
 		goto set_bounds;
 	}
 
-
-
-
-
 	if (partitionsz > scan_length) {
-		int target_length =1;
-		target_length  = partitionsz;
-		if(!sso->moreLeft ){
+		int target_length = 1;
+		target_length = partitionsz;
+		if (!sso->moreLeft) {
 			// we will need an additionl tuple
 			target_length++;
 		}
 //		if (partitionsz <= MAX_NUM_PARTITION)
-			result = _findIndexBoundsWithPrefetch(&reader, &readerBuf, buf, scan, target_length);
+		result = _findIndexBoundsWithPrefetch(&reader, &readerBuf, buf, scan, target_length);
 
 //		else
 //			result = _findIndexBoundsWithPrefetch(&reader, &readerBuf, buf, scan, partitionsz);
 
 		if (result) {
 			printf("Suitable partitioning foudn\n");
-			if(!readerBuf->prefetcher.is_prefetching)
+			if (!readerBuf->prefetcher.is_prefetching)
 
 				scan_length = readerBuf->currPos.lastItem;
 			else
 				scan_length = readerBuf->prefetcher.last_item;
 
 			next++;
-
+			lastItem++;
 			curr_buf = readerBuf;
-		}else{
-			sso->moreLeft  = true;
+		} else {
+			sso->moreLeft = true;
 			curr_buf = reader;
 			partitionsz = 1;
 			next = readerBuf->currPos.lastItem + 1;
@@ -2949,7 +2930,7 @@ void get_all_keys(IndexScanDesc scan) {
 
 		//If thelast tuple is greqter the the last qualifying root tuple
 		// use all the root tuples
-		if(sso->moreRight){
+		if (sso->moreRight) {
 			lastItem++;
 
 		}
@@ -2966,10 +2947,8 @@ void get_all_keys(IndexScanDesc scan) {
 	else
 		lastItem += curr_buf->prefetcher.last_item;
 
-
-
 	if (!readerBuf->prefetcher.is_prefetching)
-	split_factor = scan_length / partitionsz;
+		split_factor = scan_length / partitionsz;
 
 	set_bounds:
 
@@ -2978,28 +2957,23 @@ void get_all_keys(IndexScanDesc scan) {
 
 	left = safe_size;
 
+	resultCache->bounds[pos] = firstTup;
+	pos++;
+	left--;
 
-		resultCache->bounds[pos] = firstTup;
-		pos++;
-		left--;
-
-
-
-
-printf("next : %d, lastitem: %d , split_factor : %d\n",next,lastItem, split_factor);
+	printf("next : %d, lastitem: %d , split_factor : %d\n", next, lastItem, split_factor);
 	while (next < lastItem) {
 		BTScanPosItem *currItem;
 
 		currItem = &curr_buf->currPos.items[next];
-		if(left == 0){
-			int nelemLeft  = ceil((double) (lastItem - next) / (double)split_factor) + 1;
-			printf("Reallocating  %d size \n", safe_size + nelemLeft );
-			resultCache->bounds  =repalloc(resultCache->bounds ,sizeof(IndexTuple)*(safe_size + nelemLeft ));
+		if (left == 0) {
+			int nelemLeft = ceil((double) (lastItem - next) / (double) split_factor) + 1;
+			printf("Reallocating  %d size \n", safe_size + nelemLeft);
+			resultCache->bounds = repalloc(resultCache->bounds, sizeof(IndexTuple) * (safe_size + nelemLeft));
 			left = nelemLeft;
 		}
 
-
-		resultCache->bounds [pos] = CopyIndexTuple((IndexTuple) (curr_buf->currTuples + currItem->tupleOffset));
+		resultCache->bounds[pos] = CopyIndexTuple((IndexTuple) (curr_buf->currTuples + currItem->tupleOffset));
 		//print_tuple(tupdesc, resultCache->bounds [pos]);
 		//print_tuple(tupdesc, bounds[pos]);
 		next += split_factor;
@@ -3007,55 +2981,53 @@ printf("next : %d, lastitem: %d , split_factor : %d\n",next,lastItem, split_fact
 		left--;
 	}
 
-	resultCache->bounds [pos]= lastTup;
-		// saving memory
+	cmp = _comp_tuples(lastTup, resultCache->bounds[pos - 1], scan, sso);
+	if (cmp > 0) {
+		resultCache->bounds[pos] = lastTup;
+	} else
+		pos--;
 
+	// saving memory
 
-		printf("right bound %d: \n", offnum);
-		print_tuple(tupdesc, resultCache->bounds [pos]);
-		printf("**************************\n");
+	printf("right bound %d: \n", offnum);
+	print_tuple(tupdesc, resultCache->bounds[pos]);
+	printf("**************************\n");
 	//	_bt_relbuf(rel, buf);
 	//	MemoryContextStats(CurrentMemoryContext);
-		if (readerBuf) {
-			pfree(readerBuf->currTuples);
-			pfree(readerBuf);
-		}
-		if (reader) {
-			pfree(reader->currTuples);
-			pfree(reader);
-		}
+	if (readerBuf) {
+		pfree(readerBuf->currTuples);
+		pfree(readerBuf);
+	}
+	if (reader) {
+		pfree(reader->currTuples);
+		pfree(reader);
+	}
 
+	resultCache->partition_array = palloc0( MAXALIGN(sizeof(HashPartitionData))*pos);
 
-		resultCache->partition_array = palloc0( MAXALIGN(sizeof(HashPartitionData))*pos);
+	for (np = pos; np > 0; np--) {
+		int pindex = np - 1;
+		HashPartitionDesc curr_partition = &resultCache->partition_array[pindex];
+		//partitions[pindex] =(HashPartitionDesc *)palloc0(MAXALIGN(sizeof(HashPartitionDesc)));
 
-		for(np = pos; np > 0 ; np--){
-			int pindex = np - 1;
-			HashPartitionDesc curr_partition =&resultCache->partition_array[pindex];
-			//partitions[pindex] =(HashPartitionDesc *)palloc0(MAXALIGN(sizeof(HashPartitionDesc)));
-
-			curr_partition->batchIdx= pindex;
-			curr_partition ->status = RC_INFILE;
-			curr_partition->cache_status = SS_HASH;
-			curr_partition ->nbucket = 0;
-			curr_partition ->lower_bound = resultCache->bounds [np-1];
-			curr_partition ->upper_bound = resultCache->bounds [np];
-			/* TODO fix for sharing partitions;
-					     */
-			curr_partition ->BatchFile = NULL;
-
-
-		}
-
-		resultCache->nbatch = pos;
-
-		resultCache->maxtuples = pos * resultCache->maxentries;
+		curr_partition->batchIdx = pindex;
+		curr_partition->status = RC_INFILE;
+		curr_partition->cache_status = SS_HASH;
+		curr_partition->nbucket = 0;
+		curr_partition->lower_bound = resultCache->bounds[np - 1];
+		curr_partition->upper_bound = resultCache->bounds[np];
 		/* TODO fix for sharing partitions;
-		     */
-		MemoryContextStats(CurrentMemoryContext);
+		 */
+		curr_partition->BatchFile = NULL;
 
+	}
 
+	resultCache->nbatch = pos;
 
-
+	resultCache->maxtuples = pos * resultCache->maxentries;
+	/* TODO fix for sharing partitions;
+	 */
+	MemoryContextStats(CurrentMemoryContext);
 
 	//
 
