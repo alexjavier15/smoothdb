@@ -2832,7 +2832,7 @@ void get_all_keys(IndexScanDesc scan) {
 			BTScanPosItem *currItem;
 			reader->currPos.lastItem--;
 			currItem = &reader->currPos.items[reader->currPos.lastItem];
-			lastRootTup = (IndexTuple) (reader->currTuples + currItem->tupleOffset);
+			lastRootTup = CopyIndexTuple((IndexTuple) (reader->currTuples + currItem->tupleOffset));
 			scan_length--;
 			printf("Current tuple offset %d  \n", currItem->tupleOffset);
 		}
