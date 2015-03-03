@@ -2684,11 +2684,9 @@ bool _readpage(IndexBoundReader readerbuf, Buffer buf, IndexScanDesc scan, ScanD
 	readerbuf->currPos.firstItem = 0;
 	readerbuf->currPos.lastItem = itemIndex - 1;
 	if (readerbuf->prefetcher.is_prefetching) {
-		if ((readerbuf->currPos.lastItem % readerbuf->prefetcher.split_factor) == 0
-				|| itemIndexdiv == readerbuf->prefetcher.last_item   )
+
 			readerbuf->prefetcher.last_item = itemIndexdiv;
-		else
-			readerbuf->prefetcher.last_item = itemIndexdiv + 1;
+
 
 //		printf("readr buffer lastItemDev : %d, itemIndex :%d, lastItem: %d  \n"
 //				,readerbuf->prefetcher.last_item , itemIndex,readerbuf->currPos.lastItem );
@@ -2834,7 +2832,7 @@ void get_all_keys(IndexScanDesc scan) {
 			currItem = &reader->currPos.items[reader->currPos.lastItem];
 			lastRootTup = CopyIndexTuple((IndexTuple) (reader->currTuples + currItem->tupleOffset));
 			scan_length--;
-			print_tuple(tupdesc, lastRootTup);
+			//print_tuple(tupdesc, lastRootTup);
 		}
 
 	}
