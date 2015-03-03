@@ -2780,7 +2780,7 @@ void get_all_keys(IndexScanDesc scan) {
 	pos = np = next = cmp = lastItem = itemIndex = 0;
 	split_factor = safe_size = 1;
 	// in any case we need to fetc the root tuples!
-	new = AllocSetContextCreate(CurrentMemoryContext,"Bound", ALLOCSET_DEFAULT_MAXSIZE, ALLOCSET_DEFAULT_MAXSIZE, ALLOCSET_DEFAULT_MAXSIZE);
+	new = AllocSetContextCreate(CurrentMemoryContext,"Bound", ALLOCSET_DEFAULT_MAXSIZE, ALLOCSET_SMALL_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE);
 	old = MemoryContextSwitchTo(new);
 
 	reader = MakeIndexBoundReader((scan_length +2) * IndexTupleSize(lastTup));
@@ -2833,7 +2833,7 @@ void get_all_keys(IndexScanDesc scan) {
 			BTScanPosItem *currItem;
 			reader->currPos.lastItem--;
 			currItem = &reader->currPos.items[reader->currPos.lastItem];
-			lastRootTup = CopyIndexTuple((IndexTuple) (reader->currTuples + currItem->tupleOffset));
+			lastRootTup = (IndexTuple) (reader->currTuples + currItem->tupleOffset);
 			scan_length--;
 			//print_tuple(tupdesc, lastRootTup);
 		}
