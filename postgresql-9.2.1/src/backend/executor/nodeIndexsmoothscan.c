@@ -2980,13 +2980,13 @@ void get_all_keys(IndexScanDesc scan) {
 		pos++;
 		left--;
 	}
-
+	if (start_off != end_off) {
 	cmp = _comp_tuples(lastTup, resultCache->bounds[pos - 1], scan, sso);
 	if (cmp > 0) {
 		resultCache->bounds[pos] = lastTup;
 	} else
 		pos--;
-
+	}
 	// saving memory
 
 	printf("right bound %d: \n", offnum);
