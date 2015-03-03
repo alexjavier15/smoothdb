@@ -2339,6 +2339,7 @@ void _saveitem(IndexBoundReader readerbuf, int itemIndex, OffsetNumber offnum, I
 		currItem->tupleOffset = readerbuf->currPos.nextTupleOffset;
 		memcpy(readerbuf->currTuples + readerbuf->currPos.nextTupleOffset, itup, MAXALIGN(itupsz));
 		readerbuf->currPos.nextTupleOffset += MAXALIGN(itupsz);
+		readerbuf->avaible_size-=MAXALIGN(itupsz);
 	}
 }
 //void _release_pinned_buffers(IndexBoundReader reader, Relation rel ){
