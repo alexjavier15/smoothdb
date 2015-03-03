@@ -477,6 +477,7 @@ void smooth_resultcache_free(ResultCache *cache) {
 		file = cache->partition_array[j].BatchFile;
 		if (file != NULL)
 			BufFileClose(file);
+		pfree(cache->partition_array[j].upper_bound);
 
 	}
 	fflush(stdout);
@@ -2791,7 +2792,7 @@ void get_all_keys(IndexScanDesc scan) {
 	IndexBound nextItem;
 	IndexTuple curr_tuple;
 	IndexBoundReader reader, readerBuf, curr_buf;
-	int pos, np, next, cmp, lastItem, split_factor, safe_size, itemIndex, left;
+	int pos, np, next, cmp, lastItem, split_factor, safe_size, itemIndex;
 	OffsetNumber offnum = 0;
 	bool result;
 
@@ -3047,14 +3048,14 @@ void get_all_keys(IndexScanDesc scan) {
 //	MemoryContextDelete(new);
 //	new = AllocSetContextCreate(CurrentMemoryContext,"Bound 2", ALLOCSET_DEFAULT_MAXSIZE, ALLOCSET_DEFAULT_MAXSIZE, ALLOCSET_DEFAULT_MAXSIZE);
 //	MemoryContextSwitchTo(new);
-	//	if (readerBuf) {
-//		pfree(readerBuf->currTuples);
-//		pfree(readerBuf);
-//	}
-//	if (reader) {
+	if (readerBuf) {
+
+		pfree(readerBuf);
+	}
+	if (reader) {
 //		pfree(reader->currTuples);
-//		pfree(reader);
-//	}
+		pfree(reader);
+	}
 
 	resultCache->partition_array = palloc0( MAXALIGN(sizeof(HashPartitionData))*pos);
 
