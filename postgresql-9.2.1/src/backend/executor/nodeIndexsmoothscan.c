@@ -2731,7 +2731,7 @@ IndexBoundReader MakeIndexBoundReader( int size){
 		reader->prefetcher.is_prefetching = 0;
 		reader->prefetcher.split_factor = 1;
 		reader->avaible_size = size;
-		reader->currTuples = (char *) palloc0(size);
+		reader->currTuples = (char *) palloc(size);
 		return reader;
 
 
@@ -2780,7 +2780,7 @@ void get_all_keys(IndexScanDesc scan) {
 	split_factor = safe_size = 1;
 	// in any case we need to fetc the root tuples!
 	reader = MakeIndexBoundReader((scan_length +2) * IndexTupleSize(lastTup));
-	readerBuf = MakeIndexBoundReader((scan_length +2) * BLCKSZ);
+	readerBuf = MakeIndexBoundReader((scan_length +2) * 1024);
 
 	buf = _bt_getroot(rel, BT_READ);
 	page = BufferGetPage(buf);
