@@ -2951,7 +2951,7 @@ void get_all_keys(IndexScanDesc scan) {
 	set_bounds:
 
 	safe_size = partitionsz + 1;
-	resultCache->bounds = palloc0(sizeof(IndexTuple)*safe_size);
+	resultCache->bounds = palloc0(sizeof(IndexTuple)*(safe_size+2));
 
 	left = safe_size;
 
@@ -2964,12 +2964,12 @@ void get_all_keys(IndexScanDesc scan) {
 		BTScanPosItem *currItem;
 
 		currItem = &curr_buf->currPos.items[next];
-		if (left == 0) {
-			int nelemLeft = ceil((double) (lastItem - next) / (double) split_factor) + 1;
-			printf("Reallocating  %d size \n", safe_size + nelemLeft);
-			resultCache->bounds = repalloc(resultCache->bounds, sizeof(IndexTuple) * (safe_size + nelemLeft));
-			left = nelemLeft;
-		}
+//		if (left == 0) {
+//			int nelemLeft = ceil((double) (lastItem - next) / (double) split_factor) + 1;
+//			printf("Reallocating  %d size \n", safe_size + nelemLeft);
+//			resultCache->bounds = repalloc(resultCache->bounds, sizeof(IndexTuple) * (safe_size + nelemLeft));
+//			left = nelemLeft;
+//		}
 
 		resultCache->bounds[pos] = CopyIndexTuple((IndexTuple) (curr_buf->currTuples + currItem->tupleOffset));
 		//print_tuple(tupdesc, resultCache->bounds [pos]);
