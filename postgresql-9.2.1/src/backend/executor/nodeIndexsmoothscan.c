@@ -2834,7 +2834,7 @@ void get_all_keys(IndexScanDesc scan) {
 			currItem = &reader->currPos.items[reader->currPos.lastItem];
 			lastRootTup = CopyIndexTuple((IndexTuple) (reader->currTuples + currItem->tupleOffset));
 			scan_length--;
-			printf("Current tuple offset %d  \n", currItem->tupleOffset);
+			print_tuple(tupdesc, lastRootTup);
 		}
 
 	}
