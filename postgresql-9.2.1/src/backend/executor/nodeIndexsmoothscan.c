@@ -2397,7 +2397,7 @@ bool _findIndexBoundsWithPrefetch(IndexBoundReader * readerptr, IndexBoundReader
 	//int next = reader->firstItemIdx;
 	int curr_length = 0;
 	int split_factor = 1;
-	IndexBound  next;
+	IndexBound next;
 	//int target_length;
 
 //  we get a first index tuple list we will iterate all over the list to produce a new list of childs indextuples
@@ -2447,7 +2447,6 @@ for( next = reader->firstItem; next!=NULL; next= next->link){
 
 		}
 
-		next++;
 	}
 
 	// At his point we have curr_length =  number of tuple in the index rooth childs passing
@@ -2508,7 +2507,7 @@ for( next = reader->firstItem; next!=NULL; next= next->link){
 //		}
 		if (_readpage(reader_buffer, buf, scan, ForwardScanDirection ,false) ) {
 			curr_length = reader_buffer->lastItem;
-			next++;
+
 		} else {
 			printf("returning false\n");
 			_bt_relbuf(rel, buf);
