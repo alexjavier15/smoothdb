@@ -2762,7 +2762,7 @@ void get_all_keys(IndexScanDesc scan) {
 	IndexTuple firstTup = sso->itup_bounds[RightBound];
 	IndexTuple lastTup = sso->itup_bounds[LeftBound];
 	IndexTuple  lastRootTup;
-	MemoryContext new , old;
+	MemoryContext new , old, new1;
 	IndexTuple curr_tuple;
 	IndexBoundReader reader, readerBuf, curr_buf;
 	int pos, np, next, cmp, lastItem, split_factor, safe_size, itemIndex, left;
@@ -2967,6 +2967,8 @@ void get_all_keys(IndexScanDesc scan) {
 	left--;
 
 	printf("next : %d, lastitem: %d , split_factor : %d\n", next, lastItem, split_factor);
+	new1 = AllocSetContextCreate(CurrentMemoryContext,"Bound 3", ALLOCSET_SMALL_MINSIZE, ALLOCSET_SMALL_INITSIZE , ALLOCSET_DEFAULT_MAXSIZE);
+	MemoryContextSwitchTo(new1);
 	while (next < lastItem) {
 		BTScanPosItem *currItem;
 
@@ -3004,11 +3006,12 @@ void get_all_keys(IndexScanDesc scan) {
 	print_tuple(tupdesc, resultCache->bounds[pos]);
 	printf("**************************\n");
 	//	_bt_relbuf(rel, buf);
-	MemoryContextStats(CurrentMemoryContext);
+	//MemoryContextStats(CurrentMemoryContext);
 	fflush(stdout);
 	MemoryContextDelete(new);
 	new = AllocSetContextCreate(CurrentMemoryContext,"Bound 2", ALLOCSET_DEFAULT_MAXSIZE, ALLOCSET_DEFAULT_MAXSIZE, ALLOCSET_DEFAULT_MAXSIZE);
-//	if (readerBuf) {
+	MemoryContextSwitchTo(new);
+	//	if (readerBuf) {
 //		pfree(readerBuf->currTuples);
 //		pfree(readerBuf);
 //	}
