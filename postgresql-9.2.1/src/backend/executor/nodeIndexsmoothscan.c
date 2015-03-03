@@ -2783,7 +2783,7 @@ void get_all_keys(IndexScanDesc scan) {
 	new = AllocSetContextCreate(CurrentMemoryContext,"Bound", ALLOCSET_DEFAULT_MAXSIZE, ALLOCSET_SMALL_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE);
 	old = MemoryContextSwitchTo(new);
 
-	reader = MakeIndexBoundReader((scan_length +2) * IndexTupleSize(lastTup));
+	reader = MakeIndexBoundReader((scan_length +2) * BLCKSZ);
 
 	buf = _bt_getroot(rel, BT_READ);
 	page = BufferGetPage(buf);
@@ -2892,7 +2892,7 @@ void get_all_keys(IndexScanDesc scan) {
 	}
 
 
-	readerBuf = MakeIndexBoundReader(8 * BLCKSZ);
+	readerBuf = MakeIndexBoundReader(32 * BLCKSZ);
 
 	if (partitionsz > scan_length) {
 		int target_length = 1;
