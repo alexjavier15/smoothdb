@@ -3006,6 +3006,7 @@ void get_all_keys(IndexScanDesc scan) {
 	//	_bt_relbuf(rel, buf);
 	//	MemoryContextStats(CurrentMemoryContext);
 	MemoryContextDelete(new);
+	new = AllocSetContextCreate(CurrentMemoryContext,"Bound 2", ALLOCSET_DEFAULT_MAXSIZE, ALLOCSET_DEFAULT_MAXSIZE, ALLOCSET_DEFAULT_MAXSIZE);
 //	if (readerBuf) {
 //		pfree(readerBuf->currTuples);
 //		pfree(readerBuf);
