@@ -48,6 +48,7 @@
 	(offsetof(HashPartitionDesc, itupleArray) + (ntuples) * sizeof(IndexTupleData))
 //void _saveitem(IndexTuple *items, int itemIndex,
 //			 OffsetNumber offnum, IndexTuple itup);
+
 typedef struct IndexReaderPrefecther
 {
 	bool	   is_prefetching;		/* tuple storage for currPos */
@@ -56,6 +57,12 @@ typedef struct IndexReaderPrefecther
 
 
 } IndexReaderPrefecther;
+
+typedef struct IndexBoundData
+{
+	struct IndexBoundData  *link;
+	IndexTuple tuple;
+} IndexBoundData;
 typedef struct IndexBoundReaderData
 {
 			/* tuple storage for currPos */
@@ -63,14 +70,20 @@ typedef struct IndexBoundReaderData
 	Size		avaible_size;
 	bool		hasPrefecth;
 	IndexReaderPrefecther prefetcher;
-	char	   *currTuples;
+	int			firstItemIdx;		/* first valid index in items[] */
+	int			lastItem;		/* last valid index in items[] */
+	int			itemIndex;		/* current index in items[] */
+
+	IndexBoundData  *firstItem;
+	IndexBoundData  *nextItem;
 	/* keep these last in struct for efficiency */
-	BTScanPosData currPos;		/* current position data */
 
 } IndexBoundReaderData;
 
 #define INDEXBOUNDREADERSIZE  MAXALIGN(sizeof(IndexBoundReaderData))
+#define INDEXBOUNDSIZE  MAXALIGN(sizeof(IndexBoundData))
 
+typedef IndexBoundData *IndexBound;
 typedef IndexBoundReaderData *IndexBoundReader;
 
 static void _saveitem(IndexBoundReader readerbuf, int itemIndex, OffsetNumber offnum, IndexTuple itup);
@@ -2328,18 +2341,28 @@ _binsrch(Relation rel, IndexScanDesc scan,
 //}
 
 void _saveitem(IndexBoundReader readerbuf, int itemIndex, OffsetNumber offnum, IndexTuple itup) {
-	BTScanPosItem *currItem = &readerbuf->currPos.items[itemIndex];
 	Size itupsz = 0;
-	currItem->heapTid = itup->t_tid;
-	currItem->indexOffset = offnum;
-	itupsz = IndexTupleSize(itup);
-	Assert (readerbuf->currTuples && readerbuf->avaible_size >=  MAXALIGN(itupsz)) ;
+	IndexBound nextItem;
+	IndexBound newItem;
 
-		printf("saving %d tuple  with size :%d\n", itemIndex, MAXALIGN(itupsz));
-		currItem->tupleOffset = readerbuf->currPos.nextTupleOffset;
-		memcpy(readerbuf->currTuples + readerbuf->currPos.nextTupleOffset, itup, MAXALIGN(itupsz));
-		readerbuf->currPos.nextTupleOffset += MAXALIGN(itupsz);
-		readerbuf->avaible_size-=MAXALIGN(itupsz);
+	itupsz = IndexTupleSize(itup);
+	//Assert (readerbuf->firstItem && readerbuf->avaible_size >= MAXALIGN(itupsz));
+
+	printf("saving %d tuple  with size :%ld\n", itemIndex, MAXALIGN(itupsz));
+
+	newItem = (IndexBound) palloc0(INDEXBOUNDSIZE);
+	newItem->tuple = CopyIndexTuple(itup);
+	newItem->link = NULL;
+
+	if (readerbuf->firstItem != NULL) {
+		nextItem = readerbuf->nextItem;
+		nextItem->link = newItem;
+	}else // list is empty
+		readerbuf->firstItem=newItem;
+
+	readerbuf->nextItem = newItem;
+
+	readerbuf->avaible_size -= MAXALIGN(itupsz);
 
 }
 //void _release_pinned_buffers(IndexBoundReader reader, Relation rel ){
@@ -2371,11 +2394,10 @@ bool _findIndexBoundsWithPrefetch(IndexBoundReader * readerptr, IndexBoundReader
 	Relation rel = scan->indexRelation;
 	IndexBoundReader reader = *readerptr;
 	IndexBoundReader reader_buffer = *reader_bufferptr;
-	int next = reader->currPos.firstItem;
+	//int next = reader->firstItemIdx;
 	int curr_length = 0;
 	int split_factor = 1;
-	int firstItem = 0;
-
+	IndexBound  next;
 	//int target_length;
 
 //  we get a first index tuple list we will iterate all over the list to produce a new list of childs indextuples
@@ -2383,10 +2405,10 @@ bool _findIndexBoundsWithPrefetch(IndexBoundReader * readerptr, IndexBoundReader
 	// in order to get the desired bounds.
 
 	// Make a buffer storage for the reading and pray for we have enough space
-
-	while (next <= reader->currPos.lastItem) {
+for( next = reader->firstItem; next!=NULL; next= next->link){
+	//while ((curr_tuple = next )) {
 		IndexTuple curr_tuple;
-		BTScanPosItem *currItem;
+
 		BlockNumber blkno;
 		Page page;
 		BTPageOpaque opaque;
@@ -2395,8 +2417,8 @@ bool _findIndexBoundsWithPrefetch(IndexBoundReader * readerptr, IndexBoundReader
 		OffsetNumber offnum;
 		bool continuescan;
 
-		currItem = &reader->currPos.items[next];
-		curr_tuple = (IndexTuple) (reader->currTuples + currItem->tupleOffset);
+
+		curr_tuple = next->tuple;
 
 		// Now _readpage need the right buffer in order to read the page so fetch the page
 		// associated to this indextuple.
@@ -2453,18 +2475,20 @@ bool _findIndexBoundsWithPrefetch(IndexBoundReader * readerptr, IndexBoundReader
 	printf("Computing split factor  is: %d\n", split_factor);
 	// set loop invariants
 
-	next = reader->currPos.firstItem;
-	firstItem = next;
-	reader_buffer->currPos.nextTupleOffset = 0;
-
-	while (next <= reader->currPos.lastItem) {
+//	next = reader->currPos.firstItem;
+	//firstItem = next;
+	//reader_buffer->currPos.nextTupleOffset = 0;
+	reader_buffer->nextItem= NULL;
+	reader_buffer->firstItem=NULL;
+	reader_buffer->firstItemIdx = 0;
+	reader_buffer->lastItem = 0;
+	reader_buffer->itemIndex= 0;
+for( next = reader->firstItem; next!=NULL; next= next->link){
+//	while (next <= reader->currPos.lastItem) {
 		//bool skip = (next == 0);
 		IndexTuple curr_tuple;
-		BTScanPosItem *currItem;
 		BlockNumber blkno;
-		bool continuescan;
-		currItem = &reader->currPos.items[next];
-		curr_tuple = (IndexTuple) (reader->currTuples + currItem->tupleOffset);
+		curr_tuple = next->tuple;
 
 		//print_tuple(RelationGetDescr(scan->indexRelation), curr_tuple);
 		// Now _readpage need the right buffer in order to read the page so fetch the page
@@ -2482,8 +2506,8 @@ bool _findIndexBoundsWithPrefetch(IndexBoundReader * readerptr, IndexBoundReader
 //
 //			_saveitem(reader_buffer,lastItem, currItem->tupleOffset,curr_tuple);
 //		}
-		if (_readpage(reader_buffer, buf, scan, ForwardScanDirection ,(firstItem == next)) ) {
-			curr_length = reader_buffer->currPos.lastItem;
+		if (_readpage(reader_buffer, buf, scan, ForwardScanDirection ,false) ) {
+			curr_length = reader_buffer->lastItem;
 			next++;
 		} else {
 			printf("returning false\n");
@@ -2499,70 +2523,70 @@ bool _findIndexBoundsWithPrefetch(IndexBoundReader * readerptr, IndexBoundReader
 
 bool _findIndexBounds(IndexBoundReader * readerptr, IndexBoundReader * reader_bufferptr, Buffer buf,
 			IndexScanDesc scan, int target_length) {
-		Relation rel = scan->indexRelation;
-		IndexBoundReader reader = *readerptr;
-		IndexBoundReader reader_buffer = *reader_bufferptr;
-		IndexBoundReader tmp_reader;
-		int next = reader->currPos.firstItem;
-		int curr_length = 0;
-		//int target_length;
-
-//  we get a first index tuple list we will iterate all over the list to produce a new list of childs indextuples
-// if the length of the produced list satisfy the required to form n partions we stop (n - 2 indextuples). we use a BSF
-		// in order to get the desired bounds.
-
-		// Make a buffer storage for the reading and pray for we have enough space
-		while (next <= reader->currPos.lastItem) {
-			IndexTuple curr_tuple;
-			BTScanPosItem *currItem;
-			BlockNumber blkno;
-			currItem = &reader->currPos.items[next];
-			curr_tuple = (IndexTuple) (reader->currTuples + currItem->tupleOffset);
-
-			// Now _readpage need the right buffer in order to read the page so fetch the page
-			// associated to this indextuple.
-
-
-
-			blkno = ItemPointerGetBlockNumber(&(curr_tuple->t_tid));
-			buf = _bt_relandgetbuf(rel, buf, blkno, BT_READ);
-			// we are rady to read the page so go ahead
-
-		if (_readpage(reader_buffer, buf, scan, ForwardScanDirection, false)) {
-			curr_length = reader_buffer->currPos.lastItem;
-			next++;
-		} else{
-			printf("returning false\n");
-
-			return false;
-		}
-		}
-
-		// Now check how many tuples we got
-		if (curr_length < target_length) {
-			// we need to reset  the initial BTScanOpaque buffer to reuse;
-			memset(reader->currTuples, 0, reader->alloc_size);
-			memset(&reader->currPos, 0,sizeof(BTScanPosData));
-			reader->avaible_size = reader->alloc_size;
-			//keep the pointer of the bound storage. At this point the reader is buffer and the buffer is the new reader
-			tmp_reader = *reader_bufferptr;
-			*reader_bufferptr = reader;
-			*readerptr = tmp_reader;
-			if(target_length > MAX_NUM_PARTITION){
-				IndexReaderPrefecther *prefetcher = &(*reader_bufferptr)->prefetcher;
-				double 	split_factor = reader_buffer->currPos.lastItem;
-				split_factor = split_factor /(double)target_length;
-				prefetcher->split_factor = split_factor;
-				prefetcher->is_prefetching = true;
-
-			}
-			// And pass recursively the new indextuple list;
-			return _findIndexBounds(readerptr, reader_bufferptr, buf, scan, target_length);
-
-		}
-
-		_bt_relbuf(rel,buf);
-		return true;
+//		Relation rel = scan->indexRelation;
+//		IndexBoundReader reader = *readerptr;
+//		IndexBoundReader reader_buffer = *reader_bufferptr;
+//		IndexBoundReader tmp_reader;
+//		int next = reader->currPos.firstItem;
+//		int curr_length = 0;
+//		//int target_length;
+//
+////  we get a first index tuple list we will iterate all over the list to produce a new list of childs indextuples
+//// if the length of the produced list satisfy the required to form n partions we stop (n - 2 indextuples). we use a BSF
+//		// in order to get the desired bounds.
+//
+//		// Make a buffer storage for the reading and pray for we have enough space
+//		while (next <= reader->currPos.lastItem) {
+//			IndexTuple curr_tuple;
+//			BTScanPosItem *currItem;
+//			BlockNumber blkno;
+//			currItem = &reader->currPos.items[next];
+//			curr_tuple = (IndexTuple) (reader->currTuples + currItem->tupleOffset);
+//
+//			// Now _readpage need the right buffer in order to read the page so fetch the page
+//			// associated to this indextuple.
+//
+//
+//
+//			blkno = ItemPointerGetBlockNumber(&(curr_tuple->t_tid));
+//			buf = _bt_relandgetbuf(rel, buf, blkno, BT_READ);
+//			// we are rady to read the page so go ahead
+//
+//		if (_readpage(reader_buffer, buf, scan, ForwardScanDirection, false)) {
+//			curr_length = reader_buffer->currPos.lastItem;
+//			next++;
+//		} else{
+//			printf("returning false\n");
+//
+//			return false;
+//		}
+//		}
+//
+//		// Now check how many tuples we got
+//		if (curr_length < target_length) {
+//			// we need to reset  the initial BTScanOpaque buffer to reuse;
+//			memset(reader->currTuples, 0, reader->alloc_size);
+//			memset(&reader->currPos, 0,sizeof(BTScanPosData));
+//			reader->avaible_size = reader->alloc_size;
+//			//keep the pointer of the bound storage. At this point the reader is buffer and the buffer is the new reader
+//			tmp_reader = *reader_bufferptr;
+//			*reader_bufferptr = reader;
+//			*readerptr = tmp_reader;
+//			if(target_length > MAX_NUM_PARTITION){
+//				IndexReaderPrefecther *prefetcher = &(*reader_bufferptr)->prefetcher;
+//				double 	split_factor = reader_buffer->currPos.lastItem;
+//				split_factor = split_factor /(double)target_length;
+//				prefetcher->split_factor = split_factor;
+//				prefetcher->is_prefetching = true;
+//
+//			}
+//			// And pass recursively the new indextuple list;
+//			return _findIndexBounds(readerptr, reader_bufferptr, buf, scan, target_length);
+//
+//		}
+//
+//		_bt_relbuf(rel,buf);
+	return true;
 
 
 
@@ -2592,12 +2616,13 @@ bool _readpage(IndexBoundReader readerbuf, Buffer buf, IndexScanDesc scan, ScanD
 	int itemIndex;
 	int itemIndexdiv;
 	int firstIndex;
+	bool pr= true;
 	//TupleDesc tupdes = RelationGetDescr(scan->indexRelation);
 	IndexTuple itup;
 	bool continuescan;
 	OffsetNumber offnum;
 	int modOffset = 0;
-	int lastitem = readerbuf->currPos.lastItem + 1;
+	int lastitem = readerbuf->lastItem + 1;
 
 	/* we must have the buffer pinned and locked */
 	Assert(BufferIsValid(buf));
@@ -2633,13 +2658,13 @@ bool _readpage(IndexBoundReader readerbuf, Buffer buf, IndexScanDesc scan, ScanD
 	Assert(ScanDirectionIsForward(dir));
 	/* load items[] in ascending order */
 
-	itemIndex = readerbuf->currPos.lastItem == 0 ? 0 : readerbuf->currPos.lastItem + 1;
+	itemIndex = readerbuf->lastItem == 0 ? 0 : readerbuf->lastItem + 1;
 	firstIndex = itemIndex;
 	offnum = minoff;
 
 	itemIndexdiv = readerbuf->prefetcher.last_item;
 	printf("min offset : %d, max offset = %d \n", offnum,maxoff);
-	bool pr= true;
+
 	Assert(BufferIsValid(buf));
 	while (offnum <= maxoff) {
 
@@ -2656,7 +2681,7 @@ bool _readpage(IndexBoundReader readerbuf, Buffer buf, IndexScanDesc scan, ScanD
 
 			//_check_tuple(RelationGetDescr(scan->indexRelation),itup);
 			/* tuple passes all scan key conditions, so remember it */
-			Assert(readerbuf->avaible_size > MAXALIGN(IndexTupleSize(itup)));
+		//	Assert(readerbuf->avaible_size > MAXALIGN(IndexTupleSize(itup)));
 			if (readerbuf->prefetcher.is_prefetching) {
 
 				modOffset = itemIndex % readerbuf->prefetcher.split_factor;
@@ -2682,8 +2707,8 @@ bool _readpage(IndexBoundReader readerbuf, Buffer buf, IndexScanDesc scan, ScanD
 	}
 
 	Assert(itemIndex <= MaxIndexTuplesPerPage + lastitem);
-	readerbuf->currPos.firstItem = 0;
-	readerbuf->currPos.lastItem = itemIndex - 1;
+	readerbuf->firstItemIdx = 0;
+	readerbuf->lastItem = itemIndex - 1;
 	if (readerbuf->prefetcher.is_prefetching) {
 
 			readerbuf->prefetcher.last_item = itemIndexdiv;
@@ -2692,9 +2717,9 @@ bool _readpage(IndexBoundReader readerbuf, Buffer buf, IndexScanDesc scan, ScanD
 //		printf("readr buffer lastItemDev : %d, itemIndex :%d, lastItem: %d  \n"
 //				,readerbuf->prefetcher.last_item , itemIndex,readerbuf->currPos.lastItem );
 	}
-	readerbuf->currPos.itemIndex = firstIndex;
+	readerbuf->itemIndex = firstIndex;
 
-	return (readerbuf->currPos.firstItem <= readerbuf->currPos.lastItem);
+	return (readerbuf->firstItemIdx <= readerbuf->lastItem);
 }
 /*Return true if itup1 > itup2.
  *
@@ -2721,18 +2746,19 @@ int  _comp_tuples(IndexTuple itup1, IndexTuple itup2,IndexScanDesc scan, SmoothS
 IndexBoundReader MakeIndexBoundReader( int size){
 		IndexBoundReader reader;
 		reader = (IndexBoundReader) palloc0(INDEXBOUNDREADERSIZE);
-		reader->currPos.buf = InvalidBuffer;
 
-		reader->currPos.firstItem = 0;
 
-		reader->currPos.lastItem = 0;
-		reader->currPos.nextTupleOffset = 0;
+		reader->firstItemIdx = 0;
+
+		reader->lastItem = 0;
+		reader->nextItem = NULL;
+		reader->firstItem = NULL;
 
 		reader->alloc_size = size;
 		reader->prefetcher.is_prefetching = 0;
 		reader->prefetcher.split_factor = 1;
 		reader->avaible_size = size;
-		reader->currTuples = (char *) palloc(size);
+
 		return reader;
 
 
@@ -2761,15 +2787,16 @@ void get_all_keys(IndexScanDesc scan) {
 	int end_off = sso->root_offbounds[LeftBound];
 	IndexTuple firstTup = sso->itup_bounds[RightBound];
 	IndexTuple lastTup = sso->itup_bounds[LeftBound];
-	IndexTuple  lastRootTup;
-	MemoryContext new , old, new1;
+	//IndexTuple  lastRootTup;
+	//MemoryContext new , old, new1;
+	IndexBound nextItem;
 	IndexTuple curr_tuple;
 	IndexBoundReader reader, readerBuf, curr_buf;
 	int pos, np, next, cmp, lastItem, split_factor, safe_size, itemIndex, left;
 	OffsetNumber offnum = 0;
 	bool result;
 
-	lastRootTup = NULL;
+//	lastRootTup = NULL;
 	reader = readerBuf = curr_buf = NULL;
 	scan_length = 0;
 
@@ -2780,8 +2807,8 @@ void get_all_keys(IndexScanDesc scan) {
 	pos = np = next = cmp = lastItem = itemIndex = 0;
 	split_factor = safe_size = 1;
 	// in any case we need to fetc the root tuples!
-	new = AllocSetContextCreate(CurrentMemoryContext,"Bound", ALLOCSET_DEFAULT_MAXSIZE, ALLOCSET_SMALL_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE);
-	old = MemoryContextSwitchTo(new);
+//	new = AllocSetContextCreate(CurrentMemoryContext,"Bound", ALLOCSET_DEFAULT_MAXSIZE, ALLOCSET_SMALL_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE);
+//	old = MemoryContextSwitchTo(new);
 
 	reader = MakeIndexBoundReader((scan_length +2) * BLCKSZ);
 
@@ -2793,16 +2820,25 @@ void get_all_keys(IndexScanDesc scan) {
 //
 //	}
 	printf("Printing root... start : %d, end: %d\n", start_off, end_off);
-	reader->currPos.nextTupleOffset = 0;
+
 	while (offnum <= end_off) {
 
 		ItemId iid = PageGetItemId(page, offnum);
 
 		curr_tuple = (IndexTuple) PageGetItem(page, iid);
 
-		if (offnum == end_off)
-			lastRootTup = curr_tuple;
+		if (offnum == end_off && start_off != end_off) {
 
+			cmp = _comp_tuples(lastTup, curr_tuple, scan, sso);
+			if (cmp > 0) {
+				sso->moreRight = true;
+
+			} else
+
+				break;
+			//print_tuple(tupdesc, lastRootTup);
+
+		}
 		_saveitem(reader, itemIndex, offnum, curr_tuple);
 		itemIndex++;
 		print_tuple(tupdesc, curr_tuple);
@@ -2815,30 +2851,15 @@ void get_all_keys(IndexScanDesc scan) {
 
 	printf("End Printing root... \n");
 
-	reader->currPos.firstItem = 0;
-	reader->currPos.lastItem = itemIndex - 1;
-	reader->currPos.itemIndex = 0;
+	reader->firstItemIdx = 0;
+	reader->lastItem = itemIndex - 1;
+	reader->itemIndex = 0;
 	/*Check the last  and first item*/
 
 	/*Check the initial number of keys into the scan range*/
 //	cmp =  _comp_tuples(firstRootTup, firstTup,scan, sso);
 //	sso->moreLeft = (cmp > 0);
-	if (start_off != end_off) {
-		cmp = _comp_tuples(lastTup, lastRootTup, scan, sso);
-		if (cmp > 0) {
-			sso->moreRight = true;
 
-		} else {
-
-			BTScanPosItem *currItem;
-			reader->currPos.lastItem--;
-			currItem = &reader->currPos.items[reader->currPos.lastItem];
-			lastRootTup = (IndexTuple) (reader->currTuples + currItem->tupleOffset);
-			scan_length--;
-			//print_tuple(tupdesc, lastRootTup);
-		}
-
-	}
 	//print_tuple(tupdesc, curr_tuple);
 	/*TO-DO: Check for backwarddirection
 	 *
@@ -2887,12 +2908,13 @@ void get_all_keys(IndexScanDesc scan) {
 	if (partitionsz == 1) {
 		//	sso->moreLeft  = true;
 		next = 1;
+		lastItem = partitionsz;
 		_bt_relbuf(rel, buf);
 		goto set_bounds;
 	}
 
 
-	readerBuf = MakeIndexBoundReader(32 * BLCKSZ);
+    readerBuf = MakeIndexBoundReader(32 * BLCKSZ);
 
 	if (partitionsz > scan_length) {
 		int target_length = 1;
@@ -2911,7 +2933,7 @@ void get_all_keys(IndexScanDesc scan) {
 			printf("Suitable partitioning foudn\n");
 			if (!readerBuf->prefetcher.is_prefetching)
 
-				scan_length = readerBuf->currPos.lastItem;
+				scan_length = readerBuf->lastItem;
 			else
 				scan_length = readerBuf->prefetcher.last_item;
 
@@ -2922,7 +2944,8 @@ void get_all_keys(IndexScanDesc scan) {
 			sso->moreLeft = true;
 			curr_buf = reader;
 			partitionsz = 1;
-			next = readerBuf->currPos.lastItem + 1;
+			lastItem = partitionsz;
+			next = readerBuf->lastItem + 1;
 			//readerBuf->currPos.lastItem  0;
 			goto set_bounds;
 		}
@@ -2947,7 +2970,7 @@ void get_all_keys(IndexScanDesc scan) {
 		_bt_relbuf(rel, buf);
 	}
 	if (!readerBuf->prefetcher.is_prefetching)
-		lastItem += curr_buf->currPos.lastItem;
+		lastItem += curr_buf->lastItem;
 	else
 		lastItem += curr_buf->prefetcher.last_item;
 
@@ -2956,23 +2979,36 @@ void get_all_keys(IndexScanDesc scan) {
 
 	set_bounds:
 
-	safe_size = partitionsz + 1;
-	MemoryContextSwitchTo(old);
-	resultCache->bounds = palloc0(sizeof(IndexTuple)*(safe_size+2));
+	safe_size = ceil((double) lastItem / (double) split_factor) + 3;
+	//MemoryContextSwitchTo(old);
+	resultCache->bounds = palloc0(sizeof(IndexTuple)*(safe_size));
 
-	left = safe_size;
+
 
 	resultCache->bounds[pos] = firstTup;
 	pos++;
-	left--;
+
 
 	printf("next : %d, lastitem: %d , split_factor : %d\n", next, lastItem, split_factor);
-	new1 = AllocSetContextCreate(CurrentMemoryContext,"Bound 3", ALLOCSET_SMALL_MINSIZE, ALLOCSET_SMALL_INITSIZE , ALLOCSET_DEFAULT_MAXSIZE);
-	MemoryContextSwitchTo(new1);
-	while (next < lastItem) {
-		BTScanPosItem *currItem;
+//	new1 = AllocSetContextCreate(CurrentMemoryContext,"Bound 3", ALLOCSET_SMALL_MINSIZE, ALLOCSET_SMALL_INITSIZE , ALLOCSET_DEFAULT_MAXSIZE);
+//	MemoryContextSwitchTo(new1);
 
-		currItem = &curr_buf->currPos.items[next];
+
+
+	nextItem =curr_buf->firstItem;
+	while (next < lastItem) {
+
+		int iter = 0;
+		while(nextItem != NULL && iter < split_factor){
+			nextItem = nextItem->link;
+
+			iter++;
+		}
+		//we are at the last position
+		if(iter !=split_factor )
+			break;
+
+
 //		if (left == 0) {
 //			int nelemLeft = ceil((double) (lastItem - next) / (double) split_factor) + 1;
 //			printf("Reallocating  %d size \n", safe_size + nelemLeft);
@@ -2980,12 +3016,13 @@ void get_all_keys(IndexScanDesc scan) {
 //			left = nelemLeft;
 //		}
 
-		resultCache->bounds[pos] =CopyIndexTuple((IndexTuple) (curr_buf->currTuples + currItem->tupleOffset));
+		resultCache->bounds[pos] = nextItem->tuple;
 		//print_tuple(tupdesc, resultCache->bounds [pos]);
 		//print_tuple(tupdesc, bounds[pos]);
+
 		next += split_factor;
 		pos++;
-		left--;
+
 	}
 
 	if (start_off != end_off) {
@@ -3008,9 +3045,9 @@ void get_all_keys(IndexScanDesc scan) {
 	//	_bt_relbuf(rel, buf);
 	//MemoryContextStats(CurrentMemoryContext);
 	fflush(stdout);
-	MemoryContextDelete(new);
-	new = AllocSetContextCreate(CurrentMemoryContext,"Bound 2", ALLOCSET_DEFAULT_MAXSIZE, ALLOCSET_DEFAULT_MAXSIZE, ALLOCSET_DEFAULT_MAXSIZE);
-	MemoryContextSwitchTo(new);
+//	MemoryContextDelete(new);
+//	new = AllocSetContextCreate(CurrentMemoryContext,"Bound 2", ALLOCSET_DEFAULT_MAXSIZE, ALLOCSET_DEFAULT_MAXSIZE, ALLOCSET_DEFAULT_MAXSIZE);
+//	MemoryContextSwitchTo(new);
 	//	if (readerBuf) {
 //		pfree(readerBuf->currTuples);
 //		pfree(readerBuf);
