@@ -954,7 +954,7 @@ HeapTuple SmoothProcessOnePageOrder(IndexScanDesc scan, BlockNumber page, ScanDi
 		}
 
 		/* we have processed all tuples from this page */
-		if (!linesleft && !bms_is_member(page,smoothDesc->bs_vispages)) {
+		if (!linesleft) {
 			smoothDesc->bs_vispages = bms_add_member(smoothDesc->bs_vispages, page);
 			smoothDesc->num_vispages++;
 			/* set next page to process in a sequential manner */
