@@ -1256,8 +1256,8 @@ void ExecEndIndexSmoothScan(IndexSmoothScanState *node) {
 	if (indexScanDesc != NULL) {
 		ss = (SmoothScanOpaque) node->iss_ScanDesc->smoothInfo;
 
-		printf("\nOverall table size in blocks %ld, prefetcher accumulated %ld, page cache size %ld \n",
-				ss->rel_nblocks, ss->prefetch_cumul, bms_num_members(ss->bs_vispages));
+		printf("\nOverall table size in blocks %ld, prefetcher accumulated %ld, , page cache size %ld, page cache size 2 %ld \n",
+				ss->rel_nblocks, ss->prefetch_cumul, bms_num_members(ss->bs_vispages) , ss->num_vispages);
 		if (ss->bs_vispages != NULL)
 			printf("\n Page ID cache size %ld in words", ss->bs_vispages->nwords);
 

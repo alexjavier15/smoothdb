@@ -840,6 +840,7 @@ typedef struct SmoothScanOpaqueData
 	int 		num_result_tuples;
 
 	Bitmapset     *bs_vispages;		/* keep track of all visited pages  */
+	int				num_vispages;	/* keep track of number of visited pages  */
 	TupleIDCache  *tupleID_cache;		/* keep track of all visited tuples in a hash table (blok id = key, offset = value) */
 	//Bitmapset  *bs_tovispages;		/* keep track of all pages to visit */
 	/* keep these last in struct for efficiency */

@@ -956,6 +956,7 @@ HeapTuple SmoothProcessOnePageOrder(IndexScanDesc scan, BlockNumber page, ScanDi
 		/* we have processed all tuples from this page */
 		if (!linesleft) {
 			smoothDesc->bs_vispages = bms_add_member(smoothDesc->bs_vispages, page);
+			smoothDesc->num_vispages++;
 			/* set next page to process in a sequential manner */
 			if (smoothDesc->prefetch_pages)
 				smoothDesc->nextPageId = page + 1;
@@ -1330,6 +1331,7 @@ HeapTuple SmoothProcessOnePage(IndexScanDesc scan, BlockNumber page, ScanDirecti
 			//smoothDesc->vispages[page] = (PageBitmap)1;
 			/* bitmap set option */
 			smoothDesc->bs_vispages = bms_add_member(smoothDesc->bs_vispages, page);
+			smoothDesc->num_vispages++;
 			/* set next page to process in a sequential manner */
 			if (smoothDesc->prefetch_pages)
 				smoothDesc->nextPageId = page + 1;
@@ -1353,6 +1355,7 @@ HeapTuple SmoothProcessOnePage(IndexScanDesc scan, BlockNumber page, ScanDirecti
 		//smoothDesc->vispages[page] = (PageBitmap)1;
 		/* bitmap set option */
 		smoothDesc->bs_vispages = bms_add_member(smoothDesc->bs_vispages, page);
+		smoothDesc->num_vispages++;
 		if (smoothDesc->prefetch_pages)
 			smoothDesc->nextPageId = page + 1;
 		return NULL;
@@ -1563,7 +1566,11 @@ HeapTuple index_smoothfetch_heap(IndexScanDesc scan, ScanDirection direction, do
 						}
 						if (enable_benchmarking)
 							printf("\n Normal Smooth Scan. Number of pages checked %ld. Prefetch target %ld  ",
-									bms_num_members(smoothDesc->bs_vispages), smoothDesc->prefetch_target);
+									smoothDesc->num_vispages, smoothDesc->prefetch_target);
+
+
+//							printf("\n Normal Smooth Scan. Number of pages checked %ld. Prefetch target %ld  ",
+//									bms_num_members(smoothDesc->bs_vispages), smoothDesc->prefetch_target);
 
 						//17.02.2014 - starting a new cycle
 						//printf("\nLocal number of tuples for prefetcher size %ld, is %ld, ", smoothDesc->local_num_pages, smoothDesc->local_qualifying_tuples);
@@ -1803,6 +1810,7 @@ HeapTuple index_smoothfetch_heap(IndexScanDesc scan, ScanDirection direction, do
 						//smoothDesc->vispages[page] = (PageBitmap)1;
 						/* bitmap set option */
 						smoothDesc->bs_vispages = bms_add_member(smoothDesc->bs_vispages, page);
+						smoothDesc->num_vispages++;
 
 						/* this page is done */
 						smoothDesc->more_data_for_smooth = false;
