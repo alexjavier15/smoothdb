@@ -1256,8 +1256,8 @@ void ExecEndIndexSmoothScan(IndexSmoothScanState *node) {
 	if (indexScanDesc != NULL) {
 		ss = (SmoothScanOpaque) node->iss_ScanDesc->smoothInfo;
 
-		printf("\nOverall table size in blocks %ld, prefetcher accumulated %ld, , page cache size %ld, page cache size 2 %ld \n",
-				ss->rel_nblocks, ss->prefetch_cumul, bms_num_members(ss->bs_vispages) , ss->num_vispages);
+		printf("\nOverall table size in blocks %ld, prefetcher accumulated %ld, , page cache size %ld \n",
+				ss->rel_nblocks, ss->prefetch_cumul, ss->num_vispages);
 		if (ss->bs_vispages != NULL)
 			printf("\n Page ID cache size %ld in words", ss->bs_vispages->nwords);
 
@@ -1688,27 +1688,27 @@ ExecInitIndexSmoothScan(IndexSmoothScan *node, EState *estate, int eflags) {
 		// we need  to check if there's exist one in shared memory otherwise we start by building
 		// a bitmap in local memory
 		if (enable_smoothshare) {
-//			bool found;
-//
-//			Size bs_size = BITMAPSET_SIZE(ss->rel_nblocks  + 1);
-//
-//			char * name1 = RelationGetRelationName(indexstate->iss_ScanDesc->indexRelation);
-//			char * name2 = "Bitmap vispages ";
-//			char * name3 = (char *)palloc0((strlen(name1) + strlen(name2) + 1) * sizeof(char));
-//			memcpy(name3, name1, strlen(name1));
-//			memcpy(name3 + strlen(name1), name2, strlen(name2)+1);
-//			ss->bs_vispages = (Bitmapset*) ShmemInitStruct(name3, bs_size, &found);
-//
-//			if(!found){
-//				memset(ss->bs_vispages->words,0, bs_size);
-//				ss->bs_vispages->nwords =ss->rel_nblocks  + 1;
-//				smooth_work_mem = smooth_work_mem -  (Size)bs_size;
-//			}else{
-//
-//				printf("Found bitmap with : %d words\n", bms_num_members(ss->bs_vispages));
-//
-//			}
-//			pfree(name3);
+			bool found;
+
+			Size bs_size = BITMAPSET_SIZE(ss->rel_nblocks  + 1);
+
+			char * name1 = RelationGetRelationName(indexstate->iss_ScanDesc->indexRelation);
+			char * name2 = "Bitmap vispages ";
+			char * name3 = (char *)palloc0((strlen(name1) + strlen(name2) + 1) * sizeof(char));
+			memcpy(name3, name1, strlen(name1));
+			memcpy(name3 + strlen(name1), name2, strlen(name2)+1);
+			ss->bs_vispages = (Bitmapset*) ShmemInitStruct(name3, bs_size, &found);
+
+			if(!found){
+				memset(ss->bs_vispages->words,0, bs_size);
+				ss->bs_vispages->nwords =ss->rel_nblocks  + 1;
+				smooth_work_mem = smooth_work_mem -  (Size)bs_size;
+			}else{
+
+				printf("Found bitmap with : %d words\n", bms_num_members(ss->bs_vispages));
+
+			}
+			pfree(name3);
 
 			/*printf("Size of words shared : %d.\n", sizeof(bitmapword) * ss->bs_vispages->nwords);
 			 printf("number of members in shared memory :  %d.\n", bms_num_members(ss->bs_vispages));*/

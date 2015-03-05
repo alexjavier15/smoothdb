@@ -1581,16 +1581,16 @@ HeapTuple index_smoothfetch_heap(IndexScanDesc scan, ScanDirection direction, do
 						//enable_skewcheck
 						double localSelectivity;
 						double globalSelectivity;
-
+						double numPages = smoothDesc->num_vispages;
 						if (smoothDesc->local_num_pages)
 							localSelectivity = (double) smoothDesc->local_qualifying_pages
 									/ (double) smoothDesc->local_num_pages;
 						else
 							localSelectivity = 0;
 
-						if (bms_num_members(smoothDesc->bs_vispages))
+						if (numPages)
 							globalSelectivity = (double) smoothDesc->global_qualifying_pages
-									/ (double) bms_num_members(smoothDesc->bs_vispages);
+									/ (double) numPages;
 						else
 							globalSelectivity = 0;
 
@@ -1651,7 +1651,7 @@ HeapTuple index_smoothfetch_heap(IndexScanDesc scan, ScanDirection direction, do
 
 						if (enable_benchmarking)
 							printf("\n Normal Smooth Scan. Number of pages checked %ld. Prefetch target %ld  ",
-									bms_num_members(smoothDesc->bs_vispages), smoothDesc->prefetch_target);
+									smoothDesc->num_vispages, smoothDesc->prefetch_target);
 
 						//17.02.2014 - starting a new cycle
 						//printf("\nLocal number of tuples for prefetcher size %ld, is %ld, ", smoothDesc->local_num_pages, smoothDesc->local_qualifying_tuples);
@@ -1670,9 +1670,9 @@ HeapTuple index_smoothfetch_heap(IndexScanDesc scan, ScanDirection direction, do
 						else
 							localSelectivity = 0;
 
-						if (bms_num_members(smoothDesc->bs_vispages))
+						if (smoothDesc->num_vispages)
 							globalSelectivity = (double) smoothDesc->global_qualifying_pages
-									/ (double) bms_num_members(smoothDesc->bs_vispages);
+									/ (double)smoothDesc->num_vispages;
 						else
 							globalSelectivity = 0;
 
@@ -1901,7 +1901,7 @@ HeapTuple index_smoothfetch_heap(IndexScanDesc scan, ScanDirection direction, do
 								}
 								if (enable_benchmarking)
 									printf("\n Normal Smooth Scan. Number of pages checked %ld. Prefetch target %ld  ",
-											bms_num_members(smoothDesc->bs_vispages), smoothDesc->prefetch_target);
+											smoothDesc->num_vispages, smoothDesc->prefetch_target);
 
 								//17.02.2014 - starting a new cycle
 								//printf("\nLocal number of tuples for prefetcher size %ld, is %ld, ", smoothDesc->local_num_pages, smoothDesc->local_qualifying_tuples);
@@ -1919,9 +1919,9 @@ HeapTuple index_smoothfetch_heap(IndexScanDesc scan, ScanDirection direction, do
 								else
 									localSelectivity = 0;
 
-								if (bms_num_members(smoothDesc->bs_vispages))
+								if (smoothDesc->num_vispages)
 									globalSelectivity = (double) smoothDesc->global_qualifying_pages
-											/ (double) bms_num_members(smoothDesc->bs_vispages);
+											/ (double) smoothDesc->num_vispages;
 								else
 									globalSelectivity = 0;
 
@@ -1981,7 +1981,7 @@ HeapTuple index_smoothfetch_heap(IndexScanDesc scan, ScanDirection direction, do
 
 								if (enable_benchmarking)
 									printf("\n Normal Smooth Scan. Number of pages checked %ld. Prefetch target %ld  ",
-											bms_num_members(smoothDesc->bs_vispages), smoothDesc->prefetch_target);
+											smoothDesc->num_vispages, smoothDesc->prefetch_target);
 
 								//17.02.2014 - starting a new cycle
 								//printf("\nLocal number of tuples for prefetcher size %ld, is %ld, ", smoothDesc->local_num_pages, smoothDesc->local_qualifying_tuples);
@@ -2000,9 +2000,9 @@ HeapTuple index_smoothfetch_heap(IndexScanDesc scan, ScanDirection direction, do
 								else
 									localSelectivity = 0;
 
-								if (bms_num_members(smoothDesc->bs_vispages))
+								if (smoothDesc->num_vispages)
 									globalSelectivity = (double) smoothDesc->global_qualifying_pages
-											/ (double) bms_num_members(smoothDesc->bs_vispages);
+											/ (double) smoothDesc->num_vispages;
 								else
 									globalSelectivity = 0;
 
