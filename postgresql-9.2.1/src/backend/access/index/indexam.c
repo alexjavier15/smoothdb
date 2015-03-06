@@ -2343,17 +2343,6 @@ HeapTuple indexsmooth_getnext(IndexScanDesc scan, ScanDirection direction, doubl
 			if (tid == NULL)
 					break;
 
-			if (!visibilitymap_test(scan->heapRelation,
-											ItemPointerGetBlockNumber(tid),
-											&buf)) {
-				/*
-				 * Rats, we have to visit the heap to check visibility.
-				 */
-
-				tuple = index_fetch_heap(scan);
-				/* no visible tuple, try next index entry */
-
-			}
 
 
 
@@ -2371,7 +2360,7 @@ HeapTuple indexsmooth_getnext(IndexScanDesc scan, ScanDirection direction, doubl
 		 *
 		 * */
 		//	print_tuple(RelationGetDescr(scan->indexRelation), scan->xs_itup);
-				ExecResultCacheSwitchPartition(scan,sso,scan->xs_itup);
+
 		heapTuple = index_smoothfetch_heap(scan, direction, plan_rows, no_orig_keys, orig_keys, target_list, qual_list,
 				index, no_orig_smooth_keys, orig_smooth_keys, allqual, econtext, slot);
 		if (heapTuple != NULL) {

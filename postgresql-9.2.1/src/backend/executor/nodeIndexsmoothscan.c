@@ -888,7 +888,7 @@ bool smooth_resultcache_find_tuple(IndexScanDesc scan, HeapTuple tpl, BlockNumbe
 	TID tid;
 	//calling macro
 	form_tuple_id(tpl, blkn, &tid);
-
+	ExecResultCacheSwitchPartition(scan,sso,tpl);
 	resultCache = smooth_resultcache_find_resultentry(scan, tid, tpl);
 
 	/* if we have a bucket for this block */
@@ -3266,13 +3266,13 @@ void print_tuple(TupleDesc tupdesc, IndexTuple itup) {
 
 
  }*/
-void ExecResultCacheSwitchPartition(IndexScanDesc scan, SmoothScanOpaque sso, IndexTuple ituple) {
-	if (ituple != NULL && sso != NULL && sso->orderby && sso->result_cache->status == SS_HASH) {
+void ExecResultCacheSwitchPartition(IndexScanDesc scan, SmoothScanOpaque sso, HeapTuple tuple) {
+	if (tuple != NULL && sso != NULL && sso->orderby && sso->result_cache->status == SS_HASH) {
 		int batchno = -1;
 
-		ExecResultCacheGetBatchFromIndex(scan, ituple, &batchno);
+		ExecResultCacheGetBatch(scan, tuple, &batchno);
 		if (sso->result_cache->curbatch != batchno) {
-			print_tuple(RelationGetDescr(scan->indexRelation), ituple);
+		//	print_tuple(RelationGetDescr(scan->he), tuple);
 
 			ExecHashJoinNewBatch(scan, batchno);
 		}
