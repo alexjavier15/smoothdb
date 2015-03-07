@@ -1410,6 +1410,7 @@ HeapTuple index_smoothfetch_heap(IndexScanDesc scan, ScanDirection direction, do
 	bool got_heap_tuple = false;
 	bool used_prefetcher = false;
 	BlockNumber page;
+	Page pageorig;
 	HeapTuple tuple = &(scan->xs_ctup);
 
 	int max_number_of_pages = 0; /*maximal number of pages for prefetcher */
@@ -1441,18 +1442,44 @@ HeapTuple index_smoothfetch_heap(IndexScanDesc scan, ScanDirection direction, do
 				used_prefetcher = true;
 
 			} else {
+				ItemPointerData pointer = tuple->t_self;
+				ItemId lpp;
+				OffsetNumber lineoff = pointer.ip_posid;
+				HeapTuple projectedTuple =NULL;
+				if (smoothDesc->result_cache->status != SS_EMPTY) {
+					LockBuffer(scan->xs_cbuf, BUFFER_LOCK_SHARE);
 				/* not in the prefetching mode */
 				/* when order by logic is similar but we are using result cache instead of bitmap*/
 				/* if the page is in the cache - fill tuple with it*/
 				/* NO ORDER BY - return all tuples from a page */
-				page = ItemPointerGetBlockNumber(tid);
+
+				pageorig = (Page) BufferGetPage(scan->xs_cbuf);
+				lpp = PageGetItemId(pageorig,lineoff);
 				//Maybe we are already outside of the partitionM
 
+					tuple->t_data = (HeapTupleHeader) PageGetItem((Page) pageorig
+							, lpp);
+					tuple->t_len = ItemIdGetLength(lpp);
+					tuple->t_tableOid = scan->heapRelation->rd_id;
+					projectedTuple = project_tuple(tuple,
+							RelationGetDescr(scan->heapRelation), target_list,
+							qual_list, index,
+							smoothDesc->result_cache->projected_values,
+							smoothDesc->result_cache->projected_isnull);
+					LockBuffer(scan->xs_cbuf, BUFFER_LOCK_UNLOCK);
+
+				}
+				page = ItemPointerGetBlockNumber(tid);
 				if (smooth_resultcache_find_tuple(scan, tuple, page)) {
 
 					smoothDesc->num_result_cache_hits++;
+					if (projectedTuple)
+						heap_freetuple(projectedTuple);
+
 					return tuple;
 				}
+				if (projectedTuple)
+				heap_freetuple(projectedTuple);
 			}
 
 			/*check FOR CASE WHEN WE HAVE UPDATES - SINCE UPDATES KEEP OLD POINTERS TO NOTHING*/

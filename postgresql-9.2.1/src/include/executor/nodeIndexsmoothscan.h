@@ -40,4 +40,6 @@ smooth_resultcache_find_tuple(IndexScanDesc scan, HeapTuple tpl, BlockNumber blk
 extern bool
 smooth_resultcache_add_tuple(IndexScanDesc scan, const BlockNumber blknum, const OffsetNumber off, const HeapTuple tpl, const TupleDesc tupleDesc, List *target_list, List *qual_list, Index index, bool *pageHasOneResultTuple);
 
+extern HeapTuple project_tuple(const HeapTuple tuple, const TupleDesc tupleDesc, List *target_list, List *qual_list,
+		Index index, Datum *values, bool * isnull);
 #endif   /* NODEINDEXSMOOTHSCAN_H */
