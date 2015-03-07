@@ -22,7 +22,7 @@ extern void ExecReScanIndexSmoothScan(IndexSmoothScanState *node);
 extern bool ExecHashJoinNewBatch(IndexScanDesc scan, int batchindex);
 extern void ExecResultCacheGetBatch(IndexScanDesc scan, HeapTuple tuple,  int *batchno);
 extern void ExecResultCacheGetBatchFromIndex(IndexScanDesc scan, IndexTuple tuple,  int *batchno);
-extern void ExecResultCacheSwitchPartition(IndexScanDesc scan, SmoothScanOpaque sso, HeapTuple ituple );
+extern void ExecResultCacheSwitchPartition(IndexScanDesc scan, SmoothScanOpaque smoothDesc, IndexTuple ituple );
 /* renata: this is added because with smooth scan with have to follow ScanKeys for Heap Scan and not Index Scan
  * attno = 1 is actually first attribute in the table and not in the index */
 extern void print_tuple(TupleDesc tupdesc, IndexTuple itup);

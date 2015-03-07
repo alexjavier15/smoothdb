@@ -19,7 +19,7 @@ OBJS = execAmi.o execCurrent.o execGrouping.o execJunk.o execMain.o \
        nodeBitmapHeapscan.o nodeBitmapIndexscan.o nodeHash.o nodeSmoothHash.o \
        nodeHashjoin.o nodeIndexscan.o nodeIndexsmoothscan.o nodeSmoothHeapscan.o nodeSmoothIndexscan.o nodeIndexonlyscan.o \
        nodeLimit.o nodeLockRows.o \
-       nodeMaterial.o nodeMergeAppend.o nodeMergejoin.o nodeModifyTable.o \
+       nodeMaterial.o nodeMergeAppend.o nodeMergejoin.o nodeMHashjoin.o nodeModifyTable.o \
        nodeNestloop.o nodeFunctionscan.o nodeRecursiveunion.o nodeResult.o \
        nodeSeqscan.o nodeSetOp.o nodeSort.o nodeUnique.o \
        nodeValuesscan.o nodeCtescan.o nodeWorktablescan.o \

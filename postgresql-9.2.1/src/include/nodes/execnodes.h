@@ -1700,7 +1700,48 @@ typedef struct HashJoinState
 	int			hj_JoinState;
 	bool		hj_MatchedOuter;
 	bool		hj_OuterNotEmpty;
+	/*Alex : MJoin fields:
+	 *
+	 *
+	 */
+	HashJoinTable mj_innerHashTable;
+	HashJoinTable mj_outerHashTable;
 } HashJoinState;
+
+
+/*Alex:
+ *  ----------------------------------------------------------------
+ *				 Materialization State Information
+ * ----------------------------------------------------------------
+ */
+
+/* ----------------
+ *	 MHashJoinState information
+ *
+ *		see: HashJoinState
+ * ----------------
+ */
+typedef struct MHashJoinState
+{
+	JoinState	js;				/* its first field is NodeTag */
+	List	   *hashclauses;	/* list of ExprState nodes */
+	List	   *hj_OuterHashKeys;		/* list of ExprState nodes */
+	List	   *hj_InnerHashKeys;		/* list of ExprState nodes */
+	List	   *hj_HashOperators;		/* list of operator OIDs */
+	HashJoinTable hj_HashTable;
+	uint32		hj_CurHashValue;
+	int			hj_CurBucketNo;
+	int			hj_CurSkewBucketNo;
+	HashJoinTuple hj_CurTuple;
+	TupleTableSlot *hj_OuterTupleSlot;
+	TupleTableSlot *hj_HashTupleSlot;
+	TupleTableSlot *hj_NullOuterTupleSlot;
+	TupleTableSlot *hj_NullInnerTupleSlot;
+	TupleTableSlot *hj_FirstOuterTupleSlot;
+	int			hj_JoinState;
+	bool		hj_MatchedOuter;
+	bool		hj_OuterNotEmpty;
+} MHashJoinState;
 
 
 /* ----------------------------------------------------------------
@@ -1882,6 +1923,10 @@ typedef struct HashState
 	HashJoinTable hashtable;	/* hash table for the hashjoin */
 	List	   *hashkeys;		/* list of ExprState nodes */
 	/* hashkeys is same as parent's hj_InnerHashKeys */
+	/*ALex  MJOIN*/
+	//HashJoinTable innerHashtable;
+	//HashJoinTable outerHashtable;
+
 } HashState;
 
 /* ----------------

@@ -111,8 +111,8 @@ ExecResultCacheInsertByBatch(IndexScanDesc scan, ResultCache *resultcache,
 					ResultCacheKey hashkey, int batchno , int action);
 
 void _check_tuple(TupleDesc tupdesc, IndexTuple itup);
-ScanKey BuildScanKeyFromTuple(SmoothScanOpaque sso, TupleDesc tupdesc, HeapTuple tuple );
-ScanKey  BuildScanKeyFromIndexTuple(SmoothScanOpaque sso, TupleDesc tupdesc, IndexTuple tuple );
+ScanKey BuildScanKeyFromTuple(SmoothScanOpaque smoothDesc, TupleDesc tupdesc, HeapTuple tuple );
+ScanKey  BuildScanKeyFromIndexTuple(SmoothScanOpaque smoothDesc, TupleDesc tupdesc, IndexTuple tuple );
 static void
 ExecResultCacheSaveTuple( BufFile **fileptr, ResultCacheKey *hashkey, HeapTuple tuple);
 static HeapTuple
@@ -600,8 +600,8 @@ static void smooth_resultcache_create(IndexScanDesc scan, uint32 tup_length) {
 	HASHCTL *hash_ctl_ptr;
 	bool found;
 	MemoryContext oldctx = CurrentMemoryContext;
-	SmoothScanOpaque sso = (SmoothScanOpaque) scan->smoothInfo;
-	ResultCache *res_cache = sso->result_cache;
+	SmoothScanOpaque smoothDesc = (SmoothScanOpaque) scan->smoothInfo;
+	ResultCache *res_cache = smoothDesc->result_cache;
 	int hash_tag = HASH_ELEM | HASH_FUNCTION | HASH_SMOOTH;
 	Size entry = RHASHENTRYSIZE + tup_length;
 	long nbuckets;
@@ -877,8 +877,8 @@ bool smooth_tuplecache_find_tuple(TupleIDCache *cache, TID tid) {
 
 bool smooth_resultcache_find_tuple(IndexScanDesc scan, HeapTuple tpl, BlockNumber blkn) {
 	ResultCacheEntry *resultCache = NULL;
-	SmoothScanOpaque sso = (SmoothScanOpaque)scan->smoothInfo;
-	//HashPartitionDesc  *hashtable = sso->result_cache->partion_array;
+	SmoothScanOpaque smoothDesc = (SmoothScanOpaque)scan->smoothInfo;
+	//HashPartitionDesc  *hashtable = smoothDesc->result_cache->partion_array;
 
 	bool found = false;
 
@@ -887,7 +887,7 @@ bool smooth_resultcache_find_tuple(IndexScanDesc scan, HeapTuple tpl, BlockNumbe
 	TID tid;
 	//calling macro
 	form_tuple_id(tpl, blkn, &tid);
-	ExecResultCacheSwitchPartition(scan,sso,tpl);
+
 	resultCache = smooth_resultcache_find_resultentry(scan, tid, tpl);
 
 	/* if we have a bucket for this block */
@@ -896,14 +896,14 @@ bool smooth_resultcache_find_tuple(IndexScanDesc scan, HeapTuple tpl, BlockNumbe
 		tpl->t_data = (HeapTupleHeader)( resultCache + RHASHENTRYSIZE);
 
 		found = true;
-		sso->result_cache->curr_partition->hits++;
-		//sso->result_cache->curbatch = 0;
+		smoothDesc->result_cache->curr_partition->hits++;
+		//smoothDesc->result_cache->curbatch = 0;
 	}
 //	else{
 //
-//		sso->result_cache->partion_array[sso->result_cache->curbatch].miss++;
+//		smoothDesc->result_cache->partion_array[smoothDesc->result_cache->curbatch].miss++;
 //	}
-//	sso->result_cache->curbatch = 0;
+//	smoothDesc->result_cache->curbatch = 0;
 	return found;
 }
 
@@ -913,9 +913,9 @@ smooth_resultcache_find_resultentry(IndexScanDesc scan, ResultCacheKey tid, Heap
 	ResultCacheEntry *resultCache = NULL;
 
 
-	SmoothScanOpaque sso = (SmoothScanOpaque)scan->smoothInfo;
+	SmoothScanOpaque smoothDesc = (SmoothScanOpaque)scan->smoothInfo;
 
-	ResultCache *cache = sso->result_cache;
+	ResultCache *cache = smoothDesc->result_cache;
 	if (cache->nentries == 0) /* in case pagetable doesn't exist */
 	{
 		printf("\nCache has not entries\n");
@@ -953,8 +953,8 @@ static ResultCacheEntry *
 smooth_resultcache_get_resultentry(IndexScanDesc scan, HeapTuple tpl, BlockNumber blknum) {
 	ResultCacheEntry *resultCache = NULL;
 	bool found;
-	SmoothScanOpaque sso = (SmoothScanOpaque)scan->smoothInfo;
-	ResultCache *cache = sso->result_cache;
+	SmoothScanOpaque smoothDesc = (SmoothScanOpaque)scan->smoothInfo;
+	ResultCache *cache = smoothDesc->result_cache;
 //	TID tid = form_tuple_id(tpl, blknum);
 	TID tid;
 	//calling macro
@@ -1942,7 +1942,7 @@ void ExecIndexBuildSmoothScanKeys(PlanState *planstate, Relation index, List *qu
 				varorigattno = ((Var *) leftop)->varoattno;
 
 				/*
-				 * We have to look up the operator's associated btree support
+				 * We have to look up the operator's asmoothDescciated btree support
 				 * function
 				 */
 				opno = lfirst_oid(opnos_cell);
@@ -2261,8 +2261,8 @@ _binsrch(Relation rel, IndexScanDesc scan,
 				high;
 	int32		result,
 				cmpval;
-	SmoothScanOpaque sso = (SmoothScanOpaque)scan->smoothInfo;
-	ResultCache *res_cache = sso->result_cache;
+	SmoothScanOpaque smoothDesc = (SmoothScanOpaque)scan->smoothInfo;
+	ResultCache *res_cache = smoothDesc->result_cache;
 	int partitionz = res_cache->nbatch;
 	//HashPartitionDesc **partion_array = res_cache->partion_array;
 	TupleDesc itupdesc = RelationGetDescr(scan->indexRelation);
@@ -2377,7 +2377,7 @@ void _saveitem(IndexBoundReader readerbuf, int itemIndex, OffsetNumber offnum, I
 //		curr_tuple = (IndexTuple) (reader->currTuples + currItem->tupleOffset);
 //
 //		// Now _readpage need the right buffer in order to read the page so fetch the page
-//		// associated to this indextuple.
+//		// asmoothDescciated to this indextuple.
 //
 //		blkno = ItemPointerGetBlockNumber(&(curr_tuple->t_tid));
 //		buf = _bt_getbuf(rel,blkno);
@@ -2421,7 +2421,7 @@ for( next = reader->firstItem; next!=NULL; next= next->link){
 		curr_tuple = next->tuple;
 
 		// Now _readpage need the right buffer in order to read the page so fetch the page
-		// associated to this indextuple.
+		// asmoothDescciated to this indextuple.
 
 		blkno = ItemPointerGetBlockNumber(&(curr_tuple->t_tid));
 
@@ -2491,7 +2491,7 @@ for( next = reader->firstItem; next!=NULL; next= next->link){
 
 		//print_tuple(RelationGetDescr(scan->indexRelation), curr_tuple);
 		// Now _readpage need the right buffer in order to read the page so fetch the page
-		// associated to this indextuple.
+		// asmoothDescciated to this indextuple.
 
 		blkno = ItemPointerGetBlockNumber(&(curr_tuple->t_tid));
 		buf = _bt_relandgetbuf(rel, buf, blkno, BT_READ);
@@ -2543,7 +2543,7 @@ bool _findIndexBounds(IndexBoundReader * readerptr, IndexBoundReader * reader_bu
 //			curr_tuple = (IndexTuple) (reader->currTuples + currItem->tupleOffset);
 //
 //			// Now _readpage need the right buffer in order to read the page so fetch the page
-//			// associated to this indextuple.
+//			// asmoothDescciated to this indextuple.
 //
 //
 //
@@ -2723,7 +2723,7 @@ bool _readpage(IndexBoundReader readerbuf, Buffer buf, IndexScanDesc scan, ScanD
 /*Return true if itup1 > itup2.
  *
  * */
-int  _comp_tuples(IndexTuple itup1, IndexTuple itup2,IndexScanDesc scan, SmoothScanOpaque sso){
+int  _comp_tuples(IndexTuple itup1, IndexTuple itup2,IndexScanDesc scan, SmoothScanOpaque smoothDesc){
 
 		int result;
 		Relation rel = scan->indexRelation;
@@ -2731,9 +2731,9 @@ int  _comp_tuples(IndexTuple itup1, IndexTuple itup2,IndexScanDesc scan, SmoothS
 
 		ScanKey scankeys;
 		//MemoryContextStats(CurrentMemoryContext);
-		scankeys  = BuildScanKeyFromIndexTuple(sso,RelationGetDescr(rel),itup1);
+		scankeys  = BuildScanKeyFromIndexTuple(smoothDesc,RelationGetDescr(rel),itup1);
 
-		result = _bt_compare_tup(itup2,RelationGetDescr(scan->indexRelation),sso->keyz,scankeys);
+		result = _bt_compare_tup(itup2,RelationGetDescr(scan->indexRelation),smoothDesc->keyz,scankeys);
 		printf("Result: %d\n", result);
 		print_tuple(RelationGetDescr(rel),itup1);
 
@@ -2769,23 +2769,23 @@ void get_all_keys(IndexScanDesc scan) {
 	double rootfrac = 1.0;
 
 	Relation rel = scan->indexRelation;
-	SmoothScanOpaque sso = (SmoothScanOpaque) scan->smoothInfo;
+	SmoothScanOpaque smoothDesc = (SmoothScanOpaque) scan->smoothInfo;
 	Buffer buf;
 	Page page;
-	ResultCache *resultCache = sso->result_cache;
+	ResultCache *resultCache = smoothDesc->result_cache;
 	double reltuples = rel->rd_rel->reltuples;
 	double aproxtups;
-	int tup_length = sso->result_cache->tuple_length;
+	int tup_length = smoothDesc->result_cache->tuple_length;
 	int partitionsz;
 	long nbuckets;
 	TupleDesc tupdesc = RelationGetDescr(rel);
-	long work_mem = sso->work_mem;
-	int min_off = sso->min_offset;
-	int max_off = sso->max_offset;
-	int start_off = sso->root_offbounds[RightBound];
-	int end_off = sso->root_offbounds[LeftBound];
-	IndexTuple firstTup = sso->itup_bounds[RightBound];
-	IndexTuple lastTup = sso->itup_bounds[LeftBound];
+	long work_mem = smoothDesc->work_mem;
+	int min_off = smoothDesc->min_offset;
+	int max_off = smoothDesc->max_offset;
+	int start_off = smoothDesc->root_offbounds[RightBound];
+	int end_off = smoothDesc->root_offbounds[LeftBound];
+	IndexTuple firstTup = smoothDesc->itup_bounds[RightBound];
+	IndexTuple lastTup = smoothDesc->itup_bounds[LeftBound];
 	//IndexTuple  lastRootTup;
 	//MemoryContext new , old, new1;
 	IndexBound nextItem;
@@ -2814,7 +2814,7 @@ void get_all_keys(IndexScanDesc scan) {
 	buf = _bt_getroot(rel, BT_READ);
 	page = BufferGetPage(buf);
 	offnum = start_off;
-//	if(!sso->moreLeft){
+//	if(!smoothDesc->moreLeft){
 //		end_off--;
 //
 //	}
@@ -2828,9 +2828,9 @@ void get_all_keys(IndexScanDesc scan) {
 
 		if (offnum == end_off && start_off != end_off) {
 
-			cmp = _comp_tuples(lastTup, curr_tuple, scan, sso);
+			cmp = _comp_tuples(lastTup, curr_tuple, scan, smoothDesc);
 			if (cmp > 0) {
-				sso->moreRight = true;
+				smoothDesc->moreRight = true;
 
 			} else
 
@@ -2856,8 +2856,8 @@ void get_all_keys(IndexScanDesc scan) {
 	/*Check the last  and first item*/
 
 	/*Check the initial number of keys into the scan range*/
-//	cmp =  _comp_tuples(firstRootTup, firstTup,scan, sso);
-//	sso->moreLeft = (cmp > 0);
+//	cmp =  _comp_tuples(firstRootTup, firstTup,scan, smoothDesc);
+//	smoothDesc->moreLeft = (cmp > 0);
 
 	//print_tuple(tupdesc, curr_tuple);
 	/*TO-DO: Check for backwarddirection
@@ -2896,13 +2896,13 @@ void get_all_keys(IndexScanDesc scan) {
 	Assert( partitionsz > 0);
 //
 //	/*Check the initial number of keys into the scan range*/
-//	scan_length = sso->moreLeft ? scan_length + 1.0 : scan_length;
-//	scan_length = sso->moreRight ? scan_length + 1.0 : scan_length;
+//	scan_length = smoothDesc->moreLeft ? scan_length + 1.0 : scan_length;
+//	scan_length = smoothDesc->moreRight ? scan_length + 1.0 : scan_length;
 
 	printf("scan_length: %.2f\n", scan_length);
 	printf("npartitions: %d\n", partitionsz);
 
-	printf("nhas more left : %d, has more right : %d \n", sso->moreLeft, sso->moreRight);
+	printf("nhas more left : %d, has more right : %d \n", smoothDesc->moreLeft, smoothDesc->moreRight);
 
 	if (partitionsz == 1) {
 
@@ -2919,7 +2919,7 @@ void get_all_keys(IndexScanDesc scan) {
 	if (partitionsz > scan_length) {
 		int target_length = 1;
 		target_length = partitionsz;
-		if (!sso->moreLeft) {
+		if (!smoothDesc->moreLeft) {
 			// we will need an additionl tuple
 			target_length++;
 		}
@@ -2941,7 +2941,7 @@ void get_all_keys(IndexScanDesc scan) {
 			lastItem++;
 			curr_buf = readerBuf;
 		} else {
-			sso->moreLeft = true;
+			smoothDesc->moreLeft = true;
 			curr_buf = reader;
 			partitionsz = 1;
 			lastItem = partitionsz;
@@ -2950,14 +2950,14 @@ void get_all_keys(IndexScanDesc scan) {
 			goto set_bounds;
 		}
 
-		scan_length = sso->moreLeft ? scan_length + 1.0 : scan_length;
-		scan_length = sso->moreRight ? scan_length + 1.0 : scan_length;
+		scan_length = smoothDesc->moreLeft ? scan_length + 1.0 : scan_length;
+		scan_length = smoothDesc->moreRight ? scan_length + 1.0 : scan_length;
 
 	} else {
 
 		//If thelast tuple is greqter the the last qualifying root tuple
 		// use all the root tuples
-		if (sso->moreRight) {
+		if (smoothDesc->moreRight) {
 			lastItem++;
 
 		}
@@ -3027,7 +3027,7 @@ void get_all_keys(IndexScanDesc scan) {
 
 	if (start_off != end_off) {
 
-		cmp = _comp_tuples(lastTup, resultCache->bounds[pos - 1], scan, sso);
+		cmp = _comp_tuples(lastTup, resultCache->bounds[pos - 1], scan, smoothDesc);
 		if (cmp > 0) {
 			resultCache->bounds[pos] = lastTup;
 		} else
@@ -3265,12 +3265,12 @@ void print_tuple(TupleDesc tupdesc, IndexTuple itup) {
 
 
  }*/
-void ExecResultCacheSwitchPartition(IndexScanDesc scan, SmoothScanOpaque sso, HeapTuple tuple) {
-	if (tuple != NULL && sso != NULL && sso->orderby && sso->result_cache->status == SS_HASH) {
+void ExecResultCacheSwitchPartition(IndexScanDesc scan, SmoothScanOpaque smoothDesc, IndexTuple tuple) {
+	if (tuple != NULL && smoothDesc != NULL && smoothDesc->orderby && smoothDesc->result_cache->status == SS_HASH) {
 		int batchno = -1;
 
-		ExecResultCacheGetBatch(scan, tuple, &batchno);
-		if (sso->result_cache->curbatch != batchno) {
+		ExecResultCacheGetBatchFromIndex(scan, tuple, &batchno);
+		if (smoothDesc->result_cache->curbatch != batchno) {
 		//	print_tuple(RelationGetDescr(scan->he), tuple);
 
 			ExecHashJoinNewBatch(scan, batchno);
@@ -3297,19 +3297,19 @@ void ExecResultCacheCheckStatus(ResultCache *resultCache, HashPartitionDesc part
 	}
 
 }
-ScanKey  BuildScanKeyFromIndexTuple(SmoothScanOpaque sso, TupleDesc tupdesc, IndexTuple tuple ){
+ScanKey  BuildScanKeyFromIndexTuple(SmoothScanOpaque smoothDesc, TupleDesc tupdesc, IndexTuple tuple ){
 	ScanKey this_scan_key;
 	ScanKey scankeys;
-	int	keyz = sso->keyz;
+	int	keyz = smoothDesc->keyz;
 	int i = 0;
 	bool isNull;
 
 
-	Assert(sso->keyz <= INDEX_MAX_KEYS);
-	Assert(sso->search_keyData != NULL);
-	scankeys = sso->search_keyData;
+	Assert(smoothDesc->keyz <= INDEX_MAX_KEYS);
+	Assert(smoothDesc->search_keyData != NULL);
+	scankeys = smoothDesc->search_keyData;
 
-	this_scan_key = (ScanKey) palloc(sso->keyz * sizeof(ScanKeyData));
+	this_scan_key = (ScanKey) palloc(smoothDesc->keyz * sizeof(ScanKeyData));
 
 	for (i = 0; i < keyz; i++) {
 
@@ -3329,19 +3329,19 @@ ScanKey  BuildScanKeyFromIndexTuple(SmoothScanOpaque sso, TupleDesc tupdesc, Ind
 	}
 	return this_scan_key;
 }
-ScanKey  BuildScanKeyFromTuple(SmoothScanOpaque sso, TupleDesc tupdesc, HeapTuple tuple ){
+ScanKey  BuildScanKeyFromTuple(SmoothScanOpaque smoothDesc, TupleDesc tupdesc, HeapTuple tuple ){
 	ScanKey this_scan_key;
 	ScanKey scankeys;
-	int	keyz = sso->keyz;
+	int	keyz = smoothDesc->keyz;
 	int i = 0;
 	bool isNull;
 
 
-	Assert(sso->keyz <= INDEX_MAX_KEYS);
-	Assert(sso->search_keyData != NULL);
-	scankeys = sso->search_keyData;
+	Assert(smoothDesc->keyz <= INDEX_MAX_KEYS);
+	Assert(smoothDesc->search_keyData != NULL);
+	scankeys = smoothDesc->search_keyData;
 
-	this_scan_key = (ScanKey) palloc(sso->keyz * sizeof(ScanKeyData));
+	this_scan_key = (ScanKey) palloc(smoothDesc->keyz * sizeof(ScanKeyData));
 
 	for (i = 0; i < keyz; i++) {
 
@@ -3363,14 +3363,14 @@ ScanKey  BuildScanKeyFromTuple(SmoothScanOpaque sso, TupleDesc tupdesc, HeapTupl
 }
 void ExecResultCacheGetBatchFromIndex(IndexScanDesc scan, IndexTuple tuple,  int *batchno){
 	Relation rel = scan->indexRelation;
-	SmoothScanOpaque sso = (SmoothScanOpaque) scan->smoothInfo;
+	SmoothScanOpaque smoothDesc = (SmoothScanOpaque) scan->smoothInfo;
 	OffsetNumber offnum;
 	ScanKey scankeys;
 	//MemoryContextStats(CurrentMemoryContext);
-	scankeys  = BuildScanKeyFromIndexTuple(sso,RelationGetDescr(rel),tuple);
+	scankeys  = BuildScanKeyFromIndexTuple(smoothDesc,RelationGetDescr(rel),tuple);
 
 
-	offnum = _binsrch(rel, scan, sso->keyz, scankeys);
+	offnum = _binsrch(rel, scan, smoothDesc->keyz, scankeys);
 	pfree(scankeys);
 	//printf("Go to batch: %d\n", offnum);
 	//MemoryContextStats(CurrentMemoryContext);
@@ -3382,14 +3382,14 @@ void ExecResultCacheGetBatchFromIndex(IndexScanDesc scan, IndexTuple tuple,  int
 }
 void ExecResultCacheGetBatch(IndexScanDesc scan, HeapTuple tuple,  int *batchno){
 	Relation rel = scan->indexRelation;
-	SmoothScanOpaque sso = (SmoothScanOpaque) scan->smoothInfo;
+	SmoothScanOpaque smoothDesc = (SmoothScanOpaque) scan->smoothInfo;
 	OffsetNumber offnum;
 	ScanKey scankeys;
 	//MemoryContextStats(CurrentMemoryContext);
-	scankeys  = BuildScanKeyFromTuple(sso,RelationGetDescr(scan->heapRelation),tuple);
+	scankeys  = BuildScanKeyFromTuple(smoothDesc,RelationGetDescr(scan->heapRelation),tuple);
 
 
-	offnum = _binsrch(rel, scan, sso->keyz, scankeys);
+	offnum = _binsrch(rel, scan, smoothDesc->keyz, scankeys);
 	pfree(scankeys);
 	//printf("Go to batch: %d\n", offnum);
 	//MemoryContextStats(CurrentMemoryContext);
@@ -3419,8 +3419,8 @@ ResultCacheEntry *
 ExecResultCacheInsertByBatch(IndexScanDesc scan, ResultCache *resultcache, HeapTuple tuple, ResultCacheKey hashkey,
 		int batchno, int action) {
 	ResultCacheEntry *resultEntry = NULL;
-	SmoothScanOpaque sso = (SmoothScanOpaque) scan->smoothInfo;
-	ResultCache *cache = sso->result_cache;
+	SmoothScanOpaque smoothDesc = (SmoothScanOpaque) scan->smoothInfo;
+	ResultCache *cache = smoothDesc->result_cache;
 	HashPartitionDesc partition;
 	MemoryContext oldcxt;
 	oldcxt = CurrentMemoryContext;
@@ -3508,12 +3508,12 @@ ExecResultCacheInsert(IndexScanDesc scan, ResultCache *resultcache,
 }
 
 void ExecResultCacheInitPartition(IndexScanDesc scan, ResultCache *res_cache) {
-	SmoothScanOpaque sso = (SmoothScanOpaque) scan->smoothInfo;
+	SmoothScanOpaque smoothDesc = (SmoothScanOpaque) scan->smoothInfo;
 
-	sso->creatingBounds = true;
+	smoothDesc->creatingBounds = true;
 
 	get_all_keys(scan);
-	sso->creatingBounds = false;
+	smoothDesc->creatingBounds = false;
 	int j = 0;
 	int partitionz = res_cache->nbatch;
 	// checking//
@@ -3649,7 +3649,7 @@ static HeapTuple ExecResultCacheGetSavedTuple(IndexScanDesc scan, BufFile *file,
  * Returns true if successful, false if there are no more batches.
  */
 bool ExecHashJoinNewBatch(IndexScanDesc scan, int batchindex) {
-	SmoothScanOpaque sso = (SmoothScanOpaque) scan->smoothInfo;
+	SmoothScanOpaque smoothDesc = (SmoothScanOpaque) scan->smoothInfo;
 	int nbatch;
 	int curbatch;
 	int prevBatch;
@@ -3659,7 +3659,7 @@ bool ExecHashJoinNewBatch(IndexScanDesc scan, int batchindex) {
 	//MemoryContext oldcxt;
 	ResultCacheKey hashvalue;
 	//ResultCacheEntry *hashEntry;
-	ResultCache * res_cache = sso->result_cache;
+	ResultCache * res_cache = smoothDesc->result_cache;
 //	HeapTuple tuple;
 	HashPartitionDesc hashtable = res_cache->partition_array;
 	HASH_ITER iter;
@@ -4003,7 +4003,7 @@ bool ExecHashJoinNewBatch(IndexScanDesc scan, int batchindex) {
 //				varattno = ((Var *) leftop)->varattno;
 //
 //				/*
-//				 * We have to look up the operator's associated btree support
+//				 * We have to look up the operator's asmoothDescciated btree support
 //				 * function
 //				 */
 //				opno = lfirst_oid(opnos_cell);
