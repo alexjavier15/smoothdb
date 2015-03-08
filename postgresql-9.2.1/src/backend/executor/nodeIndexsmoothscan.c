@@ -598,7 +598,7 @@ static TupleIDCache * smooth_tuplecache_create_empty() {
 static void smooth_resultcache_create(IndexScanDesc scan, uint32 tup_length) {
 	HASHCTL hash_ctl;
 	HASHCTL *hash_ctl_ptr;
-	bool found;
+	bool found = false;
 	MemoryContext oldctx = CurrentMemoryContext;
 	SmoothScanOpaque smoothDesc = (SmoothScanOpaque) scan->smoothInfo;
 	ResultCache *res_cache = smoothDesc->result_cache;
@@ -2495,7 +2495,7 @@ for( next = reader->firstItem; next!=NULL; next= next->link){
 		IndexTuple curr_tuple;
 		BlockNumber blkno;
 		OffsetNumber itemIndex;
-		int itemIndexdiv;
+		int itemIndexdiv = reader_buffer->prefetcher.last_item;
 		int modOffset = 0;
 		curr_tuple = next->tuple;
 		if(counter > 0){
@@ -2505,9 +2505,10 @@ for( next = reader->firstItem; next!=NULL; next= next->link){
 			itemIndexdiv = itemIndex / reader_buffer->prefetcher.split_factor;
 
 			_saveitem(reader_buffer,itemIndexdiv,0,curr_tuple);
+
+			}
 			reader_buffer->prefetcher.last_item = itemIndexdiv;
 			reader_buffer->lastItem++;
-			}
 		}
 
 		//print_tuple(RelationGetDescr(scan->indexRelation), curr_tuple);
