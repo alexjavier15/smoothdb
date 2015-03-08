@@ -2689,11 +2689,13 @@ bool _readpage(IndexBoundReader readerbuf, Buffer buf, IndexScanDesc scan, ScanD
 	Assert(BufferIsValid(buf));
 	while (offnum <= maxoff) {
 
-		//ItemId iid = PageGetItemId(page, offnum);
+		ItemId iid = PageGetItemId(page, offnum);
 
 		itup = _bt_checkkeys(scan, page, offnum, ForwardScanDirection, &continuescan);
 
 		if (itup != NULL) {
+
+
 //			if(pr){
 //
 //						print_tuple(RelationGetDescr(scan->indexRelation),itup);
@@ -2718,7 +2720,7 @@ bool _readpage(IndexBoundReader readerbuf, Buffer buf, IndexScanDesc scan, ScanD
 				}
 			}
 			itemIndexdiv = itemIndex / readerbuf->prefetcher.split_factor; // in not prefetching mode split_factor = 1;
-
+			itup = (IndexTuple) PageGetItem(page, iid);
 			_saveitem(readerbuf, itemIndexdiv, offnum, itup);
 			itemIndex++;
 		}
