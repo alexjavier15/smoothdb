@@ -425,6 +425,9 @@ ExecEndIndexScan(IndexScanState *node)
 	/*
 	 * close the heap relation.
 	 */
+	printf("Endig br Index Scan"
+			"\n");
+		fflush(stdout);
 	ExecCloseScanRelation(relation);
 }
 

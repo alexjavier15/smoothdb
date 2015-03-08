@@ -2398,6 +2398,7 @@ bool _findIndexBoundsWithPrefetch(IndexBoundReader * readerptr, IndexBoundReader
 	int curr_length = 0;
 	int split_factor = 1;
 	IndexBound next;
+	int counter = 0;
 	//int target_length;
 
 //  we get a first index tuple list we will iterate all over the list to produce a new list of childs indextuples
@@ -2405,7 +2406,8 @@ bool _findIndexBoundsWithPrefetch(IndexBoundReader * readerptr, IndexBoundReader
 	// in order to get the desired bounds.
 
 	// Make a buffer storage for the reading and pray for we have enough space
-for( next = reader->firstItem; next!=NULL; next= next->link){
+
+	for( next = reader->firstItem; next!=NULL; next= next->link){
 	//while ((curr_tuple = next )) {
 		IndexTuple curr_tuple;
 
@@ -2419,6 +2421,10 @@ for( next = reader->firstItem; next!=NULL; next= next->link){
 
 
 		curr_tuple = next->tuple;
+		if(counter != 0){
+			curr_length++;
+
+		}
 
 		// Now _readpage need the right buffer in order to read the page so fetch the page
 		// asmoothDescciated to this indextuple.
@@ -2482,12 +2488,27 @@ for( next = reader->firstItem; next!=NULL; next= next->link){
 	reader_buffer->firstItemIdx = 0;
 	reader_buffer->lastItem = 0;
 	reader_buffer->itemIndex= 0;
+	counter = 0;
 for( next = reader->firstItem; next!=NULL; next= next->link){
 //	while (next <= reader->currPos.lastItem) {
 		//bool skip = (next == 0);
 		IndexTuple curr_tuple;
 		BlockNumber blkno;
+		OffsetNumber itemIndex;
+		int itemIndexdiv;
+		int modOffset = 0;
 		curr_tuple = next->tuple;
+		if(counter > 0){
+			itemIndex = reader_buffer->lastItem == 0 ? 0 : reader_buffer->lastItem + 1;
+			modOffset = itemIndex % reader_buffer->prefetcher.split_factor;
+			if(modOffset == 0){
+			itemIndexdiv = itemIndex / reader_buffer->prefetcher.split_factor;
+
+			_saveitem(reader_buffer,itemIndexdiv,0,curr_tuple);
+			reader_buffer->prefetcher.last_item = itemIndexdiv;
+			reader_buffer->lastItem++;
+			}
+		}
 
 		//print_tuple(RelationGetDescr(scan->indexRelation), curr_tuple);
 		// Now _readpage need the right buffer in order to read the page so fetch the page
@@ -2513,6 +2534,7 @@ for( next = reader->firstItem; next!=NULL; next= next->link){
 			_bt_relbuf(rel, buf);
 			return false;
 		}
+		counter++;
 	}
 	_bt_relbuf(rel,buf);
 	return true;

@@ -1126,11 +1126,13 @@ if(HasSmoothInfo(scan)){
 	 *
 	 */
 
+	if(sso != NULL){
 	cur_stack = stack;
 	while(cur_stack != NULL){
 		root_offset = cur_stack->bts_offset;
 		cur_stack = cur_stack->bts_parent;
 
+	}
 	}
 
 
