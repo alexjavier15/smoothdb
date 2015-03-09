@@ -3227,7 +3227,7 @@ void print_tuple(TupleDesc tupdesc, IndexTuple itup) {
 	Datum values[INDEX_MAX_KEYS];
 
 	index_deform_tuple(itup, tupdesc, values, isnull);
-	printf("\ntuple with data : [  ");
+	printf("\ntuple with data :  size : %d [  ", IndexTupleSize(itup));
 
 	for (j = 0; j < nattr; j++) {
 		Form_pg_attribute attr_form = tupdesc->attrs[j];
