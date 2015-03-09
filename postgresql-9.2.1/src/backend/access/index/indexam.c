@@ -1444,7 +1444,7 @@ HeapTuple index_smoothfetch_heap(IndexScanDesc scan, ScanDirection direction, do
 			} else {
 
 				IndexTuple indexTuple =scan->xs_itup;
-				if (smoothDesc->result_cache->status != SS_EMPTY && indexTuple) {
+				if (smoothDesc->result_cache->status != SS_EMPTY && indexTuple && enable_smoothshare) {
 					ExecResultCacheSwitchPartition(scan,smoothDesc,indexTuple);
 				}
 				page = ItemPointerGetBlockNumber(tid);

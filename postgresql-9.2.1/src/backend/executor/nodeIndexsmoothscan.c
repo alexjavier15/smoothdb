@@ -101,7 +101,7 @@ bool _findIndexBoundsWithPrefetch(IndexBoundReader * readerptr, IndexBoundReader
 		IndexScanDesc scan, int target_length);
 static OffsetNumber _binsrch(Relation rel, IndexScanDesc scan,	int keysz, ScanKey scankey);
 static void ExecResultCacheInitPartition(IndexScanDesc scan, ResultCache *res_cache);
-static void get_all_keys(IndexScanDesc scan);
+static void _get_all_keys(IndexScanDesc scan);
 ResultCacheEntry *
 ExecResultCacheInsert(IndexScanDesc scan, ResultCache *resultcache,
 					HeapTuple tuple,
@@ -465,7 +465,8 @@ void smooth_resultcache_free(ResultCache *cache) {
 	int j;
 	int partitionz = cache->nbatch;
 	// checking//
-	for (j = 0; j < partitionz; j++) {
+	if(enable_smoothshare)
+	{	for (j = 0; j < partitionz; j++) {
 		BufFile *file;
 		printf("Number of buckets for partition  %d is %d \n", j, cache->partition_array[j].nbucket);
 
@@ -481,10 +482,12 @@ void smooth_resultcache_free(ResultCache *cache) {
 
 	}
 	fflush(stdout);
+	pfree(cache->bounds);
+	}
 	pfree(cache->partition_array);
 	pfree(cache->projected_values);
 	pfree(cache->projected_isnull);
-	pfree(cache->bounds);
+
 	if (!enable_smoothshare) {
 		if (cache->hashtable)
 			hash_destroy(cache->hashtable);
@@ -556,8 +559,6 @@ smooth_resultcache_create_empty(IndexScanDesc scan,int numatt) {
 		memcpy(result->name, str.data, str.len);
 		result->mcxt = CurrentMemoryContext;
 		result->size = work_mem * 1024L;
-		if (result->size > MaxAllocSize)
-			result->size = MaxAllocSize;
 		result->status = SS_EMPTY;
 		pfree(str.data);
 
@@ -609,13 +610,13 @@ static void smooth_resultcache_create(IndexScanDesc scan, uint32 tup_length) {
 	StringInfoData str;
 
 	res_cache->tuple_length = tup_length;
-
+	initStringInfo(&str);
 	Assert(res_cache != NULL);
 	if (enable_smoothshare) {
 
 		oldctx = MemoryContextSwitchTo(TopMemoryContext);
 
-		initStringInfo(&str);
+
 		appendStringInfoString(&str, res_cache->name);
 		appendStringInfoString(&str, " HASHCTL");
 
@@ -683,9 +684,9 @@ static void smooth_resultcache_create(IndexScanDesc scan, uint32 tup_length) {
 	if (!enable_smoothshare) {
 
 		hash_tag |= HASH_CONTEXT;
-		res_cache->hashtable = hash_create(str.data, 128, /* start small and extend */
+		res_cache->hashtable = hash_create(str.data,  res_cache->maxentries, /* start small and extend */
 		hash_ctl_ptr, hash_tag);
-
+    Assert(res_cache->hashtable != NULL);
 	} else {
 		MemoryContextSwitchTo(TopMemoryContext);
 
@@ -702,6 +703,8 @@ static void smooth_resultcache_create(IndexScanDesc scan, uint32 tup_length) {
 	pfree(str.data);
 
 	ExecResultCacheInitPartition(scan, res_cache);
+
+	fflush(stdout);
 }
 
 //renata: add tuple id in tuple cache
@@ -2815,7 +2818,7 @@ IndexBoundReader MakeIndexBoundReader( int size){
 
 
 }
-void get_all_keys(IndexScanDesc scan) {
+void _get_all_keys(IndexScanDesc scan) {
 	double root_lentgh = 1.0;
 	double scan_length = 1.0;
 	double rootfrac = 1.0;
@@ -3445,6 +3448,7 @@ void ExecResultCacheGetBatch(IndexScanDesc scan, HeapTuple tuple,  int *batchno)
 	OffsetNumber offnum;
 	ScanKey scankeys;
 	//MemoryContextStats(CurrentMemoryContext);
+	if(enable_smoothshare){
 	scankeys  = BuildScanKeyFromTuple(smoothDesc,RelationGetDescr(scan->heapRelation),tuple);
 
 
@@ -3452,8 +3456,9 @@ void ExecResultCacheGetBatch(IndexScanDesc scan, HeapTuple tuple,  int *batchno)
 	pfree(scankeys);
 	//printf("Go to batch: %d\n", offnum);
 	//MemoryContextStats(CurrentMemoryContext);
-
-
+	}
+	else
+		offnum = 0;
 	*batchno = offnum;
 
 
@@ -3568,26 +3573,46 @@ ExecResultCacheInsert(IndexScanDesc scan, ResultCache *resultcache,
 
 void ExecResultCacheInitPartition(IndexScanDesc scan, ResultCache *res_cache) {
 	SmoothScanOpaque smoothDesc = (SmoothScanOpaque) scan->smoothInfo;
+	if (enable_smoothshare) {
+		smoothDesc->creatingBounds = true;
 
-	smoothDesc->creatingBounds = true;
+		_get_all_keys(scan);
+		smoothDesc->creatingBounds = false;
+		int j = 0;
+		int partitionz = res_cache->nbatch;
+		// checking//
+		for (j = 0; j < partitionz; j++) {
+			printf("Printing bounds for partition : %d \n", j);
+			printf("Lower Bound: %d \n", j);
+			print_tuple(RelationGetDescr(scan->indexRelation),
+					res_cache->partition_array[j].lower_bound);
 
-	get_all_keys(scan);
-	smoothDesc->creatingBounds = false;
-	int j = 0;
-	int partitionz = res_cache->nbatch;
-	// checking//
-	for (j = 0; j < partitionz; j++) {
-		printf("Printing bounds for partition : %d \n", j);
-		printf("Lower Bound: %d \n", j);
-		print_tuple(RelationGetDescr(scan->indexRelation), res_cache->partition_array[j].lower_bound);
+			printf("Upper Bound: %d \n", j);
+			print_tuple(RelationGetDescr(scan->indexRelation),
+					res_cache->partition_array[j].upper_bound);
 
-		printf("Upper Bound: %d \n", j);
-		print_tuple(RelationGetDescr(scan->indexRelation), res_cache->partition_array[j].upper_bound);
+			printf("************************************************\n");
 
-		printf("************************************************\n");
+		}
+	} else {
+
+		res_cache->partition_array =
+				palloc0( MAXALIGN(sizeof(HashPartitionData)));
+
+		res_cache->partition_array->batchIdx = 0;
+		res_cache->partition_array->status = RC_INMEM;
+		res_cache->partition_array->cache_status = SS_HASH;
+		res_cache->partition_array->nbucket = 0;
+		res_cache->partition_array->lower_bound = smoothDesc->itup_bounds[LeftBound];
+		res_cache->partition_array->upper_bound = smoothDesc->itup_bounds[RightBound];
+		/* TODO fix for sharing partitions;
+		 */
+
+		res_cache->nbatch = 1;
+
+		res_cache->maxtuples = res_cache->maxentries;
 
 	}
-
 	res_cache->curbatch = INIT_PARTITION_NUM;
 	res_cache->curr_partition = &res_cache->partition_array[INIT_PARTITION_NUM];
 	PrepareTempTablespaces();
