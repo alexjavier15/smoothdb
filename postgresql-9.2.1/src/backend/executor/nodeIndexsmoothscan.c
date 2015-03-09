@@ -2515,7 +2515,7 @@ for( next = reader->firstItem; next!=NULL; next= next->link){
 		curr_tuple = next->tuple;
 
 		if(counter > 0){
-			itemIndex = reader_buffer->lastItem == 0 ? 0 : reader_buffer->lastItem + 1;
+			itemIndex = reader_buffer->lastItem + 1 ;
 			modOffset = itemIndex % reader_buffer->prefetcher.split_factor;
 			if(modOffset == 0){
 			itemIndexdiv = itemIndex / reader_buffer->prefetcher.split_factor;
@@ -2709,15 +2709,13 @@ bool _readpage(IndexBoundReader readerBuf, Buffer buf, IndexScanDesc scan, ScanD
 	offnum = minoff;
 
 	itemIndexdiv = readerBuf->prefetcher.last_item;
-	printf("min offset : %d, max offset = %d \n", offnum,maxoff);
+
 
 	Assert(BufferIsValid(buf));
 	while (offnum <= maxoff) {
 
-		ItemId iid = PageGetItemId(page, offnum);
-		itup = (IndexTuple) PageGetItem(page, iid);
-		if(offnum == minoff)
-			print_tuple(RelationGetDescr(scan->indexRelation),itup);
+
+
 
 		itup = _bt_checkkeys(scan, page, offnum, ForwardScanDirection, &continuescan);
 
@@ -2752,7 +2750,8 @@ bool _readpage(IndexBoundReader readerBuf, Buffer buf, IndexScanDesc scan, ScanD
 			_saveitem(readerBuf, itemIndexdiv, offnum, itup);
 			itemIndex++;
 		}else{
-		printf("Tuple not passing, at offset %d\n", offnum);
+
+			break;
 		}
 		/*renata: move to next index tuple */
 		offnum = OffsetNumberNext(offnum);
@@ -2974,8 +2973,8 @@ void get_all_keys(IndexScanDesc scan) {
 		int target_length = 1;
 		target_length = partitionsz;
 		if (!smoothDesc->moreLeft) {
-			// we will need an additionl tuple
-			target_length++;
+		// we will need an additionl tuple
+		 target_length++;
 		}
 //		if (partitionsz <= MAX_NUM_PARTITION)
 		result = _findIndexBoundsWithPrefetch(&reader, &readerBuf, buf, scan, target_length);
@@ -2987,7 +2986,7 @@ void get_all_keys(IndexScanDesc scan) {
 			printf("Suitable partitioning foudn\n");
 			if (!readerBuf->prefetcher.is_prefetching)
 
-				scan_length = readerBuf->lastItem;
+				scan_length = readerBuf->lastItem - 1;
 			else
 				scan_length = readerBuf->prefetcher.last_item;
 

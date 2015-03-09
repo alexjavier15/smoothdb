@@ -1408,7 +1408,7 @@ _bt_readpage(IndexScanDesc scan, ScanDirection dir, OffsetNumber offnum)
 		itemIndex = 0;
 
 		offnum = Max(offnum, minoff);
-		printf("_bt search min offset  : %d, max offset = %d \n", offnum,maxoff);
+
 		while (offnum <= maxoff)
 		{
 			itup = _bt_checkkeys(scan, page, offnum, dir, &continuescan);
