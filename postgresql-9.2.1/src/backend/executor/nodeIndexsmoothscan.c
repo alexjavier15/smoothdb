@@ -2690,7 +2690,7 @@ bool _readpage(IndexBoundReader readerBuf, Buffer buf, IndexScanDesc scan, ScanD
 	offnum = minoff;
 
 	itemIndexdiv = readerBuf->prefetcher.last_item;
-	//printf("min offset : %d, max offset = %d \n", offnum,maxoff);
+	printf("min offset : %d, max offset = %d \n", offnum,maxoff);
 
 	Assert(BufferIsValid(buf));
 	while (offnum <= maxoff) {
