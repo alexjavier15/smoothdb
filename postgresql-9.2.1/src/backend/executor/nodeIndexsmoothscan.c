@@ -2513,7 +2513,7 @@ for( next = reader->firstItem; next!=NULL; next= next->link){
 
 			}
 			reader_buffer->prefetcher.last_item = itemIndexdiv;
-			reader_buffer->lastItem++;
+			reader_buffer->lastItem= itemIndex;
 		}
 
 		//print_tuple(RelationGetDescr(scan->indexRelation), curr_tuple);
@@ -2729,7 +2729,7 @@ bool _readpage(IndexBoundReader readerBuf, Buffer buf, IndexScanDesc scan, ScanD
 			_saveitem(readerBuf, itemIndexdiv, offnum, itup);
 			itemIndex++;
 		}
-
+		printf("Tuple not passing");
 		/*renata: move to next index tuple */
 		offnum = OffsetNumberNext(offnum);
 	}
