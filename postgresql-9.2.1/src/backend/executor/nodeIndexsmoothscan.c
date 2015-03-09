@@ -2728,8 +2728,8 @@ bool _readpage(IndexBoundReader readerBuf, Buffer buf, IndexScanDesc scan, ScanD
 
 			_saveitem(readerBuf, itemIndexdiv, offnum, itup);
 			itemIndex++;
-		}
-		printf("Tuple not passing");
+		}else{
+		printf("Tuple not passing");}
 		/*renata: move to next index tuple */
 		offnum = OffsetNumberNext(offnum);
 	}
