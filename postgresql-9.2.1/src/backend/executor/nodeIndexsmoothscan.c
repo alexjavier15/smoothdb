@@ -2670,7 +2670,7 @@ bool _readpage(IndexBoundReader readerBuf, Buffer buf, IndexScanDesc scan, ScanD
 
 	/* we must have the buffer pinned and locked */
 	Assert(BufferIsValid(buf));
-	_bt_checkpage(scan->indexRelation, buf);
+
 
 	page = BufferGetPage(buf);
 	opaque = (BTPageOpaque) PageGetSpecialPointer(page);
@@ -2711,7 +2711,11 @@ bool _readpage(IndexBoundReader readerBuf, Buffer buf, IndexScanDesc scan, ScanD
 
 	Assert(BufferIsValid(buf));
 	while (offnum <= maxoff) {
+
 		ItemId iid = PageGetItemId(page, offnum);
+		itup = (IndexTuple) PageGetItem(page, iid);
+		if(offnum == minoff)
+			print_tuple(RelationGetDescr(scan->indexRelation),itup);
 
 		itup = _bt_checkkeys(scan, page, offnum, ForwardScanDirection, &continuescan);
 
