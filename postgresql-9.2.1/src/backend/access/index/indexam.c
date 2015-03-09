@@ -84,13 +84,12 @@
 #include "utils/tqual.h"
 /*renata */
 #include "optimizer/cost.h"
-#include "executor/execdebug.h"
 #include "access/nbtree.h"
 #include "access/valid.h"
 #include "smooth/smoothscanopaque.h"
-#include "executor/nodeIndexsmoothscan.h"
 #include "executor/executor.h"
-
+#include "executor/nodeIndexsmoothscan.h"
+#include "utils/memutils.h"
 /* ----------------------------------------------------------------
  *					macros used in index_ routines
  *
@@ -117,7 +116,23 @@
 	AssertMacro(PointerIsValid(scan->indexRelation->rd_am)) \
 )
 
-//#define SmoothProcesOnePage(scan, page, direction, no_orig_keys, orig_keys ) \
+HeapTuple
+SmoothProcessOnePageOrder(IndexScanDesc scan, BlockNumber page, ScanDirection direction, int no_orig_keys, ScanKey orig_keys, bool prefetcher, List *target_list, List *qual_list, Index index, int no_orig_smooth_keys, ScanKey orig_smooth_keys, List *allqual, ExprContext *econtext, TupleTableSlot *slot);
+ItemPointer
+ smoothscan_getnext_tid(IndexScanDesc scan, ScanDirection direction);
+
+HeapTuple
+SmoothProcessOnePage(IndexScanDesc scan, BlockNumber page, ScanDirection direction, int no_orig_keys, ScanKey orig_keys, int no_orig_smooth_keys, ScanKey orig_smooth_keys, List *allqual, ExprContext *econtext, TupleTableSlot *slot );
+
+
+HeapTuple
+index_smoothfetch_heap(IndexScanDesc scan, ScanDirection direction, double plan_rows, int no_orig_keys, ScanKey orig_keys, List *target_list, List *qual_list, Index index, int no_orig_smooth_keys, ScanKey orig_smooth_keys, List *allqual, ExprContext *econtext, TupleTableSlot *slot);
+
+HeapTuple
+indexsmooth_getnext(IndexScanDesc scan, ScanDirection direction, double plan_rows,  int no_orig_keys, ScanKey orig_keys, List *target_list, List *qual_list, Index index, int no_orig_smooth_keys, ScanKey orig_smooth_keys, List *allqual, ExprContext *econtext, TupleTableSlot *slot );
+
+
+//#define SmoothProcessOnePage(scan, page, direction, no_orig_keys, orig_keys ) \
 //( \
 //	Page		dp; \
 //	int			lines; \
@@ -290,7 +305,9 @@ do { \
 	} \
 } while(0)
 
-static IndexScanDesc index_beginscan_internal(Relation indexRelation, int nkeys, int norderbys, Snapshot snapshot);
+static IndexScanDesc index_beginscan_internal(Relation indexRelation,
+						 int nkeys, int norderbys, Snapshot snapshot);
+
 
 /* ----------------------------------------------------------------
  *				   index_ interface functions
@@ -311,14 +328,18 @@ static IndexScanDesc index_beginscan_internal(Relation indexRelation, int nkeys,
  *		Some callers may prefer to use relation_open directly.
  * ----------------
  */
-Relation index_open(Oid relationId, LOCKMODE lockmode) {
-	Relation r;
+Relation
+index_open(Oid relationId, LOCKMODE lockmode)
+{
+	Relation	r;
 
 	r = relation_open(relationId, lockmode);
 
 	if (r->rd_rel->relkind != RELKIND_INDEX)
 		ereport(ERROR,
-				(errcode(ERRCODE_WRONG_OBJECT_TYPE), errmsg("\"%s\" is not an index", RelationGetRelationName(r))));
+				(errcode(ERRCODE_WRONG_OBJECT_TYPE),
+				 errmsg("\"%s\" is not an index",
+						RelationGetRelationName(r))));
 
 	return r;
 }
@@ -332,8 +353,10 @@ Relation index_open(Oid relationId, LOCKMODE lockmode) {
  *		in that case, the lock is released automatically at xact end.
  * ----------------
  */
-void index_close(Relation relation, LOCKMODE lockmode) {
-	LockRelId relid = relation->rd_lockInfo.lockRelId;
+void
+index_close(Relation relation, LOCKMODE lockmode)
+{
+	LockRelId	relid = relation->rd_lockInfo.lockRelId;
 
 	Assert(lockmode >= NoLock && lockmode < MAX_LOCKMODES);
 
@@ -348,26 +371,34 @@ void index_close(Relation relation, LOCKMODE lockmode) {
  *		index_insert - insert an index tuple into a relation
  * ----------------
  */
-bool index_insert(Relation indexRelation, Datum *values, bool *isnull, ItemPointer heap_t_ctid, Relation heapRelation,
-		IndexUniqueCheck checkUnique) {
-	FmgrInfo *procedure;
+bool
+index_insert(Relation indexRelation,
+			 Datum *values,
+			 bool *isnull,
+			 ItemPointer heap_t_ctid,
+			 Relation heapRelation,
+			 IndexUniqueCheck checkUnique)
+{
+	FmgrInfo   *procedure;
 
 	RELATION_CHECKS;
 	GET_REL_PROCEDURE(aminsert);
 
 	if (!(indexRelation->rd_am->ampredlocks))
-		CheckForSerializableConflictIn(indexRelation, (HeapTuple) NULL, InvalidBuffer);
+		CheckForSerializableConflictIn(indexRelation,
+									   (HeapTuple) NULL,
+									   InvalidBuffer);
 
 	/*
 	 * have the am's insert proc do all the work.
 	 */
 	return DatumGetBool(FunctionCall6(procedure,
-					PointerGetDatum(indexRelation),
-					PointerGetDatum(values),
-					PointerGetDatum(isnull),
-					PointerGetDatum(heap_t_ctid),
-					PointerGetDatum(heapRelation),
-					Int32GetDatum((int32) checkUnique)));
+									  PointerGetDatum(indexRelation),
+									  PointerGetDatum(values),
+									  PointerGetDatum(isnull),
+									  PointerGetDatum(heap_t_ctid),
+									  PointerGetDatum(heapRelation),
+									  Int32GetDatum((int32) checkUnique)));
 }
 
 /*
@@ -375,8 +406,12 @@ bool index_insert(Relation indexRelation, Datum *values, bool *isnull, ItemPoint
  *
  * Caller must be holding suitable locks on the heap and the index.
  */
-IndexScanDesc index_beginscan(Relation heapRelation, Relation indexRelation, Snapshot snapshot, int nkeys,
-		int norderbys) {
+IndexScanDesc
+index_beginscan(Relation heapRelation,
+				Relation indexRelation,
+				Snapshot snapshot,
+				int nkeys, int norderbys)
+{
 	IndexScanDesc scan;
 
 	scan = index_beginscan_internal(indexRelation, nkeys, norderbys, snapshot);
@@ -397,7 +432,11 @@ IndexScanDesc index_beginscan(Relation heapRelation, Relation indexRelation, Sna
  * As above, caller had better be holding some lock on the parent heap
  * relation, even though it's not explicitly mentioned here.
  */
-IndexScanDesc index_beginscan_bitmap(Relation indexRelation, Snapshot snapshot, int nkeys) {
+IndexScanDesc
+index_beginscan_bitmap(Relation indexRelation,
+					   Snapshot snapshot,
+					   int nkeys)
+{
 	IndexScanDesc scan;
 
 	scan = index_beginscan_internal(indexRelation, nkeys, 0, snapshot);
@@ -414,9 +453,12 @@ IndexScanDesc index_beginscan_bitmap(Relation indexRelation, Snapshot snapshot, 
 /*
  * index_beginscan_internal --- common code for index_beginscan variants
  */
-static IndexScanDesc index_beginscan_internal(Relation indexRelation, int nkeys, int norderbys, Snapshot snapshot) {
+static IndexScanDesc
+index_beginscan_internal(Relation indexRelation,
+						 int nkeys, int norderbys, Snapshot snapshot)
+{
 	IndexScanDesc scan;
-	FmgrInfo *procedure;
+	FmgrInfo   *procedure;
 
 	RELATION_CHECKS;
 	GET_REL_PROCEDURE(ambeginscan);
@@ -432,10 +474,11 @@ static IndexScanDesc index_beginscan_internal(Relation indexRelation, int nkeys,
 	/*
 	 * Tell the AM to open a scan.
 	 */
-	scan = (IndexScanDesc) DatumGetPointer(FunctionCall3(procedure,
-					PointerGetDatum(indexRelation),
-					Int32GetDatum(nkeys),
-					Int32GetDatum(norderbys)));
+	scan = (IndexScanDesc)
+		DatumGetPointer(FunctionCall3(procedure,
+									  PointerGetDatum(indexRelation),
+									  Int32GetDatum(nkeys),
+									  Int32GetDatum(norderbys)));
 
 	return scan;
 }
@@ -452,8 +495,12 @@ static IndexScanDesc index_beginscan_internal(Relation indexRelation, int nkeys,
  * scan->numberOfKeys is zero.)
  * ----------------
  */
-void index_rescan(IndexScanDesc scan, ScanKey keys, int nkeys, ScanKey orderbys, int norderbys) {
-	FmgrInfo *procedure;
+void
+index_rescan(IndexScanDesc scan,
+			 ScanKey keys, int nkeys,
+			 ScanKey orderbys, int norderbys)
+{
+	FmgrInfo   *procedure;
 
 	SCAN_CHECKS;
 	GET_SCAN_PROCEDURE(amrescan);
@@ -462,31 +509,39 @@ void index_rescan(IndexScanDesc scan, ScanKey keys, int nkeys, ScanKey orderbys,
 	Assert(norderbys == scan->numberOfOrderBys);
 
 	/* Release any held pin on a heap page */
-	if (BufferIsValid(scan->xs_cbuf)) {
+	if (BufferIsValid(scan->xs_cbuf))
+	{
 		ReleaseBuffer(scan->xs_cbuf);
 		scan->xs_cbuf = InvalidBuffer;
 	}
 
 	scan->xs_continue_hot = false;
 
-	scan->kill_prior_tuple = false; /* for safety */
+	scan->kill_prior_tuple = false;		/* for safety */
 
-	FunctionCall5(procedure, PointerGetDatum(scan), PointerGetDatum(keys), Int32GetDatum(nkeys),
-			PointerGetDatum(orderbys), Int32GetDatum(norderbys));
+	FunctionCall5(procedure,
+				  PointerGetDatum(scan),
+				  PointerGetDatum(keys),
+				  Int32GetDatum(nkeys),
+				  PointerGetDatum(orderbys),
+				  Int32GetDatum(norderbys));
 }
 
 /* ----------------
  *		index_endscan - end a scan
  * ----------------
  */
-void index_endscan(IndexScanDesc scan) {
-	FmgrInfo *procedure;
+void
+index_endscan(IndexScanDesc scan)
+{
+	FmgrInfo   *procedure;
 
 	SCAN_CHECKS;
 	GET_SCAN_PROCEDURE(amendscan);
 
 	/* Release any held pin on a heap page */
-	if (BufferIsValid(scan->xs_cbuf)) {
+	if (BufferIsValid(scan->xs_cbuf))
+	{
 		ReleaseBuffer(scan->xs_cbuf);
 		scan->xs_cbuf = InvalidBuffer;
 	}
@@ -505,8 +560,10 @@ void index_endscan(IndexScanDesc scan) {
  *		index_markpos  - mark a scan position
  * ----------------
  */
-void index_markpos(IndexScanDesc scan) {
-	FmgrInfo *procedure;
+void
+index_markpos(IndexScanDesc scan)
+{
+	FmgrInfo   *procedure;
 
 	SCAN_CHECKS;
 	GET_SCAN_PROCEDURE(ammarkpos);
@@ -530,8 +587,10 @@ void index_markpos(IndexScanDesc scan) {
  * if necessary, but for now it seems unimportant.
  * ----------------
  */
-void index_restrpos(IndexScanDesc scan) {
-	FmgrInfo *procedure;
+void
+index_restrpos(IndexScanDesc scan)
+{
+	FmgrInfo   *procedure;
 
 	Assert(IsMVCCSnapshot(scan->xs_snapshot));
 
@@ -540,7 +599,7 @@ void index_restrpos(IndexScanDesc scan) {
 
 	scan->xs_continue_hot = false;
 
-	scan->kill_prior_tuple = false; /* for safety */
+	scan->kill_prior_tuple = false;		/* for safety */
 
 	FunctionCall1(procedure, PointerGetDatum(scan));
 }
@@ -552,9 +611,11 @@ void index_restrpos(IndexScanDesc scan) {
  * or NULL if no more matching tuples exist.
  * ----------------
  */
-ItemPointer index_getnext_tid(IndexScanDesc scan, ScanDirection direction) {
-	FmgrInfo *procedure;
-	bool found;
+ItemPointer
+index_getnext_tid(IndexScanDesc scan, ScanDirection direction)
+{
+	FmgrInfo   *procedure;
+	bool		found;
 
 	SCAN_CHECKS;
 	GET_SCAN_PROCEDURE(amgettuple);
@@ -568,16 +629,18 @@ ItemPointer index_getnext_tid(IndexScanDesc scan, ScanDirection direction) {
 	 * to those fields here.
 	 */
 	found = DatumGetBool(FunctionCall2(procedure,
-					PointerGetDatum(scan),
-					Int32GetDatum(direction)));
+									   PointerGetDatum(scan),
+									   Int32GetDatum(direction)));
 
 	/* Reset kill flag immediately for safety */
 	scan->kill_prior_tuple = false;
 
 	/* If we're out of index entries, we're done */
-	if (!found) {
+	if (!found)
+	{
 		/* ... but first, release any held pin on a heap page */
-		if (BufferIsValid(scan->xs_cbuf)) {
+		if (BufferIsValid(scan->xs_cbuf))
+		{
 			ReleaseBuffer(scan->xs_cbuf);
 			scan->xs_cbuf = InvalidBuffer;
 		}
@@ -611,9 +674,11 @@ ItemPointer index_getnext_tid(IndexScanDesc scan, ScanDirection direction) {
  *		}
  * ----------------
  */
-ItemPointer smoothscan_getnext_tid(IndexScanDesc scan, ScanDirection direction) {
-	FmgrInfo *procedure;
-	bool found;
+ItemPointer
+smoothscan_getnext_tid(IndexScanDesc scan, ScanDirection direction)
+{
+	FmgrInfo   *procedure;
+	bool		found;
 
 	SCAN_CHECKS;
 	GET_SCAN_PROCEDURE(amgettuple);
@@ -627,16 +692,18 @@ ItemPointer smoothscan_getnext_tid(IndexScanDesc scan, ScanDirection direction) 
 	 * to those fields here.
 	 */
 	found = DatumGetBool(FunctionCall2(procedure,
-					PointerGetDatum(scan),
-					Int32GetDatum(direction)));
+									   PointerGetDatum(scan),
+									   Int32GetDatum(direction)));
 
 	/* Reset kill flag immediately for safety */
 	scan->kill_prior_tuple = false;
 
 	/* If we're out of index entries, we're done */
-	if (!found) {
+	if (!found)
+	{
 		/* ... but first, release any held pin on a heap page */
-		if (BufferIsValid(scan->xs_cbuf)) {
+		if (BufferIsValid(scan->xs_cbuf))
+		{
 			ReleaseBuffer(scan->xs_cbuf);
 			scan->xs_cbuf = InvalidBuffer;
 		}
@@ -652,7 +719,7 @@ ItemPointer smoothscan_getnext_tid(IndexScanDesc scan, ScanDirection direction) 
 /* ----------------
  *		index_fetch_heap - get the scan's next heap tuple
  *
- * The result is a visible heap tuple asmoothDescciated with the index TID most
+ * The result is a visible heap tuple associated with the index TID most
  * recently fetched by index_getnext_tid, or NULL if no more matching tuples
  * exist.  (There can be more than one matching tuple because of HOT chains,
  * although when using an MVCC snapshot it should be impossible for more than
@@ -667,32 +734,43 @@ ItemPointer smoothscan_getnext_tid(IndexScanDesc scan, ScanDirection direction) 
  * enough information to do it efficiently in the general case.
  * ----------------
  */
-HeapTuple index_fetch_heap(IndexScanDesc scan) {
+HeapTuple
+index_fetch_heap(IndexScanDesc scan)
+{
 	ItemPointer tid = &scan->xs_ctup.t_self;
-	bool all_dead = false;
-	bool got_heap_tuple;
+	bool		all_dead = false;
+	bool		got_heap_tuple;
 
 	/* We can skip the buffer-switching logic if we're in mid-HOT chain. */
-	if (!scan->xs_continue_hot) {
+	if (!scan->xs_continue_hot)
+	{
 		/* Switch to correct buffer if we don't have it already */
-		Buffer prev_buf = scan->xs_cbuf;
+		Buffer		prev_buf = scan->xs_cbuf;
 
-		scan->xs_cbuf = ReleaseAndReadBuffer(scan->xs_cbuf, scan->heapRelation, ItemPointerGetBlockNumber(tid));
+		scan->xs_cbuf = ReleaseAndReadBuffer(scan->xs_cbuf,
+											 scan->heapRelation,
+											 ItemPointerGetBlockNumber(tid));
 
 		/*
 		 * Prune page, but only if we weren't already on this page
 		 */
 		if (prev_buf != scan->xs_cbuf)
-			heap_page_prune_opt(scan->heapRelation, scan->xs_cbuf, RecentGlobalXmin);
+			heap_page_prune_opt(scan->heapRelation, scan->xs_cbuf,
+								RecentGlobalXmin);
 	}
 
 	/* Obtain share-lock on the buffer so we can examine visibility */
 	LockBuffer(scan->xs_cbuf, BUFFER_LOCK_SHARE);
-	got_heap_tuple = heap_hot_search_buffer(tid, scan->heapRelation, scan->xs_cbuf, scan->xs_snapshot, &scan->xs_ctup,
-			&all_dead, !scan->xs_continue_hot);
+	got_heap_tuple = heap_hot_search_buffer(tid, scan->heapRelation,
+											scan->xs_cbuf,
+											scan->xs_snapshot,
+											&scan->xs_ctup,
+											&all_dead,
+											!scan->xs_continue_hot);
 	LockBuffer(scan->xs_cbuf, BUFFER_LOCK_UNLOCK);
 
-	if (got_heap_tuple) {
+	if (got_heap_tuple)
+	{
 		/*
 		 * Only in a non-MVCC snapshot can more than one member of the HOT
 		 * chain be visible.
@@ -718,410 +796,6 @@ HeapTuple index_fetch_heap(IndexScanDesc scan) {
 	return NULL;
 }
 
-//HeapTuple SmoothProcessOnePageOrder(IndexScanDesc scan, BlockNumber page, ScanDirection direction, int no_orig_keys,
-//		ScanKey orig_keys, bool prefetcher, List *target_list, List *qual_list, Index index, int no_orig_smooth_keys,
-//		ScanKey orig_smooth_keys, List *allqual, ExprContext *econtext, TupleTableSlot *slot) {
-//	Page dp;
-//	int lines;
-//	OffsetNumber lineoff;
-//	int linesleft;
-//	ItemId lpp;
-//	bool valid;
-//	bool pageHasOneResultTuple = false; // does page have at least one match
-//	bool got_heap_tuple = false;
-//	bool traversed = false; /* did we walk already hot chain for the index probe?*/
-//	bool backward = ScanDirectionIsBackward(direction);
-//	HeapTuple tuple = &(scan->xs_ctup);
-//	ItemPointerData originalTupleID = tuple->t_self; /*this is a copy*/
-//	HeapTuple copyTuple = NULL;
-//	int itemIndex = 0;
-//
-//	SmoothScanOpaque smoothDesc = (SmoothScanOpaque) scan->smoothInfo;
-//	ResultCache *resultcache = smoothDesc->result_cache;
-//
-//	LockBuffer(scan->xs_cbuf, BUFFER_LOCK_SHARE);
-//	/* get page information */
-//	dp = (Page) BufferGetPage(scan->xs_cbuf);
-//
-//	if (resultcache->status != SS_FULL) {
-//
-//		if (ScanDirectionIsForward(direction)) {
-//			/* start from the first tuple */
-//			lineoff = FirstOffsetNumber;
-//			/* end is maximum offset for a page */
-//			lines = PageGetMaxOffsetNumber(dp);
-//			linesleft = lines - lineoff + 1;
-//		} else if (backward) {
-//			lines = PageGetMaxOffsetNumber(dp);
-//			lineoff = lines;
-//			linesleft = lineoff;
-//		}
-//		/*renata: this should not be the case */
-//		else {
-//			return NULL;
-//		}
-//
-//		/*
-//		 * advance the scan until we find a qualifying tuple or run out of stuff
-//		 * to scan
-//		 */
-//		itemIndex = 0;
-//
-//		while (linesleft > 0) {
-//			lpp = PageGetItemId(dp, lineoff);
-//			valid = false;
-//			if (ItemIdIsNormal(lpp)) {
-//				tuple->t_data = (HeapTupleHeader) PageGetItem((Page) dp, lpp);
-//				tuple->t_len = ItemIdGetLength(lpp);
-//				tuple->t_tableOid = scan->heapRelation->rd_id;
-//				ItemPointerSet(&(tuple->t_self), page, lineoff);
-//				/*this is a tuple for which we are doing an index probe*/
-//				if (lineoff == originalTupleID.ip_posid) {
-//					/* have to check if we have already walked hot chain - because if we did originaltupleID value has CHANGED
-//					 * and it is possible to enter this 2 times) for original and final version */
-//					/* Note: for prefetcher - we don't have the targeted tuple */
-//					if (!traversed && !prefetcher) {
-//						/* we have to traverse through hot chain */
-//						got_heap_tuple = heap_hot_search_buffer(&originalTupleID, scan->heapRelation, scan->xs_cbuf,
-//								scan->xs_snapshot, tuple, NULL, true);
-//						/* after this originalTupleID is updated to show to a new one */
-//						/* this is the one that needs to be returned */
-//
-//						if (got_heap_tuple) {
-//							if (!enable_filterpushdown) {
-//								valid = true;
-//							} else {
-//								//filter pushdown
-//								//check whether other predicates qualify and only then return tuple
-//								if (allqual != NULL) {
-//									//renata:todo 2014 HeapKeyTest can cover only predicates of type Var op Const
-//									//for filter push down - we need to use allqual - these are all posible predicates on that table
-//									valid = false;
-//									ExecStoreTuple(tuple, /* tuple to store */
-//									slot, /* slot to store in */
-//									InvalidBuffer, /* buffer containing tuple */
-//									false); /* don't pfree */
-//
-//									econtext->ecxt_scantuple = slot;
-//									ResetExprContext(econtext);
-//									if (ExecQual(allqual, econtext, false)) {
-//										valid = true;
-//									}
-//								} else {
-//									/* if no keys to check - every tuple is valid*/
-//									valid = true;
-//								}
-//
-//							} // if filter push down
-//							if (valid) {
-//								copyTuple = heap_copytuple(tuple);
-//								smooth_resultcache_add_tuple(scan, page, lineoff, tuple,
-//																	RelationGetDescr(scan->heapRelation), target_list, qual_list, index,
-//																	&pageHasOneResultTuple);
-//							}
-//							//todo check whether traversed should be on even if didn't find match
-//							traversed = true;
-//						}
-//					}
-//
-//				} else { // end if tuple for which we are doing index probe
-//					/* read only visible tuples - last tuples in hot chain*/
-//					got_heap_tuple = HeapTupleSatisfiesVisibility(tuple, scan->xs_snapshot, scan->xs_cbuf);
-//					if (got_heap_tuple) {
-//						//renata todo: maybe i could remove this
-//						PredicateLockTuple(scan->heapRelation, tuple, scan->xs_snapshot);
-//
-//						/* check if we have produced tuples before smooth */
-//						if (num_tuples_switch >= 0) {
-//							//if yes check if this tuple is produced before smooth has started and only if not do predicate check
-////							TID_SHORT formTid;
-////							form_tuple_id_short(tuple, page, &formTid);
-//							TID formTid;
-//							form_tuple_id(tuple, page, &formTid);
-//
-//							if (!smooth_tuplecache_find_tuple(smoothDesc->tupleID_cache, formTid)) {
-//								if (no_orig_smooth_keys > 0) {
-//
-//									if (enable_smoothnestedloop) {
-//										HeapSmoothKeyTest(tuple, RelationGetDescr(scan->heapRelation),
-//												no_orig_smooth_keys, orig_smooth_keys, valid);
-//									} else {
-//										HeapKeyTest(tuple, RelationGetDescr(scan->heapRelation), no_orig_smooth_keys,
-//												orig_smooth_keys, valid);
-//									}
-//									/* next line is just for vtune (to see the code of a macro) */
-//									//valid = HeapKeyTestSmooth(tuple, RelationGetDescr(scan->heapRelation), no_orig_smooth_keys, orig_smooth_keys);
-//								} else {
-//									valid = true;
-//								}
-//								if (valid && enable_filterpushdown) {
-//									//FILTER PUSH DOWN
-//									if (allqual != NULL) {
-//										//renata:todo 2014 HeapKeyTest can cover only predicates of type Var op Const
-//										//for filter push down - we need to use allqual - these are all posible predicates on that table
-//										valid = false;
-//										ExecStoreTuple(tuple, /* tuple to store */
-//										slot, /* slot to store in */
-//										InvalidBuffer, /* buffer containing tuple */
-//										false); /* don't pfree */
-//
-//										econtext->ecxt_scantuple = slot;
-//										ResetExprContext(econtext);
-//										if (ExecQual(allqual, econtext, false)) {
-//											valid = true;
-//										}
-//									} else {
-//										/* if no keys to check - every tuple is valid*/
-//										valid = true;
-//									}
-//								} //filter push down
-//							} else {
-//								//if find tuple
-//								;//nothing
-//							}
-//						} else {
-////							// Start smooth from beginning
-//							if (no_orig_smooth_keys > 0) {
-//
-//								if (enable_smoothnestedloop) {
-//									HeapSmoothKeyTest(tuple, RelationGetDescr(scan->heapRelation), no_orig_smooth_keys,
-//											orig_smooth_keys, valid);
-//								} else {
-//									HeapKeyTest(tuple, RelationGetDescr(scan->heapRelation), no_orig_smooth_keys,
-//											orig_smooth_keys, valid);
-//								}
-//								//valid = HeapKeyTestSmooth(tuple, RelationGetDescr(scan->heapRelation), no_orig_smooth_keys, orig_smooth_keys);
-//							} else {
-//								/* if no keys to check - every tuple is valid*/
-//								valid = true;
-//							}
-//							if (valid && enable_filterpushdown) {
-//								// filter pushdown
-//								if (allqual != NULL) {
-//									//renata:todo 2014 HeapKeyTest can cover only predicates of type Var op Const
-//									//for filter push down - we need to use allqual - these are all posible predicates on that table
-//									valid = false;
-//									ExecStoreTuple(tuple, /* tuple to store */
-//									slot, /* slot to store in */
-//									InvalidBuffer, /* buffer containing tuple */
-//									false); /* don't pfree */
-//
-//									econtext->ecxt_scantuple = slot;
-//									ResetExprContext(econtext);
-//									if (ExecQual(allqual, econtext, false)) {
-//										valid = true;
-//									}
-//								} else {
-//									/* if no keys to check - every tuple is valid*/
-//									valid = true;
-//								}
-//							} //filter pushwdown
-//
-//						}
-//						if (valid) {
-//							/* this is a randomly found tuple - store it in the result cache since we will need it later */
-//							if (smooth_resultcache_add_tuple(scan, page, lineoff, tuple,
-//									RelationGetDescr(scan->heapRelation), target_list, qual_list, index,
-//									&pageHasOneResultTuple)) {
-//
-//								itemIndex++;
-//
-//							} else {
-//								if(resultcache->status == SS_FULL)
-//									break;
-//							}
-//
-//						}
-//
-//					}
-//
-//				}
-//
-//			} /* if tuple is normal*/
-//			/*
-//			 * otherwise move to the next item on the page
-//			 */
-//			--linesleft;
-//
-//			if (ScanDirectionIsForward(direction)) {
-//				++lpp; /* move forward in this page's ItemId array */
-//				++lineoff;
-//			} else {
-//				--lpp; /* move back in this page's ItemId array */
-//				--lineoff;
-//			}
-//
-//		}
-//
-//		/* we have processed all tuples from this page */
-//		if (!linesleft) {
-//			smoothDesc->bs_vispages = bms_add_member(smoothDesc->bs_vispages, page);
-//			smoothDesc->num_vispages++;
-//			/* set next page to process in a sequential manner */
-//			if (smoothDesc->prefetch_pages)
-//				smoothDesc->nextPageId = page + 1;
-//
-//		} else {
-//			//hash is full - even if we have a prefetcher - have to set it to 0
-//			smoothDesc->prefetch_pages = 0;
-//		}
-//
-//		/*we have obtained the tuple we needed*/
-//		if (copyTuple) {
-////			int batchno = -1;
-////			ExecResultCacheGetBatch(scan, tuple, &batchno);
-////							if (smoothDesc->result_cache->curbatch != batchno) {
-////
-////								//	print_tuple(RelationGetDescr(scan->heapRelation),heapTuple);
-////								ExecHashJoinNewBatch(scan, batchno);
-////							}
-//
-//			/* copy tuple is the one we need to return */
-//			heap_copytuple_with_tuple(copyTuple, tuple);
-//			heap_freetuple(copyTuple);
-//			//print_slot(slot);
-//
-//			//fflush(stdout);
-//
-//
-//			/* free copy, since we don't need it anymore */
-//
-//			LockBuffer(scan->xs_cbuf, BUFFER_LOCK_UNLOCK);
-//
-//		} else {
-//			/*we haven't obtained tuple we needed
-//			 * two cases: tuple is old (updated) in that case return null
-//			 * else: hash table is full and we jumped out of fetching tuples before we reached required tuple*/
-//			if (smoothDesc->result_cache->status == SS_FULL && linesleft && !prefetcher) {
-//				if (!traversed) {
-//					/* we have to traverse through hot chain */
-//					got_heap_tuple = heap_hot_search_buffer(&originalTupleID, scan->heapRelation, scan->xs_cbuf,
-//							scan->xs_snapshot, tuple, NULL, true);
-//					LockBuffer(scan->xs_cbuf, BUFFER_LOCK_UNLOCK);
-//					/* after this originalTupleID is updated to show to a new one */
-//					/* this is the one that needs to be returned */
-//
-//					if (got_heap_tuple) {
-//						if (!enable_filterpushdown) {
-//							return tuple;
-//						} else {
-//							//check remaining predicates and only then return tuple if all predicates qualify
-//							//otherwise return NULL
-//							//filter pushdown
-//							//check whether other predicates qualify and only then return tuple
-//							if (allqual != NULL) {
-//								//renata:todo 2014 HeapKeyTest can cover only predicates of type Var op Const
-//								//for filter push down - we need to use allqual - these are all posible predicates on that table
-//								valid = false;
-//								ExecStoreTuple(tuple, /* tuple to store */
-//								slot, /* slot to store in */
-//								InvalidBuffer, /* buffer containing tuple */
-//								false); /* don't pfree */
-//
-//								econtext->ecxt_scantuple = slot;
-//								ResetExprContext(econtext);
-//								if (ExecQual(allqual, econtext, false)) {
-//									valid = true;
-//								}
-//							} // no quals
-//							else {
-//								/* if no keys to check - every tuple is valid*/
-//								valid = true;
-//							}
-//							if (valid) {
-//								return tuple;
-//							} else {
-//								//additional filtering didn't pass
-//								ItemPointerSetInvalid(&(tuple->t_self));
-//								tuple->t_tableOid = InvalidOid;
-//								return NULL;
-//							}
-//						} //filtering push down
-//					} else { // didn't get any tuple
-//						ItemPointerSetInvalid(&(tuple->t_self));
-//						tuple->t_tableOid = InvalidOid;
-//						return NULL;
-//					}
-//				}
-//
-//			}
-//			/*I am sure that in the case of prefetcher I will jump here and return nothing*/
-//			LockBuffer(scan->xs_cbuf, BUFFER_LOCK_UNLOCK);
-//			ItemPointerSetInvalid(&(tuple->t_self));
-//			tuple->t_tableOid = InvalidOid;
-//			return NULL;
-//
-//		} // if we have copy tuple
-//
-//		return tuple;
-//	} else {
-//		/* we are already in the full state
-//		 * just return a normal tuple */
-//		if (!prefetcher) {
-//			got_heap_tuple = heap_hot_search_buffer(&originalTupleID, scan->heapRelation, scan->xs_cbuf,
-//					scan->xs_snapshot, tuple, NULL, true);
-//			LockBuffer(scan->xs_cbuf, BUFFER_LOCK_UNLOCK);
-//			/* after this originalTupleID is updated to show to a new one */
-//			/* this is the one that needs to be returned */
-//
-//			if (got_heap_tuple) {
-//				if (!enable_filterpushdown) {
-//					return tuple;
-//				} //else filtering pushdown
-//				else {
-//					//check remaining predicates and only then return tuple if all predicates qualify
-//					//otherwise return NULL
-//					//filter pushdown
-//					//check whether other predicates qualify and only then return tuple
-//					if (allqual != NULL) {
-//						//renata:todo 2014 HeapKeyTest can cover only predicates of type Var op Const
-//						//for filter push down - we need to use allqual - these are all posible predicates on that table
-//						valid = false;
-//						ExecStoreTuple(tuple, /* tuple to store */
-//						slot, /* slot to store in */
-//						InvalidBuffer, /* buffer containing tuple */
-//						false); /* don't pfree */
-//
-//						econtext->ecxt_scantuple = slot;
-//						ResetExprContext(econtext);
-//						if (ExecQual(allqual, econtext, false)) {
-//							valid = true;
-//						}
-//					} // no quals
-//					else {
-//						/* if no keys to check - every tuple is valid*/
-//						valid = true;
-//					}
-//					if (valid) {
-//						return tuple;
-//					} else {
-//						//additional filtering didn't pass
-//						ItemPointerSetInvalid(&(tuple->t_self));
-//						tuple->t_tableOid = InvalidOid;
-//						return NULL;
-//					}
-//				} //end filtering pushdown
-//			} else { //we didn't get any tuple
-//				ItemPointerSetInvalid(&(tuple->t_self));
-//				tuple->t_tableOid = InvalidOid;
-//				return NULL;
-//			}
-//		} else {
-//			/* prefetcher kicked in - but our hash table became full!
-//			 * turn off prefether
-//			 * */
-//			LockBuffer(scan->xs_cbuf, BUFFER_LOCK_UNLOCK);
-//			smoothDesc->prefetch_pages = 0;
-//			smoothDesc->prefetch_target = 0;
-//			smoothDesc->nextPageId = InvalidBlockNumber;
-//
-//			ItemPointerSetInvalid(&(tuple->t_self));
-//			tuple->t_tableOid = InvalidOid;
-//			return NULL;
-//		}
-//	}
-//
-//}
 HeapTuple
 SmoothProcessOnePageOrder(IndexScanDesc scan, BlockNumber page, ScanDirection direction, int no_orig_keys, ScanKey orig_keys, bool prefetcher, List *target_list, List *qual_list, Index index, int no_orig_smooth_keys, ScanKey orig_smooth_keys, List *allqual, ExprContext *econtext, TupleTableSlot *slot)
 {
@@ -1346,11 +1020,8 @@ SmoothProcessOnePageOrder(IndexScanDesc scan, BlockNumber page, ScanDirection di
 
 						}
 						if (valid){
-
-
 							/* this is a randomly found tuple - store it in the result cache since we will need it later */
-							if(smooth_resultcache_add_tuple(scan, page, lineoff, tuple,RelationGetDescr(scan->heapRelation), target_list, qual_list, index,
-									&pageHasOneResultTuple)){
+							if(smooth_resultcache_add_tuple(scan, page, lineoff, tuple, RelationGetDescr(scan->heapRelation), target_list, qual_list, index)){
 								smoothDesc->prefetch_counter++;
 								smoothDesc->smooth_counter++;
 								//17.02.2014
@@ -1561,43 +1232,51 @@ SmoothProcessOnePageOrder(IndexScanDesc scan, BlockNumber page, ScanDirection di
 	}
 
 }
-HeapTuple SmoothProcesOnePage(IndexScanDesc scan, BlockNumber page, ScanDirection direction, int no_orig_keys,
-		ScanKey orig_keys, int no_orig_smooth_keys, ScanKey orig_smooth_keys, List *allqual, ExprContext *econtext,
-		TupleTableSlot *slot) {
-	Page dp;
-	int lines;
-	OffsetNumber lineoff;
-	int linesleft;
-	ItemId lpp;
-	bool valid;
-	bool pageHasOneResultTuple = false; // does page have at least one match
-	bool got_heap_tuple = false;
-	bool backward = ScanDirectionIsBackward(direction);
 
-	HeapTuple tuple = &(scan->xs_ctup);
+
+HeapTuple
+SmoothProcessOnePage(IndexScanDesc scan, BlockNumber page, ScanDirection direction, int no_orig_keys, ScanKey orig_keys, int no_orig_smooth_keys, ScanKey orig_smooth_keys, List *allqual, ExprContext *econtext, TupleTableSlot *slot )
+{
+	Page		dp;
+	int			lines;
+	OffsetNumber lineoff;
+	int			linesleft;
+	ItemId		lpp;
+	bool		valid = false;
+	bool 		pageHasOneResultTuple = false;  // does page have at least one match
+	bool		got_heap_tuple = false;
+	bool		backward = ScanDirectionIsBackward(direction);
+
+	HeapTuple	tuple = &(scan->xs_ctup);
 	int itemIndex = 0;
 
-	SmoothScanOpaque smoothDesc = (SmoothScanOpaque) scan->smoothInfo;
+	SmoothScanOpaque  smoothDesc =  (SmoothScanOpaque)scan->smoothInfo;
+
 
 	LockBuffer(scan->xs_cbuf, BUFFER_LOCK_SHARE);
 	/* get page information */
 	dp = (Page) BufferGetPage(scan->xs_cbuf);
 
-	if (ScanDirectionIsForward(direction)) {
+	if (ScanDirectionIsForward(direction))
+	{
 		/* start from the first tuple */
 		lineoff = FirstOffsetNumber;
 		/* end is maximum offset for a page */
 		lines = PageGetMaxOffsetNumber(dp);
 		linesleft = lines - lineoff + 1;
-	} else if (backward) {
+	}
+	else if (backward){
 		lines = PageGetMaxOffsetNumber(dp);
 		lineoff = lines;
 		linesleft = lineoff;
 	}
 	/*renata: this should not be the case */
-	else {
+	else
+	{
 		return NULL;
 	}
+
+
 
 	/*
 	 * advance the scan until we find a qualifying tuple or run out of stuff
@@ -1608,10 +1287,12 @@ HeapTuple SmoothProcesOnePage(IndexScanDesc scan, BlockNumber page, ScanDirectio
 	/* initialize tuple workspace to empty */
 	smoothDesc->currPos.nextTupleOffset = 0;
 
-	while (linesleft > 0) {
+	while (linesleft > 0)
+	{
 		lpp = PageGetItemId(dp, lineoff);
 
-		if (ItemIdIsNormal(lpp)) {
+		if (ItemIdIsNormal(lpp))
+		{
 			tuple->t_data = (HeapTupleHeader) PageGetItem((Page) dp, lpp);
 			tuple->t_len = ItemIdGetLength(lpp);
 			tuple->t_tableOid = scan->heapRelation->rd_id;
@@ -1620,113 +1301,119 @@ HeapTuple SmoothProcesOnePage(IndexScanDesc scan, BlockNumber page, ScanDirectio
 			got_heap_tuple = HeapTupleSatisfiesVisibility(tuple, scan->xs_snapshot, scan->xs_cbuf);
 			//CheckForSerializableConflictOut(got_heap_tuple, scan->heapRelation, &tuple,
 			//								scan->xs_cbuf, scan->xs_snapshot);
-			if (got_heap_tuple) {
+			if (got_heap_tuple){
 				PredicateLockTuple(scan->heapRelation, tuple, scan->xs_snapshot);
-				if (num_tuples_switch >= 0) {
+				if(num_tuples_switch >= 0){
 					//if yes check if this tuple is produced before smooth has started and only if not do predicate check
 //					TID_SHORT formTid;
 //					form_tuple_id_short(tuple, page, &formTid);
 					TID formTid;
 					form_tuple_id(tuple, page, &formTid);
 
-					if (!smooth_tuplecache_find_tuple(smoothDesc->tupleID_cache, formTid)) {
-						if (no_orig_smooth_keys > 0) {
+					if(!smooth_tuplecache_find_tuple(smoothDesc->tupleID_cache, formTid)){
+						if (no_orig_smooth_keys > 0){
 							//HeapKeyTest(tuple, RelationGetDescr(scan->heapRelation), no_orig_smooth_keys, orig_smooth_keys, valid);
 							/* next line is just for vtune (to see the code of a macro) */
 							//valid = HeapKeyTestSmooth(tuple, RelationGetDescr(scan->heapRelation), no_orig_smooth_keys, orig_smooth_keys);
-							if (enable_smoothnestedloop) {
-								HeapSmoothKeyTest(tuple, RelationGetDescr(scan->heapRelation), no_orig_smooth_keys,
-										orig_smooth_keys, valid);
-							} else {
-								HeapKeyTest(tuple, RelationGetDescr(scan->heapRelation), no_orig_smooth_keys,
-										orig_smooth_keys, valid);
+							if (enable_smoothnestedloop){
+								HeapSmoothKeyTest(tuple, RelationGetDescr(scan->heapRelation), no_orig_smooth_keys, orig_smooth_keys, valid);
+							}else{
+								HeapKeyTest(tuple, RelationGetDescr(scan->heapRelation), no_orig_smooth_keys, orig_smooth_keys, valid);
 							}
-						} else {
+						}else{
 							valid = true;
 						}
-						if (valid && enable_filterpushdown) {
-							//FILTER PUSH DOWN
-							if (allqual != NULL) {
+						if(valid && enable_filterpushdown){
+						 //FILTER PUSH DOWN
+							if(allqual != NULL) {
 								//renata:todo 2014 HeapKeyTest can cover only predicates of type Var op Const
 								//for filter push down - we need to use allqual - these are all posible predicates on that table
 								valid = false;
-								ExecStoreTuple(tuple, /* tuple to store */
-								slot, /* slot to store in */
-								InvalidBuffer, /* buffer containing tuple */
-								false); /* don't pfree */
+								ExecStoreTuple(tuple,	/* tuple to store */
+											   slot,	/* slot to store in */
+											   InvalidBuffer,		/* buffer containing tuple */
+											   false);	/* don't pfree */
+
 
 								econtext->ecxt_scantuple = slot;
 								ResetExprContext(econtext);
-								if (ExecQual(allqual, econtext, false)) {
+								if (ExecQual(allqual, econtext, false))
+								{
 									valid = true;
 								}
-							} else {
+							}
+							else{
 								/* if no keys to check - every tuple is valid*/
 								valid = true;
 							}
 						} //filter push down
-					} else {
+					}else{
 						//if smooth_tuplecache_find_tuple
 						;//nothing
 					}
-				} else {
+				}else{
 					//started smooth from the beginning
 					// Start smooth from beginning
-					if (no_orig_smooth_keys > 0) {
+					if (no_orig_smooth_keys > 0){
 
 						//HeapKeyTest(tuple, RelationGetDescr(scan->heapRelation), no_orig_smooth_keys, orig_smooth_keys, valid);
 						//valid = HeapKeyTestSmooth(tuple, RelationGetDescr(scan->heapRelation), no_orig_smooth_keys, orig_smooth_keys);
-						if (enable_smoothnestedloop) {
-							HeapSmoothKeyTest(tuple, RelationGetDescr(scan->heapRelation), no_orig_smooth_keys,
-									orig_smooth_keys, valid);
-						} else {
-							HeapKeyTest(tuple, RelationGetDescr(scan->heapRelation), no_orig_smooth_keys,
-									orig_smooth_keys, valid);
+						if (enable_smoothnestedloop){
+							HeapSmoothKeyTest(tuple, RelationGetDescr(scan->heapRelation), no_orig_smooth_keys, orig_smooth_keys, valid);
+						}else{
+							HeapKeyTest(tuple, RelationGetDescr(scan->heapRelation), no_orig_smooth_keys, orig_smooth_keys, valid);
 						}
-					} else {
+					}else{
 						/* if no keys to check - every tuple is valid*/
 						valid = true;
 					}
-					if (valid && enable_filterpushdown) {
+					if(valid && enable_filterpushdown){
 
-						// filter pushdown
-						if (allqual != NULL) {
+					// filter pushdown
+						if(allqual != NULL) {
 							//renata:todo 2014 HeapKeyTest can cover only predicates of type Var op Const
 							//for filter push down - we need to use allqual - these are all posible predicates on that table
 							valid = false;
-							ExecStoreTuple(tuple, /* tuple to store */
-							slot, /* slot to store in */
-							InvalidBuffer, /* buffer containing tuple */
-							false); /* don't pfree */
+							ExecStoreTuple(tuple,	/* tuple to store */
+										   slot,	/* slot to store in */
+										   InvalidBuffer,		/* buffer containing tuple */
+										   false);	/* don't pfree */
+
 
 							econtext->ecxt_scantuple = slot;
 							ResetExprContext(econtext);
-							if (ExecQual(allqual, econtext, false)) {
+							if (ExecQual(allqual, econtext, false))
+							{
 								valid = true;
 							}
-						} else {
+						}
+						else{
 							/* if no keys to check - every tuple is valid*/
 							valid = true;
 						}
-					} //filter pushwdown
+					}//filter pushwdown
 
-				} //if num tuples switch
-				if (valid) {
+				}//if num tuples switch
+				if (valid){
 					_bt_saveheapitem(smoothDesc, itemIndex, lineoff, tuple);
 					smoothDesc->prefetch_counter++;
 					smoothDesc->smooth_counter++;
 					//17.02.2014
 					//increase the counter just for the first time we calculate this page
-					if (!pageHasOneResultTuple) {
+					if(!pageHasOneResultTuple){
 						smoothDesc->global_qualifying_pages++;
 						smoothDesc->local_qualifying_pages++;
-						pageHasOneResultTuple = true;
+						pageHasOneResultTuple =  true;
 					}
+
 
 					itemIndex++;
 				}
 
+
 			}
+
+
 
 		} /* if tuple is normal*/
 		/*
@@ -1734,11 +1421,14 @@ HeapTuple SmoothProcesOnePage(IndexScanDesc scan, BlockNumber page, ScanDirectio
 		 */
 		--linesleft;
 
-		if (ScanDirectionIsForward(direction)) {
-			++lpp; /* move forward in this page's ItemId array */
+		if (ScanDirectionIsForward(direction))
+		{
+			++lpp;			/* move forward in this page's ItemId array */
 			++lineoff;
-		} else {
-			--lpp; /* move back in this page's ItemId array */
+		}
+		else
+		{
+			--lpp;			/* move back in this page's ItemId array */
 			--lineoff;
 		}
 
@@ -1750,8 +1440,10 @@ HeapTuple SmoothProcesOnePage(IndexScanDesc scan, BlockNumber page, ScanDirectio
 	smoothDesc->currPos.itemHeapIndex = 0;
 	LockBuffer(scan->xs_cbuf, BUFFER_LOCK_UNLOCK);
 
+
+
 	/* set first tuple for the found ones */
-	if (itemIndex > 0) {
+	if(itemIndex > 0){
 
 		/* OK, itemIndex says what to return */
 		SmoothScanPosItem *currItem = &smoothDesc->currPos.items[smoothDesc->currPos.itemHeapIndex];
@@ -1759,24 +1451,24 @@ HeapTuple SmoothProcesOnePage(IndexScanDesc scan, BlockNumber page, ScanDirectio
 		//scan->xs_ctup.t_self = currItem->heapTid;
 		scan->xs_ctup = *((HeapTuple) (smoothDesc->currTuples + currItem->tupleOffset));
 
-		if (itemIndex > 1) {
+		if(itemIndex > 1){
 			smoothDesc->more_data_for_smooth = true;
-		} else {
+		}else{
 			/* item is 1 - return it and make page as visited */
 			smoothDesc->more_data_for_smooth = false;
 
 			/* static array option */
 			//smoothDesc->vispages[page] = (PageBitmap)1;
+
 			/* bitmap set option */
 			smoothDesc->bs_vispages = bms_add_member(smoothDesc->bs_vispages, page);
-			smoothDesc->num_vispages++;
 			/* set next page to process in a sequential manner */
 			if (smoothDesc->prefetch_pages)
 				smoothDesc->nextPageId = page + 1;
 
 			/* 3. "clear" currPos space */
 			smoothDesc->currPos.firstHeapItem = 0;
-			smoothDesc->currPos.lastHeapItem = 0;
+			smoothDesc->currPos.lastHeapItem  = 0;
 			smoothDesc->currPos.itemHeapIndex = 0;
 			/* initialize tuple workspace to empty */
 			smoothDesc->currPos.nextTupleOffset = 0;
@@ -1784,16 +1476,16 @@ HeapTuple SmoothProcesOnePage(IndexScanDesc scan, BlockNumber page, ScanDirectio
 		}
 
 		return &scan->xs_ctup;
-	} else {
+	}else{
 
 		ItemPointerSetInvalid(&(tuple->t_self));
 		tuple->t_tableOid = InvalidOid;
 
 		/* static array option */
 		//smoothDesc->vispages[page] = (PageBitmap)1;
+
 		/* bitmap set option */
 		smoothDesc->bs_vispages = bms_add_member(smoothDesc->bs_vispages, page);
-		smoothDesc->num_vispages++;
 		if (smoothDesc->prefetch_pages)
 			smoothDesc->nextPageId = page + 1;
 		return NULL;
@@ -1805,25 +1497,25 @@ HeapTuple SmoothProcesOnePage(IndexScanDesc scan, BlockNumber page, ScanDirectio
  *		todo: Smooth Scan logic should go here !!!
  *		index_smoothfetch_heap - get the scan's next heap tuple
  *		 * return only one tuple, BUT
- * 1. check the rest of tuples from the page
- * 2. store them in 'result cache ' (hash map: key (block_id, page_id, offset), value - tuple)
- * 3. add (block_id, page_id) in 'Page_check' hash map: key (block_id, page_id), value - #tuples that still qualify
+		 * 1. check the rest of tuples from the page
+		 * 2. store them in 'result cache ' (hash map: key (block_id, page_id, offset), value - tuple)
+		 * 3. add (block_id, page_id) in 'Page_check' hash map: key (block_id, page_id), value - #tuples that still qualify
+		 *
+		 * For index probe:
+		 * 1. First check 'Page check' cache - if page is already checked
+		 * 	  If (Yes){
+		 * 	  	1.1 Get tuple from 'Result cache'
+		 * 	  	1.2 Remove it from 'Result cache'
+		 * 	  	1.3 Decrease # tuples in 'Page check' cache
+		 * 	  }
+		 * 	  else (No){
+		 * 	  	1.1 return tuple for which we probed index
+		 * 	  	1.2 Scan the rest of the page
+		 * 	  	1.3 Put result(s) in 'Result cache'
+		 * 	  	1.4 Increase 'Page check' #tuples - first time add one row
+		 * 	  }
  *
- * For index probe:
- * 1. First check 'Page check' cache - if page is already checked
- * 	  If (Yes){
- * 	  	1.1 Get tuple from 'Result cache'
- * 	  	1.2 Remove it from 'Result cache'
- * 	  	1.3 Decrease # tuples in 'Page check' cache
- * 	  }
- * 	  else (No){
- * 	  	1.1 return tuple for which we probed index
- * 	  	1.2 Scan the rest of the page
- * 	  	1.3 Put result(s) in 'Result cache'
- * 	  	1.4 Increase 'Page check' #tuples - first time add one row
- * 	  }
- *
- * The result is a visible heap tuple asmoothDescciated with the index TID most
+ * The result is a visible heap tuple associated with the index TID most
  * recently fetched by index_getnext_tid, or NULL if no more matching tuples
  * exist.  (There can be more than one matching tuple because of HOT chains,
  * although when using an MVCC snapshot it should be impossible for more than
@@ -1839,100 +1531,65 @@ HeapTuple SmoothProcesOnePage(IndexScanDesc scan, BlockNumber page, ScanDirectio
  * ----------------
  */
 
-HeapTuple index_smoothfetch_heap(IndexScanDesc scan, ScanDirection direction, double plan_rows, int no_orig_keys,
-		ScanKey orig_keys, List *target_list, List *qual_list, Index index, int no_orig_smooth_keys,
-		ScanKey orig_smooth_keys, List *allqual, ExprContext *econtext, TupleTableSlot *slot) {
+HeapTuple
+index_smoothfetch_heap(IndexScanDesc scan, ScanDirection direction, double plan_rows, int no_orig_keys, ScanKey orig_keys, List *target_list, List *qual_list, Index index, int no_orig_smooth_keys, ScanKey orig_smooth_keys, List *allqual, ExprContext *econtext, TupleTableSlot *slot)
+{
 	ItemPointer tid = &scan->xs_ctup.t_self;
 
-	bool all_dead = false;
-	bool got_heap_tuple = false;
-	bool used_prefetcher = false;
+	bool		all_dead = false;
+	bool		got_heap_tuple = false;
+	bool 		used_prefetcher = false;
 	BlockNumber page;
-	Page pageorig;
-	HeapTuple tuple = &(scan->xs_ctup);
+	HeapTuple	tuple = &(scan->xs_ctup);
 
-	int max_number_of_pages = 0; /*maximal number of pages for prefetcher */
-	SmoothScanOpaque smoothDesc = (SmoothScanOpaque) scan->smoothInfo;
+
+	int 		max_number_of_pages = 0; 	/*maximal number of pages for prefetcher */
+	SmoothScanOpaque  smoothDesc =  (SmoothScanOpaque)scan->smoothInfo;
 
 	/* prefetching logic should start only after smooth scan is on */
-	if (smoothDesc->start_smooth && (!enable_smoothscan)) {
+	if(smoothDesc->start_smooth && (!enable_smoothscan)){
 		//NEEDE FOR SELECTIVITY DRIVEN POLICY in case of aggegation
 		if (!smoothDesc->start_prefetch &&
-		/* number_tuples_switch = 0, meaning switch when actual cardinality is higher than estimated */
-		((!num_tuples_prefetch && smoothDesc->prefetch_counter > plan_rows)
-		/* number_tuples_prefetch > 0, meaning switch when actual cardinality is equal 'number_tuples_prefetch' */
-		|| (num_tuples_prefetch && smoothDesc->prefetch_counter >= num_tuples_prefetch)
+					/* number_tuples_switch = 0, meaning switch when actual cardinality is higher than estimated */
+				(        (!num_tuples_prefetch && smoothDesc->prefetch_counter > plan_rows)
+						/* number_tuples_prefetch > 0, meaning switch when actual cardinality is equal 'number_tuples_prefetch' */
+					||   (num_tuples_prefetch && smoothDesc->prefetch_counter >= num_tuples_prefetch)
 
-		)) {
+				)
+				){
 			smoothDesc->start_prefetch = true;
 			//set it again to 0
 			smoothDesc->prefetch_counter = 0;
 
 		}
 
-		if (smoothDesc->orderby) {
+
+		if(smoothDesc->orderby){
 			int hotRegion = 0;
 			/* we have to process next page from prefetcher*/
-			if (BlockNumberIsValid(smoothDesc->nextPageId)) {
-				page = smoothDesc->nextPageId; /*to do check here as well if page <=*/
-				/* next time it should be invalid */
-				smoothDesc->nextPageId = InvalidBlockNumber;
-				used_prefetcher = true;
+			if(BlockNumberIsValid(smoothDesc->nextPageId)) {
+					page = smoothDesc->nextPageId; /*to do check here as well if page <=*/
+					/* next time it should be invalid */
+					smoothDesc->nextPageId = InvalidBlockNumber;
+					used_prefetcher = true;
 
-			} else {
-
-				IndexTuple indexTuple =scan->xs_itup;
-				if (smoothDesc->result_cache->status != SS_EMPTY && indexTuple && enable_smoothshare) {
-					ExecResultCacheSwitchPartition(scan,smoothDesc,indexTuple);
-				}
+			}else{
+				/* not in the prefetching mode */
+				/* when order by logic is similar but we are using result cache instead of bitmap*/
+				/* if the page is in the cache - fill tuple with it*/
+				/* NO ORDER BY - return all tuples from a page */
 				page = ItemPointerGetBlockNumber(tid);
-				if (smooth_resultcache_find_tuple(scan, tuple, page)) {
+				if(smooth_resultcache_find_tuple(smoothDesc->result_cache, tuple, page)){
 
 					smoothDesc->num_result_cache_hits++;
-
 					return tuple;
 				}
-					}
+			}
+
 
 			/*check FOR CASE WHEN WE HAVE UPDATES - SINCE UPDATES KEEP OLD POINTERS TO NOTHING*/
-			if (bms_is_member(page, smoothDesc->bs_vispages) ) {
-				int batchno;
+			if(bms_is_member(page, smoothDesc->bs_vispages)){
 				/*page is already considered and all the qualifying tuples are already produced */
-				// Or maybe find tuple return false because we are out of boud of the current batch
-
-//				if (smoothDesc->result_cache->status != SS_EMPTY) {
-//					Page dp;
-//					ItemId lpp;
-//					HeapTuple tup = &(scan->xs_ctup);
-//					ItemPointerData originalTupleID = tup->t_self;
-//					bool valid;
-//					OffsetNumber offset;
-//
-//					//LockBuffer(scan->xs_cbuf, BUFFER_LOCK_SHARE);
-//					/* get page information */
-//					dp = (Page) BufferGetPage(scan->xs_cbuf);
-//					offset = originalTupleID.ip_posid;
-//
-//					lpp = PageGetItemId(dp,offset );
-//					valid = false;
-//					if (ItemIdIsNormal(lpp)) {
-//						tup->t_data = (HeapTupleHeader) PageGetItem((Page) dp, lpp);
-//						tup->t_len = ItemIdGetLength(lpp);
-//						tup->t_tableOid = scan->heapRelation->rd_id;
-//						ItemPointerSet(&(tup->t_self), page, offset);
-//					}
-//
-//					int batchno = -1;
-//					print_tuple(RelationGetDescr(scan->indexRelation), tup);
-//
-//					ExecResultCacheGetBatch(scan, tup, &batchno);
-//					if (smoothDesc->result_cache->curbatch != batchno) {
-//
-//						//	print_tuple(RelationGetDescr(scan->heapRelation),heapTuple);
-//						ExecHashJoinNewBatch(scan, batchno);
-//					}
-//				}
-
 
 				ItemPointerSetInvalid(&(tuple->t_self));
 				tuple->t_tableOid = InvalidOid;
@@ -1940,22 +1597,28 @@ HeapTuple index_smoothfetch_heap(IndexScanDesc scan, ScanDirection direction, do
 				return NULL;
 			}
 
-			if (!scan->xs_continue_hot) {
+			if (!scan->xs_continue_hot)
+			{
 				/* Switch to correct buffer if we don't have it already */
-				Buffer prev_buf = scan->xs_cbuf;
+				Buffer		prev_buf = scan->xs_cbuf;
 
-				scan->xs_cbuf = ReleaseAndReadBuffer(scan->xs_cbuf, scan->heapRelation, page);
+				scan->xs_cbuf = ReleaseAndReadBuffer(scan->xs_cbuf,
+													 scan->heapRelation,
+													 page);
 				/*
 				 * Prune page, but only if we weren't already on this page
 				 */
 				if (prev_buf != scan->xs_cbuf)
-					heap_page_prune_opt(scan->heapRelation, scan->xs_cbuf, RecentGlobalXmin);
+					heap_page_prune_opt(scan->heapRelation, scan->xs_cbuf,
+										RecentGlobalXmin);
 
 				/* check if we are using prefetcher, if yes now we are one step closer (the distance is smaller)*/
-				if (smoothDesc->prefetch_pages > 0) {
+				if (smoothDesc->prefetch_pages > 0)
+				{
 					/* The main iterator has closed the distance by one page */
 					smoothDesc->prefetch_pages--;
 				}
+
 
 			}
 
@@ -1963,15 +1626,14 @@ HeapTuple index_smoothfetch_heap(IndexScanDesc scan, ScanDirection direction, do
 			/* if hash table exist */
 			if (smoothDesc->result_cache->maxentries > 0)
 				/* -1 because we are about to process one page which will increase number of entries */
-				max_number_of_pages = smoothDesc->result_cache->maxtuples - smoothDesc->result_cache->nentries - 1;
+				max_number_of_pages = smoothDesc->result_cache->maxentries - smoothDesc->result_cache->nentries -1 ;
 			else
 				/* hash table not yet created*/
 				max_number_of_pages = smooth_prefetch_target;
 
 			/*return tuple from a page */
 			/*when hash is full no prefetching */
-			if (smoothDesc->start_prefetch && smooth_prefetch_target && max_number_of_pages > 0
-					&& !smoothDesc->prefetch_pages && (!used_prefetcher || enable_skewcheck)) {
+			if (smoothDesc->start_prefetch && smooth_prefetch_target && max_number_of_pages > 0 &&!smoothDesc->prefetch_pages  && (!used_prefetcher||enable_skewcheck)){
 
 				/*
 				 * Increase prefetch target if it's not yet at the max.  Note that
@@ -1984,56 +1646,50 @@ HeapTuple index_smoothfetch_heap(IndexScanDesc scan, ScanDirection direction, do
 				//printf("\nLocal number of tuples for prefetcher size %ld, is %ld, ", smoothDesc->local_num_pages, smoothDesc->local_qualifying_tuples);
 				//smoothDesc->local_num_pages = 0;
 				//smoothDesc->local_qualifying_tuples = 0;
-				if (num_tuples_prefetch >= 0) {
+
+				if(num_tuples_prefetch >= 0){
 
 					//new 2014 - part with SKEW CHECK
-					if (!enable_skewcheck || !used_prefetcher) {
-						if (smoothDesc->prefetch_counter >= num_tuples_prefetch) {
+					if(!enable_skewcheck || !used_prefetcher){
+						if(smoothDesc->prefetch_counter >= num_tuples_prefetch){
 							//reset it
 							smoothDesc->prefetch_counter = 0;
 							if (smoothDesc->prefetch_target >= smooth_prefetch_target)
-								/* don't increase any further */;
+								 /* don't increase any further */ ;
 							else if (smoothDesc->prefetch_target >= smooth_prefetch_target / 2)
 								smoothDesc->prefetch_target = smooth_prefetch_target;
 							else if (smoothDesc->prefetch_target > 0)
 								smoothDesc->prefetch_target *= 2;
 							else
 								smoothDesc->prefetch_target++;
-						} else {
+						}else{
 							//nothing prefetcher stays the same
 							;
 						}
 						if (enable_benchmarking)
-							printf("\n Normal Smooth Scan. Number of pages checked %ld. Prefetch target %ld  ",
-									smoothDesc->num_vispages, smoothDesc->prefetch_target);
-
-
-//							printf("\n Normal Smooth Scan. Number of pages checked %ld. Prefetch target %ld  ",
-//									bms_num_members(smoothDesc->bs_vispages), smoothDesc->prefetch_target);
+							printf("\n Normal Smooth Scan. Number of pages checked %d. Prefetch target %d  ", bms_num_members(smoothDesc->bs_vispages), smoothDesc->prefetch_target);
 
 						//17.02.2014 - starting a new cycle
 						//printf("\nLocal number of tuples for prefetcher size %ld, is %ld, ", smoothDesc->local_num_pages, smoothDesc->local_qualifying_tuples);
 						smoothDesc->local_num_pages = 0;
 						smoothDesc->local_qualifying_pages = 0;
-					} else {
+					}else{
 						//17.02.2014
 						//enable_skewcheck
 						double localSelectivity;
 						double globalSelectivity;
-						double numPages = smoothDesc->num_vispages;
-						if (smoothDesc->local_num_pages)
-							localSelectivity = (double) smoothDesc->local_qualifying_pages
-									/ (double) smoothDesc->local_num_pages;
+
+						if(smoothDesc->local_num_pages)
+							localSelectivity  = (double)smoothDesc->local_qualifying_pages/(double)smoothDesc->local_num_pages;
 						else
 							localSelectivity = 0;
 
-						if (numPages)
-							globalSelectivity = (double) smoothDesc->global_qualifying_pages
-									/ (double) numPages;
+						if(bms_num_members(smoothDesc->bs_vispages))
+							globalSelectivity = (double)smoothDesc->global_qualifying_pages/(double)bms_num_members(smoothDesc->bs_vispages);
 						else
 							globalSelectivity = 0;
 
-						if (localSelectivity > (1.4 * globalSelectivity)) {
+						if (localSelectivity > ( 1.4* globalSelectivity)){
 							//we are in the hot region
 //									if (smoothDesc->prefetch_target >= smooth_prefetch_target)
 //										/* don't increase any further */ ;
@@ -2046,21 +1702,21 @@ HeapTuple index_smoothfetch_heap(IndexScanDesc scan, ScanDirection direction, do
 							hotRegion = 2;
 							//if(enable_benchmarking)
 							//	printf("\n Hot region. Number of pages checked %ld. Prefetch target %ld  ", bms_num_members(smoothDesc->bs_vispages), smoothDesc->prefetch_target);
-						} else if ((localSelectivity) < globalSelectivity) {
+						}else if ((localSelectivity) < globalSelectivity ){
 							//check if we are in the cold region
 							if (smoothDesc->prefetch_target > 1)
 								smoothDesc->prefetch_target /= 4; // because it will be increased next time prefetcher kicks in
 							else if (smoothDesc->prefetch_target >= 1)
-								smoothDesc->prefetch_target -= 2;
+								smoothDesc->prefetch_target-=2;
 							else
 								smoothDesc->prefetch_target = -1;
 							hotRegion = 0;
 							//if(enable_benchmarking)
 							//	printf("\n Cold region. Number of pages checked %ld. Prefetch target %ld  ", bms_num_members(smoothDesc->bs_vispages), smoothDesc->prefetch_target);
 
-						} else {
+						}else{
 							//stay the same
-							;//nothing
+							; //nothing
 							hotRegion = 1;
 
 							//smoothDesc->prefetch_target /= 2;	// because it will be increased next time prefetcher kicks in
@@ -2074,13 +1730,14 @@ HeapTuple index_smoothfetch_heap(IndexScanDesc scan, ScanDirection direction, do
 //								smoothDesc->local_num_pages = 0;
 //								smoothDesc->local_qualifying_tuples = 0;
 
-					} //enable_skewcheck
-				} else { //num_tuple_prefetch < 0 (start from the beginning)
-						 //classical increasing procedure  num_tuples_prefetch = -1
-					if (!enable_skewcheck || !used_prefetcher) {
+
+					}//enable_skewcheck
+				}else{ //num_tuple_prefetch < 0 (start from the beginning)
+					//classical increasing procedure  num_tuples_prefetch = -1
+					if(!enable_skewcheck || !used_prefetcher){
 						//classical increasing procedure
 						if (smoothDesc->prefetch_target >= smooth_prefetch_target)
-							/* don't increase any further */;
+							 /* don't increase any further */ ;
 						else if (smoothDesc->prefetch_target >= smooth_prefetch_target / 2)
 							smoothDesc->prefetch_target = smooth_prefetch_target;
 						else if (smoothDesc->prefetch_target > 0)
@@ -2089,33 +1746,30 @@ HeapTuple index_smoothfetch_heap(IndexScanDesc scan, ScanDirection direction, do
 							smoothDesc->prefetch_target++;
 
 						if (enable_benchmarking)
-							printf("\n Normal Smooth Scan. Number of pages checked %ld. Prefetch target %ld  ",
-									smoothDesc->num_vispages, smoothDesc->prefetch_target);
+							printf("\n Normal Smooth Scan. Number of pages checked %d. Prefetch target %d  ", bms_num_members(smoothDesc->bs_vispages), smoothDesc->prefetch_target);
 
 						//17.02.2014 - starting a new cycle
 						//printf("\nLocal number of tuples for prefetcher size %ld, is %ld, ", smoothDesc->local_num_pages, smoothDesc->local_qualifying_tuples);
 						smoothDesc->local_num_pages = 0;
 						smoothDesc->local_qualifying_pages = 0;
-					} else {
+					}else{
 						//enable skewcheck
 						//17.02.2014
 						//enable_skewcheck
 						double localSelectivity;
 						double globalSelectivity;
 
-						if (smoothDesc->local_num_pages)
-							localSelectivity = (double) smoothDesc->local_qualifying_pages
-									/ (double) smoothDesc->local_num_pages;
+						if(smoothDesc->local_num_pages)
+							localSelectivity  = (double)smoothDesc->local_qualifying_pages/(double)smoothDesc->local_num_pages;
 						else
 							localSelectivity = 0;
 
-						if (smoothDesc->num_vispages)
-							globalSelectivity = (double) smoothDesc->global_qualifying_pages
-									/ (double)smoothDesc->num_vispages;
+						if(bms_num_members(smoothDesc->bs_vispages))
+							globalSelectivity = (double)smoothDesc->global_qualifying_pages/(double)bms_num_members(smoothDesc->bs_vispages);
 						else
 							globalSelectivity = 0;
 
-						if (localSelectivity > (1.4 * globalSelectivity)) {
+						if (localSelectivity > (1.4* globalSelectivity)){
 							//we are in the hot region
 //									if (smoothDesc->prefetch_target >= smooth_prefetch_target)
 //										 /* don't increase any further */ ;
@@ -2129,21 +1783,21 @@ HeapTuple index_smoothfetch_heap(IndexScanDesc scan, ScanDirection direction, do
 							//if(enable_benchmarking)
 							//	printf("\n Hot region. Number of pages checked %ld. Prefetch target %ld  ", bms_num_members(smoothDesc->bs_vispages), smoothDesc->prefetch_target);
 
-						} else if ((localSelectivity) < globalSelectivity) {
+						}else if ((localSelectivity) < globalSelectivity ){
 							//check if we are in the cold region
 							if (smoothDesc->prefetch_target > 1)
 								smoothDesc->prefetch_target /= 4; // because it will be increased next time prefetcher kicks in
 							else if (smoothDesc->prefetch_target >= 1)
-								smoothDesc->prefetch_target -= 2; // because it will be increased next time prefetcher kicks in
+								smoothDesc->prefetch_target-=2; // because it will be increased next time prefetcher kicks in
 							else
 								smoothDesc->prefetch_target = -1;
 							hotRegion = 0;
 							//if(enable_benchmarking)
 							//	printf("\n Cold region. Number of pages checked %ld. Prefetch target %ld  ", bms_num_members(smoothDesc->bs_vispages), smoothDesc->prefetch_target);
 
-						} else {
+						}else{
 							//stay the same
-							;//nothing
+							; //nothing
 							hotRegion = 1;
 							//smoothDesc->prefetch_target /= 2;// because it will be increased next time prefetcher kicks in
 							//if(enable_benchmarking)
@@ -2155,6 +1809,7 @@ HeapTuple index_smoothfetch_heap(IndexScanDesc scan, ScanDirection direction, do
 						//smoothDesc->local_num_pages = 0;
 						//smoothDesc->local_qualifying_tuples = 0;
 
+
 					}
 
 				}
@@ -2162,19 +1817,20 @@ HeapTuple index_smoothfetch_heap(IndexScanDesc scan, ScanDirection direction, do
 				/* start prefetching */
 				//new 2014
 				//IF HOT REGION >1 DO PREFETCHER
-				if (!enable_skewcheck || (enable_skewcheck && (hotRegion == 2 || !used_prefetcher))) {
-					while (smoothDesc->prefetch_pages < smoothDesc->prefetch_target) {
+				if(!enable_skewcheck || (enable_skewcheck && (hotRegion == 2||!used_prefetcher))){
+					while (smoothDesc->prefetch_pages < smoothDesc->prefetch_target)
+					{	BlockNumber nextPage = InvalidBlockNumber;
 						smoothDesc->prefetch_pages++;
 						smoothDesc->prefetch_cumul++;
-						BlockNumber nextPage = page + smoothDesc->prefetch_pages;
+						nextPage=page+smoothDesc->prefetch_pages;
 
 						/* prefetch pages only until end of existing relation = NO AFTER and only until you encounter visited page */
 						//before enable_skewcheck
 						//if(nextPage >= smoothDesc->rel_nblocks || bms_is_member(nextPage, smoothDesc->bs_vispages)){
 						//17.02.2014
-						if (nextPage >= smoothDesc->rel_nblocks || (bms_is_member(nextPage, smoothDesc->bs_vispages))) {
-							//19.02.2014
-							//if(nextPage >= smoothDesc->rel_nblocks ){
+						if(nextPage >= smoothDesc->rel_nblocks || (bms_is_member(nextPage, smoothDesc->bs_vispages ))){
+						//19.02.2014
+						//if(nextPage >= smoothDesc->rel_nblocks ){
 							/*stop with prefetching */
 							smoothDesc->prefetch_pages--;
 							smoothDesc->prefetch_cumul--;
@@ -2185,36 +1841,38 @@ HeapTuple index_smoothfetch_heap(IndexScanDesc scan, ScanDirection direction, do
 
 					}
 					/* if we have something at least one page the prefetcher */
-					if (smoothDesc->prefetch_pages) {
+					if(smoothDesc->prefetch_pages){
 						//printf("\nPrefetcher size in this go %ld",smoothDesc->prefetch_pages );
 						//17.02.2014
 						if (hotRegion == 2)
 							smoothDesc->local_num_pages += smoothDesc->prefetch_pages;
 						else
 							smoothDesc->local_num_pages = smoothDesc->prefetch_pages;
-						SmoothPrefetchBuffers(scan->heapRelation, MAIN_FORKNUM, (page + 1), smoothDesc->prefetch_pages);
+						SmoothPrefetchBuffers(scan->heapRelation, MAIN_FORKNUM, (page+1), smoothDesc->prefetch_pages);
 					}
-					if (hotRegion == 2) {
-						smoothDesc->prefetch_target *= 2;
+					if(hotRegion == 2){
+						smoothDesc->prefetch_target*=2;
 					}
 				} //if !enable_skewcheck...
 
 			}
-			return SmoothProcessOnePageOrder(scan, page, direction, no_orig_keys, orig_keys, used_prefetcher,
-					target_list, qual_list, index, no_orig_smooth_keys, orig_smooth_keys, allqual, econtext, slot);
+			return SmoothProcessOnePageOrder(scan, page, direction, no_orig_keys, orig_keys, used_prefetcher, target_list, qual_list, index, no_orig_smooth_keys, orig_smooth_keys, allqual, econtext, slot);
+
+
+
 
 		} /* if order by is imposed*/
-		else {
+		else{
 
 			/* NO ORDER BY - return all tuples from a page */
 			/* we have to process next page from prefetcher*/
-			if (BlockNumberIsValid(smoothDesc->nextPageId)) {
-				page = smoothDesc->nextPageId; /*to do check here as well if page <=*/
-				/* next time it should be invalid */
-				smoothDesc->nextPageId = InvalidBlockNumber;
-				used_prefetcher = true;
+			if(BlockNumberIsValid(smoothDesc->nextPageId)) {
+					page = smoothDesc->nextPageId; /*to do check here as well if page <=*/
+					/* next time it should be invalid */
+					smoothDesc->nextPageId = InvalidBlockNumber;
+					used_prefetcher = true;
 
-			} else {
+			}else {
 				/* get the block number where the tuple belongs */
 				page = ItemPointerGetBlockNumber(tid);
 			}
@@ -2222,16 +1880,17 @@ HeapTuple index_smoothfetch_heap(IndexScanDesc scan, ScanDirection direction, do
 			/* with array */
 			//if (smoothDesc->vispages[page]){
 			/* with bitmap set */
-			if (bms_is_member(page, smoothDesc->bs_vispages)) {
+			if(bms_is_member(page, smoothDesc->bs_vispages)){
 				/*page is already considered and all the qualifying tuples are already produced */
 
 				ItemPointerSetInvalid(&(tuple->t_self));
 				tuple->t_tableOid = InvalidOid;
 
 				return NULL;
-			} else {
+			}else{
 				/* check if we have buffered tuples - if yes returned the next one directly */
-				if (++smoothDesc->currPos.itemHeapIndex <= smoothDesc->currPos.lastHeapItem) {
+				if (++smoothDesc->currPos.itemHeapIndex <= smoothDesc->currPos.lastHeapItem)
+				{
 					/* OK, itemHeapIndex says what to return */
 					SmoothScanPosItem *currItem = &smoothDesc->currPos.items[smoothDesc->currPos.itemHeapIndex];
 
@@ -2239,7 +1898,7 @@ HeapTuple index_smoothfetch_heap(IndexScanDesc scan, ScanDirection direction, do
 
 					scan->xs_ctup = *((HeapTuple) (smoothDesc->currTuples + currItem->tupleOffset));
 					/* returning last one */
-					if (smoothDesc->currPos.itemHeapIndex == smoothDesc->currPos.lastHeapItem) {
+					if (smoothDesc->currPos.itemHeapIndex == smoothDesc->currPos.lastHeapItem){
 						/* this means that we have produced tuples from this page and we have come to the end */
 
 						/* 1. put pageID in pageCache */
@@ -2247,9 +1906,9 @@ HeapTuple index_smoothfetch_heap(IndexScanDesc scan, ScanDirection direction, do
 
 						/* static array option */
 						//smoothDesc->vispages[page] = (PageBitmap)1;
+
 						/* bitmap set option */
 						smoothDesc->bs_vispages = bms_add_member(smoothDesc->bs_vispages, page);
-						smoothDesc->num_vispages++;
 
 						/* this page is done */
 						smoothDesc->more_data_for_smooth = false;
@@ -2258,15 +1917,17 @@ HeapTuple index_smoothfetch_heap(IndexScanDesc scan, ScanDirection direction, do
 						if (smoothDesc->prefetch_pages)
 							smoothDesc->nextPageId = page + 1;
 
+
 						/* 2. put currPos buffer to be invalid */
-						if (SmoothScanPosIsValid(smoothDesc->currPos)) {
+						if (SmoothScanPosIsValid(smoothDesc->currPos))
+						{
 							ReleaseBuffer(smoothDesc->currPos.buf);
 							smoothDesc->currPos.buf = InvalidBuffer;
 						}
 
 						/* 3. "clear" currPos space */
 						smoothDesc->currPos.firstHeapItem = 0;
-						smoothDesc->currPos.lastHeapItem = 0;
+						smoothDesc->currPos.lastHeapItem  = 0;
 						smoothDesc->currPos.itemHeapIndex = 0;
 						/* initialize tuple workspace to empty */
 						smoothDesc->currPos.nextTupleOffset = 0;
@@ -2274,7 +1935,7 @@ HeapTuple index_smoothfetch_heap(IndexScanDesc scan, ScanDirection direction, do
 
 					return &scan->xs_ctup;
 
-				} else {
+				}else {
 					/* we have nothing buffered, meaning we are accessing the page for the first time */
 					/*
 					 * 	 2.1. collect all tuples for a page that  qualify
@@ -2290,29 +1951,34 @@ HeapTuple index_smoothfetch_heap(IndexScanDesc scan, ScanDirection direction, do
 					/* We can skip the buffer-switching logic if we're in mid-HOT chain. */
 					//if (!scan->xs_continue_hot && !((SmoothScanOpaque)scan->smoothInfo)->more_data_for_smooth)
 					int hotRegion = 0;
-					if (!scan->xs_continue_hot) {
+					if (!scan->xs_continue_hot)
+					{
 						/* Switch to correct buffer if we don't have it already */
-						Buffer prev_buf = scan->xs_cbuf;
+						Buffer		prev_buf = scan->xs_cbuf;
 
-						scan->xs_cbuf = ReleaseAndReadBuffer(scan->xs_cbuf, scan->heapRelation, page);
+						scan->xs_cbuf = ReleaseAndReadBuffer(scan->xs_cbuf,
+															 scan->heapRelation,
+															 page);
 						/*
 						 * Prune page, but only if we weren't already on this page
 						 */
 						if (prev_buf != scan->xs_cbuf)
-							heap_page_prune_opt(scan->heapRelation, scan->xs_cbuf, RecentGlobalXmin);
+							heap_page_prune_opt(scan->heapRelation, scan->xs_cbuf,
+												RecentGlobalXmin);
 
 						/* check if we are using prefetcher, if yes now we are one step closer (the distance is smaller)*/
-						if (smoothDesc->prefetch_pages > 0) {
+						if (smoothDesc->prefetch_pages > 0)
+						{
 							/* The main iterator has closed the distance by one page */
 							smoothDesc->prefetch_pages--;
 						}
+
 
 					}
 					/*if we are doing prefetching, but for now we have no pages prefetched in the buffer pool
 					 * ONLY THEN trigger prefetching */
 					//17.02.2014 - if prefetcher has reached 0, but we are still in prefetching mode - this is what we need for skewcheck
-					if (smoothDesc->start_prefetch && smooth_prefetch_target && !smoothDesc->prefetch_pages
-							&& (!used_prefetcher || enable_skewcheck)) {
+					if (smoothDesc->start_prefetch && smooth_prefetch_target && !smoothDesc->prefetch_pages && (!used_prefetcher||enable_skewcheck)){
 
 						/*
 						 * Increase prefetch target if it's not yet at the max.  Note that
@@ -2321,50 +1987,47 @@ HeapTuple index_smoothfetch_heap(IndexScanDesc scan, ScanDirection direction, do
 						 * it doubles as later pages are fetched.
 						 */
 
-						if (num_tuples_prefetch >= 0) {
-							if (!enable_skewcheck || !used_prefetcher) {
-								if (smoothDesc->prefetch_counter >= num_tuples_prefetch) {
+						if(num_tuples_prefetch >= 0){
+							if(!enable_skewcheck || !used_prefetcher){
+								if(smoothDesc->prefetch_counter >= num_tuples_prefetch){
 									//reset it
 									smoothDesc->prefetch_counter = 0;
 									if (smoothDesc->prefetch_target >= smooth_prefetch_target)
-										/* don't increase any further */;
+										 /* don't increase any further */ ;
 									else if (smoothDesc->prefetch_target >= smooth_prefetch_target / 2)
 										smoothDesc->prefetch_target = smooth_prefetch_target;
 									else if (smoothDesc->prefetch_target > 0)
 										smoothDesc->prefetch_target *= 2;
 									else
 										smoothDesc->prefetch_target++;
-								} else {
+								}else{
 									//nothing prefetcher stays the same
 									;
 								}
 								if (enable_benchmarking)
-									printf("\n Normal Smooth Scan. Number of pages checked %ld. Prefetch target %ld  ",
-											smoothDesc->num_vispages, smoothDesc->prefetch_target);
+									printf("\n Normal Smooth Scan. Number of pages checked %d. Prefetch target %d  ", bms_num_members(smoothDesc->bs_vispages), smoothDesc->prefetch_target);
 
 								//17.02.2014 - starting a new cycle
 								//printf("\nLocal number of tuples for prefetcher size %ld, is %ld, ", smoothDesc->local_num_pages, smoothDesc->local_qualifying_tuples);
 								smoothDesc->local_num_pages = 0;
 								smoothDesc->local_qualifying_pages = 0;
-							} else {
+							}else{
 								//17.02.2014
 								//enable_skewcheck
 								double localSelectivity;
 								double globalSelectivity;
 
-								if (smoothDesc->local_num_pages)
-									localSelectivity = (double) smoothDesc->local_qualifying_pages
-											/ (double) smoothDesc->local_num_pages;
+								if(smoothDesc->local_num_pages)
+									localSelectivity  = (double)smoothDesc->local_qualifying_pages/(double)smoothDesc->local_num_pages;
 								else
 									localSelectivity = 0;
 
-								if (smoothDesc->num_vispages)
-									globalSelectivity = (double) smoothDesc->global_qualifying_pages
-											/ (double) smoothDesc->num_vispages;
+								if(bms_num_members(smoothDesc->bs_vispages))
+									globalSelectivity = (double)smoothDesc->global_qualifying_pages/(double)bms_num_members(smoothDesc->bs_vispages);
 								else
 									globalSelectivity = 0;
 
-								if (localSelectivity > (1.4 * globalSelectivity)) {
+								if (localSelectivity > ( 1.4* globalSelectivity)){
 									//we are in the hot region
 //									if (smoothDesc->prefetch_target >= smooth_prefetch_target)
 //										/* don't increase any further */ ;
@@ -2377,21 +2040,21 @@ HeapTuple index_smoothfetch_heap(IndexScanDesc scan, ScanDirection direction, do
 									hotRegion = 2;
 									//if(enable_benchmarking)
 									//	printf("\n Hot region. Number of pages checked %ld. Prefetch target %ld  ", bms_num_members(smoothDesc->bs_vispages), smoothDesc->prefetch_target);
-								} else if ((localSelectivity) < globalSelectivity) {
+								}else if ((localSelectivity) < globalSelectivity ){
 									//check if we are in the cold region
 									if (smoothDesc->prefetch_target > 1)
 										smoothDesc->prefetch_target /= 4; // because it will be increased next time prefetcher kicks in
 									else if (smoothDesc->prefetch_target >= 1)
-										smoothDesc->prefetch_target -= 2;
+										smoothDesc->prefetch_target-=2;
 									else
 										smoothDesc->prefetch_target = -1;
 									hotRegion = 0;
 									//if(enable_benchmarking)
 									//	printf("\n Cold region. Number of pages checked %ld. Prefetch target %ld  ", bms_num_members(smoothDesc->bs_vispages), smoothDesc->prefetch_target);
 
-								} else {
+								}else{
 									//stay the same
-									;//nothing
+									; //nothing
 									hotRegion = 1;
 
 									//smoothDesc->prefetch_target /= 2;	// because it will be increased next time prefetcher kicks in
@@ -2405,12 +2068,13 @@ HeapTuple index_smoothfetch_heap(IndexScanDesc scan, ScanDirection direction, do
 //								smoothDesc->local_num_pages = 0;
 //								smoothDesc->local_qualifying_tuples = 0;
 
-							} //enable_skewcheck
-						} else {
-							if (!enable_skewcheck || !used_prefetcher) {
+
+							}//enable_skewcheck
+						}else{
+							if(!enable_skewcheck || !used_prefetcher){
 								//classical increasing procedure
 								if (smoothDesc->prefetch_target >= smooth_prefetch_target)
-									/* don't increase any further */;
+									 /* don't increase any further */ ;
 								else if (smoothDesc->prefetch_target >= smooth_prefetch_target / 2)
 									smoothDesc->prefetch_target = smooth_prefetch_target;
 								else if (smoothDesc->prefetch_target > 0)
@@ -2419,33 +2083,30 @@ HeapTuple index_smoothfetch_heap(IndexScanDesc scan, ScanDirection direction, do
 									smoothDesc->prefetch_target++;
 
 								if (enable_benchmarking)
-									printf("\n Normal Smooth Scan. Number of pages checked %ld. Prefetch target %ld  ",
-											smoothDesc->num_vispages, smoothDesc->prefetch_target);
+									printf("\n Normal Smooth Scan. Number of pages checked %d. Prefetch target %d  ", bms_num_members(smoothDesc->bs_vispages), smoothDesc->prefetch_target);
 
 								//17.02.2014 - starting a new cycle
 								//printf("\nLocal number of tuples for prefetcher size %ld, is %ld, ", smoothDesc->local_num_pages, smoothDesc->local_qualifying_tuples);
 								smoothDesc->local_num_pages = 0;
 								smoothDesc->local_qualifying_pages = 0;
-							} else {
+							}else{
 								//enable skewcheck
 								//17.02.2014
 								//enable_skewcheck
 								double localSelectivity;
 								double globalSelectivity;
 
-								if (smoothDesc->local_num_pages)
-									localSelectivity = (double) smoothDesc->local_qualifying_pages
-											/ (double) smoothDesc->local_num_pages;
+								if(smoothDesc->local_num_pages)
+									localSelectivity  = (double)smoothDesc->local_qualifying_pages/(double)smoothDesc->local_num_pages;
 								else
 									localSelectivity = 0;
 
-								if (smoothDesc->num_vispages)
-									globalSelectivity = (double) smoothDesc->global_qualifying_pages
-											/ (double) smoothDesc->num_vispages;
+								if(bms_num_members(smoothDesc->bs_vispages))
+									globalSelectivity = (double)smoothDesc->global_qualifying_pages/(double)bms_num_members(smoothDesc->bs_vispages);
 								else
 									globalSelectivity = 0;
 
-								if (localSelectivity > (1.4 * globalSelectivity)) {
+								if (localSelectivity > (1.4* globalSelectivity)){
 									//we are in the hot region
 //									if (smoothDesc->prefetch_target >= smooth_prefetch_target)
 //										 /* don't increase any further */ ;
@@ -2459,21 +2120,21 @@ HeapTuple index_smoothfetch_heap(IndexScanDesc scan, ScanDirection direction, do
 									//if(enable_benchmarking)
 									//	printf("\n Hot region. Number of pages checked %ld. Prefetch target %ld  ", bms_num_members(smoothDesc->bs_vispages), smoothDesc->prefetch_target);
 
-								} else if ((localSelectivity) < globalSelectivity) {
+								}else if ((localSelectivity) < globalSelectivity ){
 									//check if we are in the cold region
 									if (smoothDesc->prefetch_target > 1)
 										smoothDesc->prefetch_target /= 4; // because it will be increased next time prefetcher kicks in
 									else if (smoothDesc->prefetch_target >= 1)
-										smoothDesc->prefetch_target -= 2; // because it will be increased next time prefetcher kicks in
+										smoothDesc->prefetch_target-=2; // because it will be increased next time prefetcher kicks in
 									else
 										smoothDesc->prefetch_target = -1;
 									hotRegion = 0;
 									//if(enable_benchmarking)
 									//	printf("\n Cold region. Number of pages checked %ld. Prefetch target %ld  ", bms_num_members(smoothDesc->bs_vispages), smoothDesc->prefetch_target);
 
-								} else {
+								}else{
 									//stay the same
-									;//nothing
+									; //nothing
 									hotRegion = 1;
 									//smoothDesc->prefetch_target /= 2;// because it will be increased next time prefetcher kicks in
 									//if(enable_benchmarking)
@@ -2485,26 +2146,27 @@ HeapTuple index_smoothfetch_heap(IndexScanDesc scan, ScanDirection direction, do
 								//smoothDesc->local_num_pages = 0;
 								//smoothDesc->local_qualifying_tuples = 0;
 
+
 							}
 						}
 
 						/* start prefetching */
 						//17.02.2014
 						//IF HOT REGION >1 DO PREFETCHER
-						if (!enable_skewcheck || (enable_skewcheck && (hotRegion == 2 || !used_prefetcher))) {
-							while (smoothDesc->prefetch_pages < smoothDesc->prefetch_target) {
+						if(!enable_skewcheck || (enable_skewcheck && (hotRegion == 2||!used_prefetcher))){
+							while (smoothDesc->prefetch_pages < smoothDesc->prefetch_target)
+							{	BlockNumber nextPage = InvalidBlockNumber;
 								smoothDesc->prefetch_pages++;
 								smoothDesc->prefetch_cumul++;
-								BlockNumber nextPage = page + smoothDesc->prefetch_pages;
+								nextPage=page+smoothDesc->prefetch_pages;
 
 								/* prefetch pages only until end of existing relation = NO AFTER and only until you encounter visited page */
 								//before enable_skewcheck
 								//if(nextPage >= smoothDesc->rel_nblocks || bms_is_member(nextPage, smoothDesc->bs_vispages)){
 								//17.02.2014
-								if (nextPage >= smoothDesc->rel_nblocks
-										|| (bms_is_member(nextPage, smoothDesc->bs_vispages))) {
-									//19.02.2014
-									//if(nextPage >= smoothDesc->rel_nblocks ){
+								if(nextPage >= smoothDesc->rel_nblocks || (bms_is_member(nextPage, smoothDesc->bs_vispages ))){
+								//19.02.2014
+								//if(nextPage >= smoothDesc->rel_nblocks ){
 									/*stop with prefetching */
 									smoothDesc->prefetch_pages--;
 									smoothDesc->prefetch_cumul--;
@@ -2515,81 +2177,91 @@ HeapTuple index_smoothfetch_heap(IndexScanDesc scan, ScanDirection direction, do
 
 							}
 							/* if we have something at least one page the prefetcher */
-							if (smoothDesc->prefetch_pages) {
+							if(smoothDesc->prefetch_pages){
 								//printf("\nPrefetcher size in this go %ld",smoothDesc->prefetch_pages );
 								//17.02.2014
 								if (hotRegion == 2)
 									smoothDesc->local_num_pages += smoothDesc->prefetch_pages;
 								else
 									smoothDesc->local_num_pages = smoothDesc->prefetch_pages;
-								SmoothPrefetchBuffers(scan->heapRelation, MAIN_FORKNUM, (page + 1),
-										smoothDesc->prefetch_pages);
+								SmoothPrefetchBuffers(scan->heapRelation, MAIN_FORKNUM, (page+1), smoothDesc->prefetch_pages);
 							}
-							if (hotRegion == 2) {
-								smoothDesc->prefetch_target *= 2;
+							if(hotRegion == 2){
+								smoothDesc->prefetch_target*=2;
 							}
 						} //if !enable_skewcheck...
 
 					}
 
-					return SmoothProcesOnePage(scan, page, direction, no_orig_keys, orig_keys, no_orig_smooth_keys,
-							orig_smooth_keys, allqual, econtext, slot);
+					return SmoothProcessOnePage(scan, page, direction, no_orig_keys, orig_keys,  no_orig_smooth_keys, orig_smooth_keys, allqual, econtext, slot );
+
 
 				}/* end of else that puts new tuples in currPos.items */
 			}/* end of if page is visited */
 		}/* end of check whether we have order by or not */
-	} else { /* not index smooth sorting - do a regular procedure */
+	}else { /* not index smooth sorting - do a regular procedure */
 		/* We can skip the buffer-switching logic if we're in mid-HOT chain. */
 
 		/* get the block number where the tuple belongs */
 		page = ItemPointerGetBlockNumber(tid);
 
-		if (!scan->xs_continue_hot) {
+		if (!scan->xs_continue_hot)
+		{
 			/* Switch to correct buffer if we don't have it already */
-			Buffer prev_buf = scan->xs_cbuf;
+			Buffer		prev_buf = scan->xs_cbuf;
 
-			scan->xs_cbuf = ReleaseAndReadBuffer(scan->xs_cbuf, scan->heapRelation, page);
+			scan->xs_cbuf = ReleaseAndReadBuffer(scan->xs_cbuf,
+												 scan->heapRelation,
+												 page);
 
 			/*
 			 * Prune page, but only if we weren't already on this page
 			 */
 			if (prev_buf != scan->xs_cbuf)
-				heap_page_prune_opt(scan->heapRelation, scan->xs_cbuf, RecentGlobalXmin);
+				heap_page_prune_opt(scan->heapRelation, scan->xs_cbuf,
+									RecentGlobalXmin);
 		}
 		/* fetch just one tuple*/
 		LockBuffer(scan->xs_cbuf, BUFFER_LOCK_SHARE);
-		got_heap_tuple = heap_hot_search_buffer(tid, scan->heapRelation, scan->xs_cbuf, scan->xs_snapshot,
-				&scan->xs_ctup, &all_dead, !scan->xs_continue_hot);
+		got_heap_tuple = heap_hot_search_buffer(tid, scan->heapRelation,
+												scan->xs_cbuf,
+												scan->xs_snapshot,
+												&scan->xs_ctup,
+												&all_dead,
+												!scan->xs_continue_hot);
 		LockBuffer(scan->xs_cbuf, BUFFER_LOCK_UNLOCK);
 	}
-	if (got_heap_tuple) {
+	if (got_heap_tuple)
+	{
 		bool valid = false;
 		//check if enable_filterpushdown is on
 		//todo 2014
-		if (!enable_filterpushdown) {
+		if(!enable_filterpushdown){
 			valid = true;
-		} //else filtering pushdown
-		else {
+		}//else filtering pushdown
+		else{
 			//check remaining predicates and only then return tuple if all predicates qualify
 			//otherwise return NULL
 			//filter pushdown
 			//check whether other predicates qualify and only then return tuple
-			if (allqual != NULL) {
+			if(allqual != NULL) {
 				//renata:todo 2014 HeapKeyTest can cover only predicates of type Var op Const
 				//for filter push down - we need to use allqual - these are all posible predicates on that table
 				valid = false;
-				ExecStoreTuple(&scan->xs_ctup, /* tuple to store */
-				slot, /* slot to store in */
-				InvalidBuffer, /* buffer containing tuple */
-				false); /* don't pfree */
+				ExecStoreTuple(&scan->xs_ctup,	/* tuple to store */
+							   slot,	/* slot to store in */
+							   InvalidBuffer,		/* buffer containing tuple */
+							   false);	/* don't pfree */
+
 
 				econtext->ecxt_scantuple = slot;
 				ResetExprContext(econtext);
-				if (ExecQual(allqual, econtext, false)) {
+				if (ExecQual(allqual, econtext, false))
+				{
 					valid = true;
 				}
 			} // no quals
-			else {
+			else{
 				/* if no keys to check - every tuple is valid*/
 				valid = true;
 			}
@@ -2599,7 +2271,7 @@ HeapTuple index_smoothfetch_heap(IndexScanDesc scan, ScanDirection direction, do
 		 * Only in a non-MVCC snapshot can more than one member of the HOT
 		 * chain be visible.
 		 */
-		if (valid) {
+		if(valid){
 			scan->xs_continue_hot = !IsMVCCSnapshot(scan->xs_snapshot);
 			pgstat_count_heap_fetch(scan->indexRelation);
 			smoothDesc->prefetch_counter++;
@@ -2609,12 +2281,12 @@ HeapTuple index_smoothfetch_heap(IndexScanDesc scan, ScanDirection direction, do
 			//smoothDesc->global_qualifying_pages++;
 
 			/* renata: add page to list of produced tuples */
-			if (num_tuples_switch >= 0) {
+			if(num_tuples_switch >= 0){
 				//old with bitmapset structure
-				//			TID_SHORT formTid;
-				//			BlockNumber blknum = ItemPointerGetBlockNumber(tid);
-				//			form_tuple_id_short(&scan->xs_ctup, blknum, &formTid);
-				//			smoothDesc->bs_vistuples = bms_add_member(smoothDesc->bs_vistuples, formTid);
+	//			TID_SHORT formTid;
+	//			BlockNumber blknum = ItemPointerGetBlockNumber(tid);
+	//			form_tuple_id_short(&scan->xs_ctup, blknum, &formTid);
+	//			smoothDesc->bs_vistuples = bms_add_member(smoothDesc->bs_vistuples, formTid);
 
 				TID formTid;
 				BlockNumber blknum = ItemPointerGetBlockNumber(tid);
@@ -2630,32 +2302,34 @@ HeapTuple index_smoothfetch_heap(IndexScanDesc scan, ScanDirection direction, do
 			 * 2. num_tuples_switch = 0   - cardinality driven policy - trigger Smooth when number of tuples is higher than estimated
 			 * 3. num_tuples_switch = X   - SLA driven - start when the actual number of tuples is equal to X */
 			if (enable_indexsmoothscan && !smoothDesc->start_smooth &&
-			/* number_tuples_switch = 0, meaning switch when actual cardinality is higher than estimated */
-			((!num_tuples_switch && smoothDesc->smooth_counter > plan_rows)
-			/* number_tuples_switch > 0, meaning switch when actual cardinality is equal 'number_tuples_switch' */
-			|| (num_tuples_switch && smoothDesc->smooth_counter >= num_tuples_switch)
+					/* number_tuples_switch = 0, meaning switch when actual cardinality is higher than estimated */
+				(        (!num_tuples_switch && smoothDesc->smooth_counter > plan_rows)
+						/* number_tuples_switch > 0, meaning switch when actual cardinality is equal 'number_tuples_switch' */
+					||   (num_tuples_switch && smoothDesc->smooth_counter >= num_tuples_switch)
 
-			)) {
+				)
+				){
 				smoothDesc->start_smooth = true;
 				smoothDesc->smooth_counter = 0;
 
-			}
+				}
 			//parameter meaning is the same as with num_tuples_switch - but here we are turning on prefetcher
 			if (enable_indexsmoothscan && !smoothDesc->start_prefetch &&
-			/* number_tuples_switch = 0, meaning switch when actual cardinality is higher than estimated */
-			((!num_tuples_prefetch && smoothDesc->prefetch_counter > plan_rows)
-			/* number_tuples_prefetch > 0, meaning switch when actual cardinality is equal 'number_tuples_prefetch' */
-			|| (num_tuples_prefetch && smoothDesc->prefetch_counter >= num_tuples_prefetch)
+				/* number_tuples_switch = 0, meaning switch when actual cardinality is higher than estimated */
+			(        (!num_tuples_prefetch && smoothDesc->prefetch_counter > plan_rows)
+					/* number_tuples_prefetch > 0, meaning switch when actual cardinality is equal 'number_tuples_prefetch' */
+				||   (num_tuples_prefetch && smoothDesc->prefetch_counter >= num_tuples_prefetch)
 
-			)) {
+			)
+			){
 				smoothDesc->start_prefetch = true;
 				//set it again to 0
 				smoothDesc->prefetch_counter = 0;
 			}
 
 			return &scan->xs_ctup;
-		} //if valid
-		else {
+		}//if valid
+		else{
 			//not valid return null
 			//additional filtering didn't pass
 			ItemPointerSetInvalid(&(scan->xs_ctup.t_self));
@@ -2682,6 +2356,8 @@ HeapTuple index_smoothfetch_heap(IndexScanDesc scan, ScanDirection direction, do
 	return NULL;
 }
 
+
+
 /* ----------------
  *		index_getnext - get the next heap tuple from a scan
  *
@@ -2697,19 +2373,26 @@ HeapTuple index_smoothfetch_heap(IndexScanDesc scan, ScanDirection direction, do
  * enough information to do it efficiently in the general case.
  * ----------------
  */
-HeapTuple index_getnext(IndexScanDesc scan, ScanDirection direction) {
-	HeapTuple heapTuple;
+HeapTuple
+index_getnext(IndexScanDesc scan, ScanDirection direction)
+{
+	HeapTuple	heapTuple;
 	ItemPointer tid;
 
-	for (;;) {
-		if (scan->xs_continue_hot) {
+	for (;;)
+	{
+		if (scan->xs_continue_hot)
+		{
 			/*
 			 * We are resuming scan of a HOT chain after having returned an
 			 * earlier member.	Must still hold pin on current heap page.
 			 */
 			Assert(BufferIsValid(scan->xs_cbuf));
-			Assert(ItemPointerGetBlockNumber(&scan->xs_ctup.t_self) == BufferGetBlockNumber(scan->xs_cbuf));
-		} else {
+			Assert(ItemPointerGetBlockNumber(&scan->xs_ctup.t_self) ==
+				   BufferGetBlockNumber(scan->xs_cbuf));
+		}
+		else
+		{
 			/* Time to fetch the next TID from the index */
 			tid = index_getnext_tid(scan, direction);
 
@@ -2724,12 +2407,13 @@ HeapTuple index_getnext(IndexScanDesc scan, ScanDirection direction) {
 		 * the index.
 		 */
 
+
 		heapTuple = index_fetch_heap(scan);
 		if (heapTuple != NULL)
 			return heapTuple;
 	}
 
-	return NULL; /* failure exit */
+	return NULL;				/* failure exit */
 }
 
 /* ----------------
@@ -2750,43 +2434,39 @@ HeapTuple index_getnext(IndexScanDesc scan, ScanDirection direction) {
  * enough information to do it efficiently in the general case.
  * ----------------
  */
-HeapTuple indexsmooth_getnext(IndexScanDesc scan, ScanDirection direction, double plan_rows, int no_orig_keys,
-		ScanKey orig_keys, List *target_list, List *qual_list, Index index, int no_orig_smooth_keys,
-		ScanKey orig_smooth_keys, List *allqual, ExprContext *econtext, TupleTableSlot *slot) {
-	HeapTuple heapTuple;
+HeapTuple
+indexsmooth_getnext(IndexScanDesc scan, ScanDirection direction, double plan_rows,  int no_orig_keys, ScanKey orig_keys, List *target_list, List *qual_list, Index index, int no_orig_smooth_keys, ScanKey orig_smooth_keys, List *allqual, ExprContext *econtext, TupleTableSlot *slot )
+{
+	HeapTuple	heapTuple;
 	ItemPointer tid;
-	SmoothScanOpaque smoothDesc = (SmoothScanOpaque) scan->smoothInfo;
 
-	//int batchno;
 
-	for (;;) { /* we are either processing current page, or have more pages in prefetcher
-	 In any case, I should not fetch next TID from the index, until I don't consume all prefetched pages
-	 */
-		if (scan->xs_continue_hot || ((SmoothScanOpaque) scan->smoothInfo)->more_data_for_smooth
-				|| ((SmoothScanOpaque) scan->smoothInfo)->prefetch_pages) {
+	for (;;)
+	{	/* we are either processing current page, or have more pages in prefetcher
+	     In any case, I should not fetch next TID from the index, until I don't consume all prefetched pages
+	     */
+		if (scan->xs_continue_hot ||((SmoothScanOpaque)scan->smoothInfo)->more_data_for_smooth
+				||((SmoothScanOpaque)scan->smoothInfo)->prefetch_pages)
+		{
 			/*
 			 * We are resuming scan of a HOT chain after having returned an
 			 * earlier member.	Must still hold pin on current heap page.
 			 */
-			if (scan->xs_continue_hot) {
+			if (scan->xs_continue_hot ){
 				Assert(BufferIsValid(scan->xs_cbuf));
-				Assert(ItemPointerGetBlockNumber(&scan->xs_ctup.t_self) == BufferGetBlockNumber(scan->xs_cbuf));
+				Assert(ItemPointerGetBlockNumber(&scan->xs_ctup.t_self) ==
+					   BufferGetBlockNumber(scan->xs_cbuf));
 			}
-		} else {
-			HeapTuple tuple;
-			Buffer buf =  InvalidBuffer;
+		}
+		else
+		{
 			/* Time to fetch the next TID from the index */
 			tid = index_getnext_tid(scan, direction);
 
+
 			/* If we're out of index entries, we're done */
 			if (tid == NULL)
-					break;
-
-
-
-
-
-
+				break;
 		}
 
 		/*
@@ -2798,18 +2478,14 @@ HeapTuple indexsmooth_getnext(IndexScanDesc scan, ScanDirection direction, doubl
 		 * in this method we will fetch heaptuple -but we will also fill scan->smoothdescriptor->items with the rest of tuples
 		 *
 		 * */
-		//	print_tuple(RelationGetDescr(scan->indexRelation), scan->xs_itup);
-
-		heapTuple = index_smoothfetch_heap(scan, direction, plan_rows, no_orig_keys, orig_keys, target_list, qual_list,
-				index, no_orig_smooth_keys, orig_smooth_keys, allqual, econtext, slot);
-		if (heapTuple != NULL) {
-
-			smoothDesc->num_result_tuples++;
+		heapTuple = index_smoothfetch_heap(scan, direction, plan_rows, no_orig_keys, orig_keys, target_list, qual_list, index, no_orig_smooth_keys, orig_smooth_keys, allqual, econtext, slot);
+		if (heapTuple != NULL){
+			((SmoothScanOpaque)scan->smoothInfo)->num_result_tuples++;
 			return heapTuple;
 		}
 	}
 
-	return NULL; /* failure exit */
+	return NULL;				/* failure exit */
 }
 /* ----------------
  *		smoothscan_getnext - get the next heap tuple from a scan
@@ -2826,19 +2502,26 @@ HeapTuple indexsmooth_getnext(IndexScanDesc scan, ScanDirection direction, doubl
  * enough information to do it efficiently in the general case.
  * ----------------
  */
-HeapTuple smoothscan_getnext(IndexScanDesc scan, ScanDirection direction) {
-	HeapTuple heapTuple;
+HeapTuple
+smoothscan_getnext(IndexScanDesc scan, ScanDirection direction)
+{
+	HeapTuple	heapTuple;
 	ItemPointer tid;
 
-	for (;;) {
-		if (scan->xs_continue_hot) {
+	for (;;)
+	{
+		if (scan->xs_continue_hot)
+		{
 			/*
 			 * We are resuming scan of a HOT chain after having returned an
 			 * earlier member.	Must still hold pin on current heap page.
 			 */
 			Assert(BufferIsValid(scan->xs_cbuf));
-			Assert(ItemPointerGetBlockNumber(&scan->xs_ctup.t_self) == BufferGetBlockNumber(scan->xs_cbuf));
-		} else {
+			Assert(ItemPointerGetBlockNumber(&scan->xs_ctup.t_self) ==
+				   BufferGetBlockNumber(scan->xs_cbuf));
+		}
+		else
+		{
 			/* Time to fetch the next TID from the index */
 
 			tid = smoothscan_getnext_tid(scan, direction);
@@ -2874,14 +2557,14 @@ HeapTuple smoothscan_getnext(IndexScanDesc scan, ScanDirection direction) {
 		 * 	  }
 		 *  */
 
-		heapTuple = index_smoothfetch_heap(scan, direction, 0, 0, NULL, NULL, NULL, NULL, 0, NULL, NULL, NULL, NULL);
-		if (heapTuple != NULL) {
-			((SmoothScanOpaque) scan->smoothInfo)->num_result_tuples++;
+		heapTuple = index_smoothfetch_heap(scan, direction, 0, 0, NULL, NULL, NULL, NULL,  0, NULL, NULL, NULL, NULL);
+		if (heapTuple != NULL){
+			((SmoothScanOpaque)scan->smoothInfo)->num_result_tuples++;
 			return heapTuple;
 		}
 	}
 
-	return NULL; /* failure exit */
+	return NULL;				/* failure exit */
 }
 
 /* ----------------
@@ -2897,10 +2580,12 @@ HeapTuple smoothscan_getnext(IndexScanDesc scan, ScanDirection direction) {
  * approximate, so it should only be used for statistical purposes.)
  * ----------------
  */
-int64 index_getbitmap(IndexScanDesc scan, TIDBitmap *bitmap) {
-	FmgrInfo *procedure;
-	int64 ntids;
-	Datum d;
+int64
+index_getbitmap(IndexScanDesc scan, TIDBitmap *bitmap)
+{
+	FmgrInfo   *procedure;
+	int64		ntids;
+	Datum		d;
 
 	SCAN_CHECKS;
 	GET_SCAN_PROCEDURE(amgetbitmap);
@@ -2912,8 +2597,8 @@ int64 index_getbitmap(IndexScanDesc scan, TIDBitmap *bitmap) {
 	 * have the am's getbitmap proc do all the work.
 	 */
 	d = FunctionCall2(procedure,
-			PointerGetDatum(scan),
-			PointerGetDatum(bitmap));
+					  PointerGetDatum(scan),
+					  PointerGetDatum(bitmap));
 
 	ntids = DatumGetInt64(d);
 
@@ -2937,20 +2622,24 @@ int64 index_getbitmap(IndexScanDesc scan, TIDBitmap *bitmap) {
  * ----------------
  */
 IndexBulkDeleteResult *
-index_bulk_delete(IndexVacuumInfo *info, IndexBulkDeleteResult *stats, IndexBulkDeleteCallback callback,
-		void *callback_state) {
-	Relation indexRelation = info->index;
-	FmgrInfo *procedure;
+index_bulk_delete(IndexVacuumInfo *info,
+				  IndexBulkDeleteResult *stats,
+				  IndexBulkDeleteCallback callback,
+				  void *callback_state)
+{
+	Relation	indexRelation = info->index;
+	FmgrInfo   *procedure;
 	IndexBulkDeleteResult *result;
 
 	RELATION_CHECKS;
 	GET_REL_PROCEDURE(ambulkdelete);
 
-	result = (IndexBulkDeleteResult *) DatumGetPointer(FunctionCall4(procedure,
-					PointerGetDatum(info),
-					PointerGetDatum(stats),
-					PointerGetDatum((Pointer) callback),
-					PointerGetDatum(callback_state)));
+	result = (IndexBulkDeleteResult *)
+		DatumGetPointer(FunctionCall4(procedure,
+									  PointerGetDatum(info),
+									  PointerGetDatum(stats),
+									  PointerGetDatum((Pointer) callback),
+									  PointerGetDatum(callback_state)));
 
 	return result;
 }
@@ -2962,17 +2651,20 @@ index_bulk_delete(IndexVacuumInfo *info, IndexBulkDeleteResult *stats, IndexBulk
  * ----------------
  */
 IndexBulkDeleteResult *
-index_vacuum_cleanup(IndexVacuumInfo *info, IndexBulkDeleteResult *stats) {
-	Relation indexRelation = info->index;
-	FmgrInfo *procedure;
+index_vacuum_cleanup(IndexVacuumInfo *info,
+					 IndexBulkDeleteResult *stats)
+{
+	Relation	indexRelation = info->index;
+	FmgrInfo   *procedure;
 	IndexBulkDeleteResult *result;
 
 	RELATION_CHECKS;
 	GET_REL_PROCEDURE(amvacuumcleanup);
 
-	result = (IndexBulkDeleteResult *) DatumGetPointer(FunctionCall2(procedure,
-					PointerGetDatum(info),
-					PointerGetDatum(stats)));
+	result = (IndexBulkDeleteResult *)
+		DatumGetPointer(FunctionCall2(procedure,
+									  PointerGetDatum(info),
+									  PointerGetDatum(stats)));
 
 	return result;
 }
@@ -2981,8 +2673,10 @@ index_vacuum_cleanup(IndexVacuumInfo *info, IndexBulkDeleteResult *stats) {
  *		index_can_return - does index support index-only scans?
  * ----------------
  */
-bool index_can_return(Relation indexRelation) {
-	FmgrInfo *procedure;
+bool
+index_can_return(Relation indexRelation)
+{
+	FmgrInfo   *procedure;
 
 	RELATION_CHECKS;
 
@@ -2993,7 +2687,7 @@ bool index_can_return(Relation indexRelation) {
 	GET_REL_PROCEDURE(amcanreturn);
 
 	return DatumGetBool(FunctionCall1(procedure,
-					PointerGetDatum(indexRelation)));
+									  PointerGetDatum(indexRelation)));
 }
 
 /* ----------------
@@ -3022,10 +2716,14 @@ bool index_can_return(Relation indexRelation) {
  *		particular indexed attribute.
  * ----------------
  */
-RegProcedure index_getprocid(Relation irel, AttrNumber attnum, uint16 procnum) {
+RegProcedure
+index_getprocid(Relation irel,
+				AttrNumber attnum,
+				uint16 procnum)
+{
 	RegProcedure *loc;
-	int nproc;
-	int procindex;
+	int			nproc;
+	int			procindex;
 
 	nproc = irel->rd_am->amsupport;
 
@@ -3053,10 +2751,13 @@ RegProcedure index_getprocid(Relation irel, AttrNumber attnum, uint16 procnum) {
  * ----------------
  */
 FmgrInfo *
-index_getprocinfo(Relation irel, AttrNumber attnum, uint16 procnum) {
-	FmgrInfo *locinfo;
-	int nproc;
-	int procindex;
+index_getprocinfo(Relation irel,
+				  AttrNumber attnum,
+				  uint16 procnum)
+{
+	FmgrInfo   *locinfo;
+	int			nproc;
+	int			procindex;
 
 	nproc = irel->rd_am->amsupport;
 
@@ -3071,7 +2772,8 @@ index_getprocinfo(Relation irel, AttrNumber attnum, uint16 procnum) {
 	locinfo += procindex;
 
 	/* Initialize the lookup info if first time through */
-	if (locinfo->fn_oid == InvalidOid) {
+	if (locinfo->fn_oid == InvalidOid)
+	{
 		RegProcedure *loc = irel->rd_support;
 		RegProcedure procId;
 
@@ -3086,8 +2788,8 @@ index_getprocinfo(Relation irel, AttrNumber attnum, uint16 procnum) {
 		 * function to be optional, it can use index_getprocid.)
 		 */
 		if (!RegProcedureIsValid(procId))
-			elog(ERROR, "missing support function %d for attribute %d of index \"%s\"", procnum, attnum,
-					RelationGetRelationName(irel));
+			elog(ERROR, "missing support function %d for attribute %d of index \"%s\"",
+				 procnum, attnum, RelationGetRelationName(irel));
 
 		fmgr_info_cxt(procId, locinfo, irel->rd_indexcxt);
 	}

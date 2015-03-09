@@ -396,7 +396,7 @@ _bt_preprocess_array_keys(IndexScanDesc scan)
 			ss->arrayKeys[i].num_elems = so->arrayKeys[i].num_elems;
 			ss->arrayKeys[i].elem_values = so->arrayKeys[i].elem_values;
 		}
-		ss->numArrayKeys == so->numArrayKeys;
+		ss->numArrayKeys = so->numArrayKeys;
 	}
 	/************************************************************************************/
 	MemoryContextSwitchTo(oldContext);
