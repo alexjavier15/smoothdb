@@ -2704,7 +2704,7 @@ bool _readpage(IndexBoundReader readerBuf, Buffer buf, IndexScanDesc scan, ScanD
 	Assert(ScanDirectionIsForward(dir));
 	/* load items[] in ascending order */
 
-	itemIndex = readerBuf->lastItem == 0 ? 0 : readerBuf->lastItem + 1;
+	itemIndex =  readerBuf->lastItem + 1;
 	firstIndex = itemIndex;
 	offnum = minoff;
 
