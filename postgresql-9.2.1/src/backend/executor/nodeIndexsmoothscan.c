@@ -2691,15 +2691,16 @@ bool _readpage(IndexBoundReader readerbuf, Buffer buf, IndexScanDesc scan, ScanD
 	while (offnum <= maxoff) {
 
 		ItemId iid = PageGetItemId(page, offnum);
+		itup = (IndexTuple) PageGetItem(page, iid);
+		if(IndexTupleSize(itup) == 8){
 
+			print_tuple(RelationGetDescr(scan->indexRelation),itup);
+		}
 		itup = _bt_checkkeys(scan, page, offnum, ForwardScanDirection, &continuescan);
 
 		if (itup != NULL) {
 
-if(IndexTupleSize(itup) == 8){
 
-	print_tuple(RelationGetDescr(scan->indexRelation),itup);
-}
 //			if(pr){
 //
 //						print_tuple(RelationGetDescr(scan->indexRelation),itup);
