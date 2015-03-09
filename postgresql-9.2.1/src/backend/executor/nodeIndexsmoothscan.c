@@ -2844,6 +2844,7 @@ void get_all_keys(IndexScanDesc scan) {
 //		end_off--;
 //
 //	}
+	 reader->itupz = itupz;
 	printf("Printing root... start : %d, end: %d\n", start_off, end_off);
 
 	while (offnum <= end_off) {
