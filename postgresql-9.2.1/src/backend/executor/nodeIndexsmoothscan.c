@@ -2515,7 +2515,7 @@ for( next = reader->firstItem; next!=NULL; next= next->link){
 		curr_tuple = next->tuple;
 
 		if(counter > 0){
-			itemIndex = reader_buffer->lastItem + 1 ;
+			itemIndex = reader_buffer->lastItem + 1;
 			modOffset = itemIndex % reader_buffer->prefetcher.split_factor;
 			if(modOffset == 0){
 			itemIndexdiv = itemIndex / reader_buffer->prefetcher.split_factor;
@@ -2973,8 +2973,8 @@ void get_all_keys(IndexScanDesc scan) {
 		int target_length = 1;
 		target_length = partitionsz;
 		if (!smoothDesc->moreLeft) {
-		// we will need an additionl tuple
-					target_length++;
+			// we will need an additionl tuple
+			target_length++;
 		}
 //		if (partitionsz <= MAX_NUM_PARTITION)
 		result = _findIndexBoundsWithPrefetch(&reader, &readerBuf, buf, scan, target_length);
@@ -2986,12 +2986,12 @@ void get_all_keys(IndexScanDesc scan) {
 			printf("Suitable partitioning foudn\n");
 			if (!readerBuf->prefetcher.is_prefetching)
 
-				scan_length = readerBuf->lastItem - 1;
+				scan_length = readerBuf->lastItem;
 			else
 				scan_length = readerBuf->prefetcher.last_item;
 
-			next++;
-			lastItem++;
+			next=0;
+
 			curr_buf = readerBuf;
 		} else {
 			smoothDesc->moreLeft = true;
@@ -3050,8 +3050,14 @@ void get_all_keys(IndexScanDesc scan) {
 
 	nextItem =curr_buf->firstItem;
 	while (next < lastItem) {
-
 		int iter = 0;
+
+
+		resultCache->bounds[pos] = nextItem->tuple;
+		pos++;
+
+
+
 		while(nextItem != NULL && iter < split_factor){
 			nextItem = nextItem->link;
 
@@ -3069,12 +3075,12 @@ void get_all_keys(IndexScanDesc scan) {
 //			left = nelemLeft;
 //		}
 
-		resultCache->bounds[pos] = nextItem->tuple;
+
 		//print_tuple(tupdesc, resultCache->bounds [pos]);
 		//print_tuple(tupdesc, bounds[pos]);
 
 		next += split_factor;
-		pos++;
+
 
 	}
 
