@@ -2746,8 +2746,7 @@ bool _readpage(IndexBoundReader readerBuf, Buffer buf, IndexScanDesc scan, ScanD
 			_saveitem(readerBuf, itemIndexdiv, offnum, itup);
 			itemIndex++;
 		}else{
-		printf("Tuple not passing, is dead: %d , is valid: %d\n",ItemIdIsDead(iid),ItemIdIsValid(iid));
-		fflush(stdout);
+		printf("Tuple not passing, at offset %d\n", offnum);
 		}
 		/*renata: move to next index tuple */
 		offnum = OffsetNumberNext(offnum);
