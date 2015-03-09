@@ -124,7 +124,7 @@ typedef enum IndexUniqueCheck
  *		True iff the index scan is valid.
  */
 #define IndexScanIsValid(scan) PointerIsValid(scan)
-#define HasSmoothInfo(scan) PointerIsValid(scan->smoothInfo)
+#define HasSmoothInfo(scan) (PointerIsValid(scan->smoothInfo)  && enable_smoothshare)
 
 
 extern Relation index_open(Oid relationId, LOCKMODE lockmode);
