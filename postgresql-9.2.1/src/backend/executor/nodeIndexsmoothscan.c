@@ -2704,7 +2704,7 @@ bool _readpage(IndexBoundReader readerBuf, Buffer buf, IndexScanDesc scan, ScanD
 	Assert(ScanDirectionIsForward(dir));
 	/* load items[] in ascending order */
 
-	itemIndex =  readerBuf->lastItem + 1;
+	itemIndex = lastitem;
 	firstIndex = itemIndex;
 	offnum = minoff;
 
@@ -2974,7 +2974,7 @@ void get_all_keys(IndexScanDesc scan) {
 		target_length = partitionsz;
 		if (!smoothDesc->moreLeft) {
 		// we will need an additionl tuple
-		 target_length++;
+					target_length++;
 		}
 //		if (partitionsz <= MAX_NUM_PARTITION)
 		result = _findIndexBoundsWithPrefetch(&reader, &readerBuf, buf, scan, target_length);
