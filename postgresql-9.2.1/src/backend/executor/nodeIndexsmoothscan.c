@@ -1599,7 +1599,7 @@ ExecInitIndexSmoothScan(IndexSmoothScan *node, EState *estate, int eflags) {
 	 */
 	indexstate->iss_ScanDesc = index_beginscan(currentRelation, indexstate->iss_RelationDesc, estate->es_snapshot,
 			indexstate->iss_NumScanKeys, indexstate->iss_NumOrderByKeys);
-	indexstate->iss_ScanDesc->xs_want_itup = true;
+
 	/**********************************************************/
 	//smooth scan part
 	ss = (SmoothScanOpaque) palloc(sizeof(SmoothScanOpaqueData));
@@ -1711,6 +1711,9 @@ ExecInitIndexSmoothScan(IndexSmoothScan *node, EState *estate, int eflags) {
 				printf("Found bitmap with : %d words\n", bms_num_members(ss->bs_vispages));
 
 			}
+
+			indexstate->iss_ScanDesc->xs_want_itup = true;
+
 			pfree(name3);
 
 			/*printf("Size of words shared : %d.\n", sizeof(bitmapword) * ss->bs_vispages->nwords);
