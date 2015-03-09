@@ -117,7 +117,7 @@
 	AssertMacro(PointerIsValid(scan->indexRelation->rd_am)) \
 )
 
-//#define SmoothProcesmoothDescnePage(scan, page, direction, no_orig_keys, orig_keys ) \
+//#define SmoothProcesOnePage(scan, page, direction, no_orig_keys, orig_keys ) \
 //( \
 //	Page		dp; \
 //	int			lines; \
@@ -718,46 +718,454 @@ HeapTuple index_fetch_heap(IndexScanDesc scan) {
 	return NULL;
 }
 
-HeapTuple SmoothProcesmoothDescnePageOrder(IndexScanDesc scan, BlockNumber page, ScanDirection direction, int no_orig_keys,
-		ScanKey orig_keys, bool prefetcher, List *target_list, List *qual_list, Index index, int no_orig_smooth_keys,
-		ScanKey orig_smooth_keys, List *allqual, ExprContext *econtext, TupleTableSlot *slot) {
-	Page dp;
-	int lines;
+//HeapTuple SmoothProcessOnePageOrder(IndexScanDesc scan, BlockNumber page, ScanDirection direction, int no_orig_keys,
+//		ScanKey orig_keys, bool prefetcher, List *target_list, List *qual_list, Index index, int no_orig_smooth_keys,
+//		ScanKey orig_smooth_keys, List *allqual, ExprContext *econtext, TupleTableSlot *slot) {
+//	Page dp;
+//	int lines;
+//	OffsetNumber lineoff;
+//	int linesleft;
+//	ItemId lpp;
+//	bool valid;
+//	bool pageHasOneResultTuple = false; // does page have at least one match
+//	bool got_heap_tuple = false;
+//	bool traversed = false; /* did we walk already hot chain for the index probe?*/
+//	bool backward = ScanDirectionIsBackward(direction);
+//	HeapTuple tuple = &(scan->xs_ctup);
+//	ItemPointerData originalTupleID = tuple->t_self; /*this is a copy*/
+//	HeapTuple copyTuple = NULL;
+//	int itemIndex = 0;
+//
+//	SmoothScanOpaque smoothDesc = (SmoothScanOpaque) scan->smoothInfo;
+//	ResultCache *resultcache = smoothDesc->result_cache;
+//
+//	LockBuffer(scan->xs_cbuf, BUFFER_LOCK_SHARE);
+//	/* get page information */
+//	dp = (Page) BufferGetPage(scan->xs_cbuf);
+//
+//	if (resultcache->status != SS_FULL) {
+//
+//		if (ScanDirectionIsForward(direction)) {
+//			/* start from the first tuple */
+//			lineoff = FirstOffsetNumber;
+//			/* end is maximum offset for a page */
+//			lines = PageGetMaxOffsetNumber(dp);
+//			linesleft = lines - lineoff + 1;
+//		} else if (backward) {
+//			lines = PageGetMaxOffsetNumber(dp);
+//			lineoff = lines;
+//			linesleft = lineoff;
+//		}
+//		/*renata: this should not be the case */
+//		else {
+//			return NULL;
+//		}
+//
+//		/*
+//		 * advance the scan until we find a qualifying tuple or run out of stuff
+//		 * to scan
+//		 */
+//		itemIndex = 0;
+//
+//		while (linesleft > 0) {
+//			lpp = PageGetItemId(dp, lineoff);
+//			valid = false;
+//			if (ItemIdIsNormal(lpp)) {
+//				tuple->t_data = (HeapTupleHeader) PageGetItem((Page) dp, lpp);
+//				tuple->t_len = ItemIdGetLength(lpp);
+//				tuple->t_tableOid = scan->heapRelation->rd_id;
+//				ItemPointerSet(&(tuple->t_self), page, lineoff);
+//				/*this is a tuple for which we are doing an index probe*/
+//				if (lineoff == originalTupleID.ip_posid) {
+//					/* have to check if we have already walked hot chain - because if we did originaltupleID value has CHANGED
+//					 * and it is possible to enter this 2 times) for original and final version */
+//					/* Note: for prefetcher - we don't have the targeted tuple */
+//					if (!traversed && !prefetcher) {
+//						/* we have to traverse through hot chain */
+//						got_heap_tuple = heap_hot_search_buffer(&originalTupleID, scan->heapRelation, scan->xs_cbuf,
+//								scan->xs_snapshot, tuple, NULL, true);
+//						/* after this originalTupleID is updated to show to a new one */
+//						/* this is the one that needs to be returned */
+//
+//						if (got_heap_tuple) {
+//							if (!enable_filterpushdown) {
+//								valid = true;
+//							} else {
+//								//filter pushdown
+//								//check whether other predicates qualify and only then return tuple
+//								if (allqual != NULL) {
+//									//renata:todo 2014 HeapKeyTest can cover only predicates of type Var op Const
+//									//for filter push down - we need to use allqual - these are all posible predicates on that table
+//									valid = false;
+//									ExecStoreTuple(tuple, /* tuple to store */
+//									slot, /* slot to store in */
+//									InvalidBuffer, /* buffer containing tuple */
+//									false); /* don't pfree */
+//
+//									econtext->ecxt_scantuple = slot;
+//									ResetExprContext(econtext);
+//									if (ExecQual(allqual, econtext, false)) {
+//										valid = true;
+//									}
+//								} else {
+//									/* if no keys to check - every tuple is valid*/
+//									valid = true;
+//								}
+//
+//							} // if filter push down
+//							if (valid) {
+//								copyTuple = heap_copytuple(tuple);
+//								smooth_resultcache_add_tuple(scan, page, lineoff, tuple,
+//																	RelationGetDescr(scan->heapRelation), target_list, qual_list, index,
+//																	&pageHasOneResultTuple);
+//							}
+//							//todo check whether traversed should be on even if didn't find match
+//							traversed = true;
+//						}
+//					}
+//
+//				} else { // end if tuple for which we are doing index probe
+//					/* read only visible tuples - last tuples in hot chain*/
+//					got_heap_tuple = HeapTupleSatisfiesVisibility(tuple, scan->xs_snapshot, scan->xs_cbuf);
+//					if (got_heap_tuple) {
+//						//renata todo: maybe i could remove this
+//						PredicateLockTuple(scan->heapRelation, tuple, scan->xs_snapshot);
+//
+//						/* check if we have produced tuples before smooth */
+//						if (num_tuples_switch >= 0) {
+//							//if yes check if this tuple is produced before smooth has started and only if not do predicate check
+////							TID_SHORT formTid;
+////							form_tuple_id_short(tuple, page, &formTid);
+//							TID formTid;
+//							form_tuple_id(tuple, page, &formTid);
+//
+//							if (!smooth_tuplecache_find_tuple(smoothDesc->tupleID_cache, formTid)) {
+//								if (no_orig_smooth_keys > 0) {
+//
+//									if (enable_smoothnestedloop) {
+//										HeapSmoothKeyTest(tuple, RelationGetDescr(scan->heapRelation),
+//												no_orig_smooth_keys, orig_smooth_keys, valid);
+//									} else {
+//										HeapKeyTest(tuple, RelationGetDescr(scan->heapRelation), no_orig_smooth_keys,
+//												orig_smooth_keys, valid);
+//									}
+//									/* next line is just for vtune (to see the code of a macro) */
+//									//valid = HeapKeyTestSmooth(tuple, RelationGetDescr(scan->heapRelation), no_orig_smooth_keys, orig_smooth_keys);
+//								} else {
+//									valid = true;
+//								}
+//								if (valid && enable_filterpushdown) {
+//									//FILTER PUSH DOWN
+//									if (allqual != NULL) {
+//										//renata:todo 2014 HeapKeyTest can cover only predicates of type Var op Const
+//										//for filter push down - we need to use allqual - these are all posible predicates on that table
+//										valid = false;
+//										ExecStoreTuple(tuple, /* tuple to store */
+//										slot, /* slot to store in */
+//										InvalidBuffer, /* buffer containing tuple */
+//										false); /* don't pfree */
+//
+//										econtext->ecxt_scantuple = slot;
+//										ResetExprContext(econtext);
+//										if (ExecQual(allqual, econtext, false)) {
+//											valid = true;
+//										}
+//									} else {
+//										/* if no keys to check - every tuple is valid*/
+//										valid = true;
+//									}
+//								} //filter push down
+//							} else {
+//								//if find tuple
+//								;//nothing
+//							}
+//						} else {
+////							// Start smooth from beginning
+//							if (no_orig_smooth_keys > 0) {
+//
+//								if (enable_smoothnestedloop) {
+//									HeapSmoothKeyTest(tuple, RelationGetDescr(scan->heapRelation), no_orig_smooth_keys,
+//											orig_smooth_keys, valid);
+//								} else {
+//									HeapKeyTest(tuple, RelationGetDescr(scan->heapRelation), no_orig_smooth_keys,
+//											orig_smooth_keys, valid);
+//								}
+//								//valid = HeapKeyTestSmooth(tuple, RelationGetDescr(scan->heapRelation), no_orig_smooth_keys, orig_smooth_keys);
+//							} else {
+//								/* if no keys to check - every tuple is valid*/
+//								valid = true;
+//							}
+//							if (valid && enable_filterpushdown) {
+//								// filter pushdown
+//								if (allqual != NULL) {
+//									//renata:todo 2014 HeapKeyTest can cover only predicates of type Var op Const
+//									//for filter push down - we need to use allqual - these are all posible predicates on that table
+//									valid = false;
+//									ExecStoreTuple(tuple, /* tuple to store */
+//									slot, /* slot to store in */
+//									InvalidBuffer, /* buffer containing tuple */
+//									false); /* don't pfree */
+//
+//									econtext->ecxt_scantuple = slot;
+//									ResetExprContext(econtext);
+//									if (ExecQual(allqual, econtext, false)) {
+//										valid = true;
+//									}
+//								} else {
+//									/* if no keys to check - every tuple is valid*/
+//									valid = true;
+//								}
+//							} //filter pushwdown
+//
+//						}
+//						if (valid) {
+//							/* this is a randomly found tuple - store it in the result cache since we will need it later */
+//							if (smooth_resultcache_add_tuple(scan, page, lineoff, tuple,
+//									RelationGetDescr(scan->heapRelation), target_list, qual_list, index,
+//									&pageHasOneResultTuple)) {
+//
+//								itemIndex++;
+//
+//							} else {
+//								if(resultcache->status == SS_FULL)
+//									break;
+//							}
+//
+//						}
+//
+//					}
+//
+//				}
+//
+//			} /* if tuple is normal*/
+//			/*
+//			 * otherwise move to the next item on the page
+//			 */
+//			--linesleft;
+//
+//			if (ScanDirectionIsForward(direction)) {
+//				++lpp; /* move forward in this page's ItemId array */
+//				++lineoff;
+//			} else {
+//				--lpp; /* move back in this page's ItemId array */
+//				--lineoff;
+//			}
+//
+//		}
+//
+//		/* we have processed all tuples from this page */
+//		if (!linesleft) {
+//			smoothDesc->bs_vispages = bms_add_member(smoothDesc->bs_vispages, page);
+//			smoothDesc->num_vispages++;
+//			/* set next page to process in a sequential manner */
+//			if (smoothDesc->prefetch_pages)
+//				smoothDesc->nextPageId = page + 1;
+//
+//		} else {
+//			//hash is full - even if we have a prefetcher - have to set it to 0
+//			smoothDesc->prefetch_pages = 0;
+//		}
+//
+//		/*we have obtained the tuple we needed*/
+//		if (copyTuple) {
+////			int batchno = -1;
+////			ExecResultCacheGetBatch(scan, tuple, &batchno);
+////							if (smoothDesc->result_cache->curbatch != batchno) {
+////
+////								//	print_tuple(RelationGetDescr(scan->heapRelation),heapTuple);
+////								ExecHashJoinNewBatch(scan, batchno);
+////							}
+//
+//			/* copy tuple is the one we need to return */
+//			heap_copytuple_with_tuple(copyTuple, tuple);
+//			heap_freetuple(copyTuple);
+//			//print_slot(slot);
+//
+//			//fflush(stdout);
+//
+//
+//			/* free copy, since we don't need it anymore */
+//
+//			LockBuffer(scan->xs_cbuf, BUFFER_LOCK_UNLOCK);
+//
+//		} else {
+//			/*we haven't obtained tuple we needed
+//			 * two cases: tuple is old (updated) in that case return null
+//			 * else: hash table is full and we jumped out of fetching tuples before we reached required tuple*/
+//			if (smoothDesc->result_cache->status == SS_FULL && linesleft && !prefetcher) {
+//				if (!traversed) {
+//					/* we have to traverse through hot chain */
+//					got_heap_tuple = heap_hot_search_buffer(&originalTupleID, scan->heapRelation, scan->xs_cbuf,
+//							scan->xs_snapshot, tuple, NULL, true);
+//					LockBuffer(scan->xs_cbuf, BUFFER_LOCK_UNLOCK);
+//					/* after this originalTupleID is updated to show to a new one */
+//					/* this is the one that needs to be returned */
+//
+//					if (got_heap_tuple) {
+//						if (!enable_filterpushdown) {
+//							return tuple;
+//						} else {
+//							//check remaining predicates and only then return tuple if all predicates qualify
+//							//otherwise return NULL
+//							//filter pushdown
+//							//check whether other predicates qualify and only then return tuple
+//							if (allqual != NULL) {
+//								//renata:todo 2014 HeapKeyTest can cover only predicates of type Var op Const
+//								//for filter push down - we need to use allqual - these are all posible predicates on that table
+//								valid = false;
+//								ExecStoreTuple(tuple, /* tuple to store */
+//								slot, /* slot to store in */
+//								InvalidBuffer, /* buffer containing tuple */
+//								false); /* don't pfree */
+//
+//								econtext->ecxt_scantuple = slot;
+//								ResetExprContext(econtext);
+//								if (ExecQual(allqual, econtext, false)) {
+//									valid = true;
+//								}
+//							} // no quals
+//							else {
+//								/* if no keys to check - every tuple is valid*/
+//								valid = true;
+//							}
+//							if (valid) {
+//								return tuple;
+//							} else {
+//								//additional filtering didn't pass
+//								ItemPointerSetInvalid(&(tuple->t_self));
+//								tuple->t_tableOid = InvalidOid;
+//								return NULL;
+//							}
+//						} //filtering push down
+//					} else { // didn't get any tuple
+//						ItemPointerSetInvalid(&(tuple->t_self));
+//						tuple->t_tableOid = InvalidOid;
+//						return NULL;
+//					}
+//				}
+//
+//			}
+//			/*I am sure that in the case of prefetcher I will jump here and return nothing*/
+//			LockBuffer(scan->xs_cbuf, BUFFER_LOCK_UNLOCK);
+//			ItemPointerSetInvalid(&(tuple->t_self));
+//			tuple->t_tableOid = InvalidOid;
+//			return NULL;
+//
+//		} // if we have copy tuple
+//
+//		return tuple;
+//	} else {
+//		/* we are already in the full state
+//		 * just return a normal tuple */
+//		if (!prefetcher) {
+//			got_heap_tuple = heap_hot_search_buffer(&originalTupleID, scan->heapRelation, scan->xs_cbuf,
+//					scan->xs_snapshot, tuple, NULL, true);
+//			LockBuffer(scan->xs_cbuf, BUFFER_LOCK_UNLOCK);
+//			/* after this originalTupleID is updated to show to a new one */
+//			/* this is the one that needs to be returned */
+//
+//			if (got_heap_tuple) {
+//				if (!enable_filterpushdown) {
+//					return tuple;
+//				} //else filtering pushdown
+//				else {
+//					//check remaining predicates and only then return tuple if all predicates qualify
+//					//otherwise return NULL
+//					//filter pushdown
+//					//check whether other predicates qualify and only then return tuple
+//					if (allqual != NULL) {
+//						//renata:todo 2014 HeapKeyTest can cover only predicates of type Var op Const
+//						//for filter push down - we need to use allqual - these are all posible predicates on that table
+//						valid = false;
+//						ExecStoreTuple(tuple, /* tuple to store */
+//						slot, /* slot to store in */
+//						InvalidBuffer, /* buffer containing tuple */
+//						false); /* don't pfree */
+//
+//						econtext->ecxt_scantuple = slot;
+//						ResetExprContext(econtext);
+//						if (ExecQual(allqual, econtext, false)) {
+//							valid = true;
+//						}
+//					} // no quals
+//					else {
+//						/* if no keys to check - every tuple is valid*/
+//						valid = true;
+//					}
+//					if (valid) {
+//						return tuple;
+//					} else {
+//						//additional filtering didn't pass
+//						ItemPointerSetInvalid(&(tuple->t_self));
+//						tuple->t_tableOid = InvalidOid;
+//						return NULL;
+//					}
+//				} //end filtering pushdown
+//			} else { //we didn't get any tuple
+//				ItemPointerSetInvalid(&(tuple->t_self));
+//				tuple->t_tableOid = InvalidOid;
+//				return NULL;
+//			}
+//		} else {
+//			/* prefetcher kicked in - but our hash table became full!
+//			 * turn off prefether
+//			 * */
+//			LockBuffer(scan->xs_cbuf, BUFFER_LOCK_UNLOCK);
+//			smoothDesc->prefetch_pages = 0;
+//			smoothDesc->prefetch_target = 0;
+//			smoothDesc->nextPageId = InvalidBlockNumber;
+//
+//			ItemPointerSetInvalid(&(tuple->t_self));
+//			tuple->t_tableOid = InvalidOid;
+//			return NULL;
+//		}
+//	}
+//
+//}
+HeapTuple
+SmoothProcessOnePageOrder(IndexScanDesc scan, BlockNumber page, ScanDirection direction, int no_orig_keys, ScanKey orig_keys, bool prefetcher, List *target_list, List *qual_list, Index index, int no_orig_smooth_keys, ScanKey orig_smooth_keys, List *allqual, ExprContext *econtext, TupleTableSlot *slot)
+{
+	Page		dp;
+	int			lines;
 	OffsetNumber lineoff;
-	int linesleft;
-	ItemId lpp;
-	bool valid;
-	bool pageHasOneResultTuple = false; // does page have at least one match
-	bool got_heap_tuple = false;
-	bool traversed = false; /* did we walk already hot chain for the index probe?*/
-	bool backward = ScanDirectionIsBackward(direction);
-	HeapTuple tuple = &(scan->xs_ctup);
+	int			linesleft;
+	ItemId		lpp;
+	bool		valid;
+	bool 		pageHasOneResultTuple = false;  // does page have at least one match
+	bool		got_heap_tuple = false;
+	bool 		traversed = false; /* did we walk already hot chain for the index probe?*/
+	bool		backward = ScanDirectionIsBackward(direction);
+	HeapTuple   tuple = &(scan->xs_ctup);
 	ItemPointerData originalTupleID = tuple->t_self; /*this is a copy*/
 	HeapTuple copyTuple = NULL;
 	int itemIndex = 0;
 
-	SmoothScanOpaque smoothDesc = (SmoothScanOpaque) scan->smoothInfo;
-	ResultCache *resultcache = smoothDesc->result_cache;
+
+	SmoothScanOpaque  smoothDesc =  (SmoothScanOpaque)scan->smoothInfo;
+
 
 	LockBuffer(scan->xs_cbuf, BUFFER_LOCK_SHARE);
 	/* get page information */
 	dp = (Page) BufferGetPage(scan->xs_cbuf);
 
-	if (resultcache->status != SS_FULL) {
+	if(smoothDesc->result_cache->status != SS_FULL){
 
-		if (ScanDirectionIsForward(direction)) {
+		if (ScanDirectionIsForward(direction))
+		{
 			/* start from the first tuple */
 			lineoff = FirstOffsetNumber;
 			/* end is maximum offset for a page */
 			lines = PageGetMaxOffsetNumber(dp);
 			linesleft = lines - lineoff + 1;
-		} else if (backward) {
+		}
+		else if (backward){
 			lines = PageGetMaxOffsetNumber(dp);
 			lineoff = lines;
 			linesleft = lineoff;
 		}
 		/*renata: this should not be the case */
-		else {
+		else
+		{
 			return NULL;
 		}
 
@@ -767,168 +1175,197 @@ HeapTuple SmoothProcesmoothDescnePageOrder(IndexScanDesc scan, BlockNumber page,
 		 */
 		itemIndex = 0;
 
-		while (linesleft > 0) {
+
+		while (linesleft > 0)
+		{
 			lpp = PageGetItemId(dp, lineoff);
 			valid = false;
-			if (ItemIdIsNormal(lpp)) {
+			if (ItemIdIsNormal(lpp))
+			{
 				tuple->t_data = (HeapTupleHeader) PageGetItem((Page) dp, lpp);
 				tuple->t_len = ItemIdGetLength(lpp);
 				tuple->t_tableOid = scan->heapRelation->rd_id;
 				ItemPointerSet(&(tuple->t_self), page, lineoff);
 				/*this is a tuple for which we are doing an index probe*/
-				if (lineoff == originalTupleID.ip_posid) {
+				if(lineoff == originalTupleID.ip_posid){
 					/* have to check if we have already walked hot chain - because if we did originaltupleID value has CHANGED
 					 * and it is possible to enter this 2 times) for original and final version */
 					/* Note: for prefetcher - we don't have the targeted tuple */
-					if (!traversed && !prefetcher) {
+					if(!traversed && !prefetcher){
 						/* we have to traverse through hot chain */
-						got_heap_tuple = heap_hot_search_buffer(&originalTupleID, scan->heapRelation, scan->xs_cbuf,
-								scan->xs_snapshot, tuple, NULL, true);
+						got_heap_tuple = heap_hot_search_buffer(&originalTupleID, scan->heapRelation,
+																scan->xs_cbuf,
+																scan->xs_snapshot,
+																tuple,
+																NULL,
+																true);
 						/* after this originalTupleID is updated to show to a new one */
 						/* this is the one that needs to be returned */
 
-						if (got_heap_tuple) {
-							if (!enable_filterpushdown) {
+						if (got_heap_tuple){
+							if(!enable_filterpushdown){
 								valid = true;
-							} else {
+							}else{
 								//filter pushdown
 								//check whether other predicates qualify and only then return tuple
-								if (allqual != NULL) {
+								if(allqual != NULL) {
 									//renata:todo 2014 HeapKeyTest can cover only predicates of type Var op Const
 									//for filter push down - we need to use allqual - these are all posible predicates on that table
 									valid = false;
-									ExecStoreTuple(tuple, /* tuple to store */
-									slot, /* slot to store in */
-									InvalidBuffer, /* buffer containing tuple */
-									false); /* don't pfree */
+									ExecStoreTuple(tuple,	/* tuple to store */
+												   slot,	/* slot to store in */
+												   InvalidBuffer,		/* buffer containing tuple */
+												   false);	/* don't pfree */
+
 
 									econtext->ecxt_scantuple = slot;
 									ResetExprContext(econtext);
-									if (ExecQual(allqual, econtext, false)) {
+									if (ExecQual(allqual, econtext, false))
+									{
 										valid = true;
 									}
-								} else {
+								}
+								else{
 									/* if no keys to check - every tuple is valid*/
 									valid = true;
 								}
 
+
 							} // if filter push down
-							if (valid) {
+							if(valid){
 								copyTuple = heap_copytuple(tuple);
-								smooth_resultcache_add_tuple(scan, page, lineoff, tuple,
-																	RelationGetDescr(scan->heapRelation), target_list, qual_list, index,
-																	&pageHasOneResultTuple);
+								smoothDesc->prefetch_counter++;
+								smoothDesc->smooth_counter++;
+								//17.02.2014
+								//increase the counter just for the first time we calculate this page
+								if(!pageHasOneResultTuple){
+									smoothDesc->global_qualifying_pages++;
+									smoothDesc->local_qualifying_pages++;
+									pageHasOneResultTuple =  true;
+								}
 							}
 							//todo check whether traversed should be on even if didn't find match
 							traversed = true;
 						}
 					}
 
-				} else { // end if tuple for which we are doing index probe
+				}else{ // end if tuple for which we are doing index probe
 					/* read only visible tuples - last tuples in hot chain*/
 					got_heap_tuple = HeapTupleSatisfiesVisibility(tuple, scan->xs_snapshot, scan->xs_cbuf);
-					if (got_heap_tuple) {
+					if (got_heap_tuple){
 						//renata todo: maybe i could remove this
 						PredicateLockTuple(scan->heapRelation, tuple, scan->xs_snapshot);
 
 						/* check if we have produced tuples before smooth */
-						if (num_tuples_switch >= 0) {
+						if(num_tuples_switch >= 0){
 							//if yes check if this tuple is produced before smooth has started and only if not do predicate check
 //							TID_SHORT formTid;
 //							form_tuple_id_short(tuple, page, &formTid);
 							TID formTid;
 							form_tuple_id(tuple, page, &formTid);
 
-							if (!smooth_tuplecache_find_tuple(smoothDesc->tupleID_cache, formTid)) {
-								if (no_orig_smooth_keys > 0) {
+							if(!smooth_tuplecache_find_tuple(smoothDesc->tupleID_cache, formTid)){
+								if (no_orig_smooth_keys > 0){
 
-									if (enable_smoothnestedloop) {
-										HeapSmoothKeyTest(tuple, RelationGetDescr(scan->heapRelation),
-												no_orig_smooth_keys, orig_smooth_keys, valid);
-									} else {
-										HeapKeyTest(tuple, RelationGetDescr(scan->heapRelation), no_orig_smooth_keys,
-												orig_smooth_keys, valid);
+									if (enable_smoothnestedloop){
+										HeapSmoothKeyTest(tuple, RelationGetDescr(scan->heapRelation), no_orig_smooth_keys, orig_smooth_keys, valid);
+									}else{
+										HeapKeyTest(tuple, RelationGetDescr(scan->heapRelation), no_orig_smooth_keys, orig_smooth_keys, valid);
 									}
 									/* next line is just for vtune (to see the code of a macro) */
 									//valid = HeapKeyTestSmooth(tuple, RelationGetDescr(scan->heapRelation), no_orig_smooth_keys, orig_smooth_keys);
-								} else {
+								}else{
 									valid = true;
 								}
-								if (valid && enable_filterpushdown) {
-									//FILTER PUSH DOWN
-									if (allqual != NULL) {
+								if(valid && enable_filterpushdown){
+								 //FILTER PUSH DOWN
+									if(allqual != NULL) {
 										//renata:todo 2014 HeapKeyTest can cover only predicates of type Var op Const
 										//for filter push down - we need to use allqual - these are all posible predicates on that table
 										valid = false;
-										ExecStoreTuple(tuple, /* tuple to store */
-										slot, /* slot to store in */
-										InvalidBuffer, /* buffer containing tuple */
-										false); /* don't pfree */
+										ExecStoreTuple(tuple,	/* tuple to store */
+													   slot,	/* slot to store in */
+													   InvalidBuffer,		/* buffer containing tuple */
+													   false);	/* don't pfree */
+
 
 										econtext->ecxt_scantuple = slot;
 										ResetExprContext(econtext);
-										if (ExecQual(allqual, econtext, false)) {
+										if (ExecQual(allqual, econtext, false))
+										{
 											valid = true;
 										}
-									} else {
+									}
+									else{
 										/* if no keys to check - every tuple is valid*/
 										valid = true;
 									}
 								} //filter push down
-							} else {
+							}else{
 								//if find tuple
 								;//nothing
 							}
-						} else {
+						}else{
 //							// Start smooth from beginning
-							if (no_orig_smooth_keys > 0) {
+							if (no_orig_smooth_keys > 0){
 
-								if (enable_smoothnestedloop) {
-									HeapSmoothKeyTest(tuple, RelationGetDescr(scan->heapRelation), no_orig_smooth_keys,
-											orig_smooth_keys, valid);
-								} else {
-									HeapKeyTest(tuple, RelationGetDescr(scan->heapRelation), no_orig_smooth_keys,
-											orig_smooth_keys, valid);
+								if (enable_smoothnestedloop){
+									HeapSmoothKeyTest(tuple, RelationGetDescr(scan->heapRelation), no_orig_smooth_keys, orig_smooth_keys, valid);
+								}else{
+									HeapKeyTest(tuple, RelationGetDescr(scan->heapRelation), no_orig_smooth_keys, orig_smooth_keys, valid);
 								}
 								//valid = HeapKeyTestSmooth(tuple, RelationGetDescr(scan->heapRelation), no_orig_smooth_keys, orig_smooth_keys);
-							} else {
+							}else{
 								/* if no keys to check - every tuple is valid*/
 								valid = true;
 							}
-							if (valid && enable_filterpushdown) {
-								// filter pushdown
-								if (allqual != NULL) {
+							if(valid && enable_filterpushdown){
+							 // filter pushdown
+								if(allqual != NULL) {
 									//renata:todo 2014 HeapKeyTest can cover only predicates of type Var op Const
 									//for filter push down - we need to use allqual - these are all posible predicates on that table
 									valid = false;
-									ExecStoreTuple(tuple, /* tuple to store */
-									slot, /* slot to store in */
-									InvalidBuffer, /* buffer containing tuple */
-									false); /* don't pfree */
+									ExecStoreTuple(tuple,	/* tuple to store */
+												   slot,	/* slot to store in */
+												   InvalidBuffer,		/* buffer containing tuple */
+												   false);	/* don't pfree */
+
 
 									econtext->ecxt_scantuple = slot;
 									ResetExprContext(econtext);
-									if (ExecQual(allqual, econtext, false)) {
+									if (ExecQual(allqual, econtext, false))
+									{
 										valid = true;
 									}
-								} else {
+								}
+								else{
 									/* if no keys to check - every tuple is valid*/
 									valid = true;
 								}
-							} //filter pushwdown
+							}//filter pushwdown
 
 						}
-						if (valid) {
+						if (valid){
+
+
 							/* this is a randomly found tuple - store it in the result cache since we will need it later */
-							if (smooth_resultcache_add_tuple(scan, page, lineoff, tuple,
-									RelationGetDescr(scan->heapRelation), target_list, qual_list, index,
-									&pageHasOneResultTuple)) {
+							if(smooth_resultcache_add_tuple(scan, page, lineoff, tuple,RelationGetDescr(scan->heapRelation), target_list, qual_list, index,
+									&pageHasOneResultTuple)){
+								smoothDesc->prefetch_counter++;
+								smoothDesc->smooth_counter++;
+								//17.02.2014
+								//increase the counter just for the first time we calculate this page
+								if(!pageHasOneResultTuple){
+									smoothDesc->global_qualifying_pages++;
+									smoothDesc->local_qualifying_pages++;
+									pageHasOneResultTuple =  true;
+								}
+
 
 								itemIndex++;
-
-							} else {
-								if(resultcache->status == SS_FULL)
-									break;
+							}else{
+								/*hash table is full no more this behavior*/
+								break;
 							}
 
 						}
@@ -937,107 +1374,103 @@ HeapTuple SmoothProcesmoothDescnePageOrder(IndexScanDesc scan, BlockNumber page,
 
 				}
 
+
 			} /* if tuple is normal*/
 			/*
 			 * otherwise move to the next item on the page
 			 */
 			--linesleft;
 
-			if (ScanDirectionIsForward(direction)) {
-				++lpp; /* move forward in this page's ItemId array */
+			if (ScanDirectionIsForward(direction))
+			{
+				++lpp;			/* move forward in this page's ItemId array */
 				++lineoff;
-			} else {
-				--lpp; /* move back in this page's ItemId array */
+			}
+			else
+			{
+				--lpp;			/* move back in this page's ItemId array */
 				--lineoff;
 			}
 
 		}
 
+
 		/* we have processed all tuples from this page */
-		if (!linesleft) {
+		if(!linesleft){
 			smoothDesc->bs_vispages = bms_add_member(smoothDesc->bs_vispages, page);
-			smoothDesc->num_vispages++;
 			/* set next page to process in a sequential manner */
 			if (smoothDesc->prefetch_pages)
 				smoothDesc->nextPageId = page + 1;
 
-		} else {
+		}else{
 			//hash is full - even if we have a prefetcher - have to set it to 0
 			smoothDesc->prefetch_pages = 0;
 		}
 
 		/*we have obtained the tuple we needed*/
-		if (copyTuple) {
-//			int batchno = -1;
-//			ExecResultCacheGetBatch(scan, tuple, &batchno);
-//							if (smoothDesc->result_cache->curbatch != batchno) {
-//
-//								//	print_tuple(RelationGetDescr(scan->heapRelation),heapTuple);
-//								ExecHashJoinNewBatch(scan, batchno);
-//							}
-
+		if (copyTuple){
 			/* copy tuple is the one we need to return */
 			heap_copytuple_with_tuple(copyTuple, tuple);
-			heap_freetuple(copyTuple);
-			//print_slot(slot);
-
-			//fflush(stdout);
-
-
 			/* free copy, since we don't need it anymore */
-
+			heap_freetuple(copyTuple);
 			LockBuffer(scan->xs_cbuf, BUFFER_LOCK_UNLOCK);
 
-		} else {
+		}else{
 			/*we haven't obtained tuple we needed
 			 * two cases: tuple is old (updated) in that case return null
 			 * else: hash table is full and we jumped out of fetching tuples before we reached required tuple*/
-			if (smoothDesc->result_cache->status == SS_FULL && linesleft && !prefetcher) {
-				if (!traversed) {
+			if(smoothDesc->result_cache->status == SS_FULL && linesleft && !prefetcher){
+				if(!traversed){
 					/* we have to traverse through hot chain */
-					got_heap_tuple = heap_hot_search_buffer(&originalTupleID, scan->heapRelation, scan->xs_cbuf,
-							scan->xs_snapshot, tuple, NULL, true);
+					got_heap_tuple = heap_hot_search_buffer(&originalTupleID, scan->heapRelation,
+															scan->xs_cbuf,
+															scan->xs_snapshot,
+															tuple,
+															NULL,
+															true);
 					LockBuffer(scan->xs_cbuf, BUFFER_LOCK_UNLOCK);
 					/* after this originalTupleID is updated to show to a new one */
 					/* this is the one that needs to be returned */
 
-					if (got_heap_tuple) {
-						if (!enable_filterpushdown) {
+					if (got_heap_tuple){
+						if(!enable_filterpushdown){
 							return tuple;
-						} else {
+						}else{
 							//check remaining predicates and only then return tuple if all predicates qualify
 							//otherwise return NULL
 							//filter pushdown
 							//check whether other predicates qualify and only then return tuple
-							if (allqual != NULL) {
+							if(allqual != NULL) {
 								//renata:todo 2014 HeapKeyTest can cover only predicates of type Var op Const
 								//for filter push down - we need to use allqual - these are all posible predicates on that table
 								valid = false;
-								ExecStoreTuple(tuple, /* tuple to store */
-								slot, /* slot to store in */
-								InvalidBuffer, /* buffer containing tuple */
-								false); /* don't pfree */
+								ExecStoreTuple(tuple,	/* tuple to store */
+											   slot,	/* slot to store in */
+											   InvalidBuffer,		/* buffer containing tuple */
+											   false);	/* don't pfree */
+
 
 								econtext->ecxt_scantuple = slot;
 								ResetExprContext(econtext);
-								if (ExecQual(allqual, econtext, false)) {
+								if (ExecQual(allqual, econtext, false))
+								{
 									valid = true;
 								}
 							} // no quals
-							else {
+							else{
 								/* if no keys to check - every tuple is valid*/
 								valid = true;
 							}
-							if (valid) {
+							if(valid){
 								return tuple;
-							} else {
+							}else{
 								//additional filtering didn't pass
 								ItemPointerSetInvalid(&(tuple->t_self));
 								tuple->t_tableOid = InvalidOid;
 								return NULL;
 							}
-						} //filtering push down
-					} else { // didn't get any tuple
+						}//filtering push down
+					}else{ // didn't get any tuple
 						ItemPointerSetInvalid(&(tuple->t_self));
 						tuple->t_tableOid = InvalidOid;
 						return NULL;
@@ -1054,59 +1487,65 @@ HeapTuple SmoothProcesmoothDescnePageOrder(IndexScanDesc scan, BlockNumber page,
 		} // if we have copy tuple
 
 		return tuple;
-	} else {
+	}else{
 		/* we are already in the full state
 		 * just return a normal tuple */
-		if (!prefetcher) {
-			got_heap_tuple = heap_hot_search_buffer(&originalTupleID, scan->heapRelation, scan->xs_cbuf,
-					scan->xs_snapshot, tuple, NULL, true);
+		if(!prefetcher){
+			got_heap_tuple = heap_hot_search_buffer(&originalTupleID, scan->heapRelation,
+													scan->xs_cbuf,
+													scan->xs_snapshot,
+													tuple,
+													NULL,
+													true);
 			LockBuffer(scan->xs_cbuf, BUFFER_LOCK_UNLOCK);
 			/* after this originalTupleID is updated to show to a new one */
 			/* this is the one that needs to be returned */
 
-			if (got_heap_tuple) {
-				if (!enable_filterpushdown) {
+			if (got_heap_tuple){
+				if(!enable_filterpushdown){
 					return tuple;
-				} //else filtering pushdown
-				else {
+				}//else filtering pushdown
+				else{
 					//check remaining predicates and only then return tuple if all predicates qualify
 					//otherwise return NULL
 					//filter pushdown
 					//check whether other predicates qualify and only then return tuple
-					if (allqual != NULL) {
+					if(allqual != NULL) {
 						//renata:todo 2014 HeapKeyTest can cover only predicates of type Var op Const
 						//for filter push down - we need to use allqual - these are all posible predicates on that table
 						valid = false;
-						ExecStoreTuple(tuple, /* tuple to store */
-						slot, /* slot to store in */
-						InvalidBuffer, /* buffer containing tuple */
-						false); /* don't pfree */
+						ExecStoreTuple(tuple,	/* tuple to store */
+									   slot,	/* slot to store in */
+									   InvalidBuffer,		/* buffer containing tuple */
+									   false);	/* don't pfree */
+
 
 						econtext->ecxt_scantuple = slot;
 						ResetExprContext(econtext);
-						if (ExecQual(allqual, econtext, false)) {
+						if (ExecQual(allqual, econtext, false))
+						{
 							valid = true;
 						}
 					} // no quals
-					else {
+					else{
 						/* if no keys to check - every tuple is valid*/
 						valid = true;
 					}
-					if (valid) {
+					if(valid){
 						return tuple;
-					} else {
+					}else{
 						//additional filtering didn't pass
 						ItemPointerSetInvalid(&(tuple->t_self));
 						tuple->t_tableOid = InvalidOid;
 						return NULL;
 					}
 				} //end filtering pushdown
-			} else { //we didn't get any tuple
+			}else{//we didn't get any tuple
 				ItemPointerSetInvalid(&(tuple->t_self));
 				tuple->t_tableOid = InvalidOid;
 				return NULL;
 			}
-		} else {
+		}else{
 			/* prefetcher kicked in - but our hash table became full!
 			 * turn off prefether
 			 * */
@@ -1122,8 +1561,7 @@ HeapTuple SmoothProcesmoothDescnePageOrder(IndexScanDesc scan, BlockNumber page,
 	}
 
 }
-
-HeapTuple SmoothProcesmoothDescnePage(IndexScanDesc scan, BlockNumber page, ScanDirection direction, int no_orig_keys,
+HeapTuple SmoothProcesOnePage(IndexScanDesc scan, BlockNumber page, ScanDirection direction, int no_orig_keys,
 		ScanKey orig_keys, int no_orig_smooth_keys, ScanKey orig_smooth_keys, List *allqual, ExprContext *econtext,
 		TupleTableSlot *slot) {
 	Page dp;
@@ -1762,7 +2200,7 @@ HeapTuple index_smoothfetch_heap(IndexScanDesc scan, ScanDirection direction, do
 				} //if !enable_skewcheck...
 
 			}
-			return SmoothProcesmoothDescnePageOrder(scan, page, direction, no_orig_keys, orig_keys, used_prefetcher,
+			return SmoothProcessOnePageOrder(scan, page, direction, no_orig_keys, orig_keys, used_prefetcher,
 					target_list, qual_list, index, no_orig_smooth_keys, orig_smooth_keys, allqual, econtext, slot);
 
 		} /* if order by is imposed*/
@@ -2094,7 +2532,7 @@ HeapTuple index_smoothfetch_heap(IndexScanDesc scan, ScanDirection direction, do
 
 					}
 
-					return SmoothProcesmoothDescnePage(scan, page, direction, no_orig_keys, orig_keys, no_orig_smooth_keys,
+					return SmoothProcesOnePage(scan, page, direction, no_orig_keys, orig_keys, no_orig_smooth_keys,
 							orig_smooth_keys, allqual, econtext, slot);
 
 				}/* end of else that puts new tuples in currPos.items */
