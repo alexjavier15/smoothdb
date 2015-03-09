@@ -2696,7 +2696,10 @@ bool _readpage(IndexBoundReader readerbuf, Buffer buf, IndexScanDesc scan, ScanD
 
 		if (itup != NULL) {
 
+if(IndexTupleSize(itup) == 8){
 
+	print_tuple(RelationGetDescr(scan->indexRelation),itup);
+}
 //			if(pr){
 //
 //						print_tuple(RelationGetDescr(scan->indexRelation),itup);
