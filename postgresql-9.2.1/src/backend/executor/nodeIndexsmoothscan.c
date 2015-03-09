@@ -2451,6 +2451,7 @@ bool _findIndexBoundsWithPrefetch(IndexBoundReader * readerptr, IndexBoundReader
 		opaque = (BTPageOpaque) PageGetSpecialPointer(page);
 
 		minoff = P_FIRSTDATAKEY(opaque);
+		minoff++;
 		maxoff = PageGetMaxOffsetNumber(page);
 		offnum = minoff;
 
