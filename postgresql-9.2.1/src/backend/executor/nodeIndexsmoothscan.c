@@ -2688,6 +2688,7 @@ bool _readpage(IndexBoundReader readerBuf, Buffer buf, IndexScanDesc scan, ScanD
 	}
 
 	minoff = P_FIRSTDATAKEY(opaque);
+	minoff++;
 	maxoff = PageGetMaxOffsetNumber(page);
 
 	//printf("Offset start : %d , end: %d\n", minoff, maxoff);
