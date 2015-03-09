@@ -2354,7 +2354,7 @@ void _saveitem(IndexBoundReader readerBuf, int itemIndex, OffsetNumber offnum, I
 	newItem = (IndexBound) palloc0(INDEXBOUNDSIZE);
 	newItem->tuple =  (IndexTuple) palloc(itupsz);
 	memcpy(newItem->tuple , itup, itupsz);
-	newItem->tuple->t_info &= 0xE;
+	newItem->tuple->t_info &= 0xE000;
 	itupsz &= 0x1FFF;
 	newItem->tuple->t_info |= itupsz;
 	newItem->link = NULL;
