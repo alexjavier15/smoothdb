@@ -2404,6 +2404,9 @@ bool _findIndexBoundsWithPrefetch(IndexBoundReader * readerptr, IndexBoundReader
 	int split_factor = 1;
 	IndexBound next;
 	int counter = 0;
+	BlockNumber blkno = InvalidBlockNumber;
+	Page page;
+	BTPageOpaque opaque;
 	//int target_length;
 
 //  we get a first index tuple list we will iterate all over the list to produce a new list of childs indextuples
@@ -2411,14 +2414,12 @@ bool _findIndexBoundsWithPrefetch(IndexBoundReader * readerptr, IndexBoundReader
 	// in order to get the desired bounds.
 
 	// Make a buffer storage for the reading and pray for we have enough space
-
+	PredicateLockRelation(rel, scan->xs_snapshot);
 	for( next = reader->firstItem; next!=NULL; next= next->link){
 	//while ((curr_tuple = next )) {
 		IndexTuple curr_tuple;
 
-		BlockNumber blkno;
-		Page page;
-		BTPageOpaque opaque;
+
 		OffsetNumber minoff;
 		OffsetNumber maxoff;
 		OffsetNumber offnum;
@@ -2430,16 +2431,23 @@ bool _findIndexBoundsWithPrefetch(IndexBoundReader * readerptr, IndexBoundReader
 			curr_length++;
 
 		}
+		if(blkno == InvalidBlockNumber){
+		blkno = ItemPointerGetBlockNumber(&(curr_tuple->t_tid));
+
+		}
+
 
 		// Now _readpage need the right buffer in order to read the page so fetch the page
 		// asmoothDescciated to this indextuple.
 
-		blkno = ItemPointerGetBlockNumber(&(curr_tuple->t_tid));
 
+
+		PredicateLockPage(rel, blkno, scan->xs_snapshot);
 		// keep buffers pinned
 		buf = _bt_relandgetbuf(rel, buf, blkno, BT_READ);
 		// we are rady to read the page so go ahead
 		page = BufferGetPage(buf);
+
 		opaque = (BTPageOpaque) PageGetSpecialPointer(page);
 
 		minoff = P_FIRSTDATAKEY(opaque);
@@ -2457,6 +2465,7 @@ bool _findIndexBoundsWithPrefetch(IndexBoundReader * readerptr, IndexBoundReader
 			offnum = OffsetNumberNext(offnum);
 
 		}
+		blkno = opaque->btpo_next;
 
 	}
 
@@ -2470,7 +2479,7 @@ bool _findIndexBoundsWithPrefetch(IndexBoundReader * readerptr, IndexBoundReader
 		_bt_relbuf(rel, buf);
 		return false;
 	}
-
+	blkno = InvalidBlockNumber;
 	printf("Computing split factor ...\n");
 
 	// the prefetcher tell us that we will have enough bound in the next page
@@ -2503,6 +2512,7 @@ for( next = reader->firstItem; next!=NULL; next= next->link){
 		int itemIndexdiv = reader_buffer->prefetcher.last_item;
 		int modOffset = 0;
 		curr_tuple = next->tuple;
+
 		if(counter > 0){
 			itemIndex = reader_buffer->lastItem == 0 ? 0 : reader_buffer->lastItem + 1;
 			modOffset = itemIndex % reader_buffer->prefetcher.split_factor;
@@ -2515,10 +2525,16 @@ for( next = reader->firstItem; next!=NULL; next= next->link){
 			reader_buffer->prefetcher.last_item = itemIndexdiv;
 			reader_buffer->lastItem= itemIndex;
 		}
+		if(blkno == InvalidBlockNumber){
+			blkno = ItemPointerGetBlockNumber(&(curr_tuple->t_tid));
+
+		}
+
 
 		//print_tuple(RelationGetDescr(scan->indexRelation), curr_tuple);
 		// Now _readpage need the right buffer in order to read the page so fetch the page
 		// asmoothDescciated to this indextuple.
+		PredicateLockPage(rel, blkno, scan->xs_snapshot);
 
 		blkno = ItemPointerGetBlockNumber(&(curr_tuple->t_tid));
 		buf = _bt_relandgetbuf(rel, buf, blkno, BT_READ);
@@ -2540,6 +2556,7 @@ for( next = reader->firstItem; next!=NULL; next= next->link){
 			_bt_relbuf(rel, buf);
 			return false;
 		}
+		blkno = opaque->btpo_next;
 		counter++;
 	}
 	_bt_relbuf(rel,buf);
@@ -2694,7 +2711,7 @@ bool _readpage(IndexBoundReader readerBuf, Buffer buf, IndexScanDesc scan, ScanD
 
 	Assert(BufferIsValid(buf));
 	while (offnum <= maxoff) {
-
+		ItemId iid = PageGetItemId(page, offnum);
 
 		itup = _bt_checkkeys(scan, page, offnum, ForwardScanDirection, &continuescan);
 
@@ -2729,7 +2746,7 @@ bool _readpage(IndexBoundReader readerBuf, Buffer buf, IndexScanDesc scan, ScanD
 			_saveitem(readerBuf, itemIndexdiv, offnum, itup);
 			itemIndex++;
 		}else{
-		printf("Tuple not passing");
+		printf("Tuple not passing, is dead: %d , is valid: %d\n",ItemIdIsDead(iid),ItemIdIsValid(iid));
 		fflush(stdout);
 		}
 		/*renata: move to next index tuple */
@@ -3234,7 +3251,7 @@ void print_tuple(TupleDesc tupdesc, IndexTuple itup) {
 	Datum values[INDEX_MAX_KEYS];
 
 	index_deform_tuple(itup, tupdesc, values, isnull);
-	printf("\ntuple with data :  size : %d [  ", IndexTupleSize(itup));
+	printf("\ntuple with data :  size : %ld [  ", IndexTupleSize(itup));
 
 	for (j = 0; j < nattr; j++) {
 		Form_pg_attribute attr_form = tupdesc->attrs[j];
