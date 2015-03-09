@@ -68,6 +68,7 @@ typedef struct IndexBoundReaderData
 			/* tuple storage for currPos */
 	Size		alloc_size;
 	Size		avaible_size;
+	Size		itupz;
 	bool		hasPrefecth;
 	IndexReaderPrefecther prefetcher;
 	int			firstItemIdx;		/* first valid index in items[] */
@@ -86,11 +87,11 @@ typedef struct IndexBoundReaderData
 typedef IndexBoundData *IndexBound;
 typedef IndexBoundReaderData *IndexBoundReader;
 
-static void _saveitem(IndexBoundReader readerbuf, int itemIndex, OffsetNumber offnum, IndexTuple itup);
+static void _saveitem(IndexBoundReader readerBuf, int itemIndex, OffsetNumber offnum, IndexTuple itup);
 
 static IndexBoundReader MakeIndexBoundReader( int size);
 void ExecResultCacheCheckStatus(ResultCache *resultCache, HashPartitionDesc partition);
-static bool _readpage(IndexBoundReader readerbuf, Buffer buf, IndexScanDesc scan, ScanDirection dir, bool skipFirst) ;
+static bool _readpage(IndexBoundReader readerBuf, Buffer buf, IndexScanDesc scan, ScanDirection dir, bool skipFirst) ;
 
 
 static TupleTableSlot *IndexSmoothNext(IndexSmoothScanState *node);
@@ -2340,29 +2341,30 @@ _binsrch(Relation rel, IndexScanDesc scan,
 //	}
 //}
 
-void _saveitem(IndexBoundReader readerbuf, int itemIndex, OffsetNumber offnum, IndexTuple itup) {
+void _saveitem(IndexBoundReader readerBuf, int itemIndex, OffsetNumber offnum, IndexTuple itup) {
 	Size itupsz = 0;
 	IndexBound nextItem;
 	IndexBound newItem;
 
-	itupsz = IndexTupleSize(itup);
-	//Assert (readerbuf->firstItem && readerbuf->avaible_size >= MAXALIGN(itupsz));
+	itupsz = readerBuf->itupz ;
+	//Assert (readerBuf->firstItem && readerBuf->avaible_size >= MAXALIGN(itupsz));
 
 	//printf("saving %d tuple  with size :%ld\n", itemIndex, MAXALIGN(itupsz));
 
 	newItem = (IndexBound) palloc0(INDEXBOUNDSIZE);
-	newItem->tuple = CopyIndexTuple(itup);
+	newItem->tuple =  (IndexTuple) palloc(itupsz);
+	memcpy(newItem->tuple , itup, itupsz);
 	newItem->link = NULL;
 
-	if (readerbuf->firstItem != NULL) {
-		nextItem = readerbuf->nextItem;
+	if (readerBuf->firstItem != NULL) {
+		nextItem = readerBuf->nextItem;
 		nextItem->link = newItem;
 	}else // list is empty
-		readerbuf->firstItem=newItem;
+		readerBuf->firstItem=newItem;
 
-	readerbuf->nextItem = newItem;
+	readerBuf->nextItem = newItem;
 
-	readerbuf->avaible_size -= MAXALIGN(itupsz);
+	readerBuf->avaible_size -= MAXALIGN(itupsz);
 
 }
 //void _release_pinned_buffers(IndexBoundReader reader, Relation rel ){
@@ -2630,7 +2632,7 @@ bool _findIndexBounds(IndexBoundReader * readerptr, IndexBoundReader * reader_bu
  *
  * Returns true if any matching items found on the page, false if none.
  */
-bool _readpage(IndexBoundReader readerbuf, Buffer buf, IndexScanDesc scan, ScanDirection dir, bool skipFirst) {
+bool _readpage(IndexBoundReader readerBuf, Buffer buf, IndexScanDesc scan, ScanDirection dir, bool skipFirst) {
 	Page page;
 	BTPageOpaque opaque;
 	OffsetNumber minoff;
@@ -2644,7 +2646,7 @@ bool _readpage(IndexBoundReader readerbuf, Buffer buf, IndexScanDesc scan, ScanD
 	bool continuescan;
 	OffsetNumber offnum;
 	int modOffset = 0;
-	int lastitem = readerbuf->lastItem + 1;
+	int lastitem = readerBuf->lastItem + 1;
 
 	/* we must have the buffer pinned and locked */
 	Assert(BufferIsValid(buf));
@@ -2669,7 +2671,7 @@ bool _readpage(IndexBoundReader readerbuf, Buffer buf, IndexScanDesc scan, ScanD
 	maxoff = PageGetMaxOffsetNumber(page);
 
 	//printf("Offset start : %d , end: %d\n", minoff, maxoff);
-	//printf("prefetcher state  in read page %d\n", readerbuf->prefetcher.is_prefetching);
+	//printf("prefetcher state  in read page %d\n", readerBuf->prefetcher.is_prefetching);
 
 	/*
 	 * we must save the page's right-link while scanning it; this tells us
@@ -2680,22 +2682,17 @@ bool _readpage(IndexBoundReader readerbuf, Buffer buf, IndexScanDesc scan, ScanD
 	Assert(ScanDirectionIsForward(dir));
 	/* load items[] in ascending order */
 
-	itemIndex = readerbuf->lastItem == 0 ? 0 : readerbuf->lastItem + 1;
+	itemIndex = readerBuf->lastItem == 0 ? 0 : readerBuf->lastItem + 1;
 	firstIndex = itemIndex;
 	offnum = minoff;
 
-	itemIndexdiv = readerbuf->prefetcher.last_item;
+	itemIndexdiv = readerBuf->prefetcher.last_item;
 	//printf("min offset : %d, max offset = %d \n", offnum,maxoff);
 
 	Assert(BufferIsValid(buf));
 	while (offnum <= maxoff) {
 
-		ItemId iid = PageGetItemId(page, offnum);
-		itup = (IndexTuple) PageGetItem(page, iid);
-		if(IndexTupleSize(itup) == 8){
 
-			print_tuple(RelationGetDescr(scan->indexRelation),itup);
-		}
 		itup = _bt_checkkeys(scan, page, offnum, ForwardScanDirection, &continuescan);
 
 		if (itup != NULL) {
@@ -2709,10 +2706,10 @@ bool _readpage(IndexBoundReader readerbuf, Buffer buf, IndexScanDesc scan, ScanD
 
 			//_check_tuple(RelationGetDescr(scan->indexRelation),itup);
 			/* tuple passes all scan key conditions, so remember it */
-		//	Assert(readerbuf->avaible_size > MAXALIGN(IndexTupleSize(itup)));
-			if (readerbuf->prefetcher.is_prefetching) {
+		//	Assert(readerBuf->avaible_size > MAXALIGN(IndexTupleSize(itup)));
+			if (readerBuf->prefetcher.is_prefetching) {
 
-				modOffset = itemIndex % readerbuf->prefetcher.split_factor;
+				modOffset = itemIndex % readerBuf->prefetcher.split_factor;
 
 				//continue the iteration if we have to skip this position
 				// split factor or it's the first item and caller tell
@@ -2724,9 +2721,9 @@ bool _readpage(IndexBoundReader readerbuf, Buffer buf, IndexScanDesc scan, ScanD
 					continue;
 				}
 			}
-			itemIndexdiv = itemIndex / readerbuf->prefetcher.split_factor; // in not prefetching mode split_factor = 1;
-			itup = (IndexTuple) PageGetItem(page, iid);
-			_saveitem(readerbuf, itemIndexdiv, offnum, itup);
+			itemIndexdiv = itemIndex / readerBuf->prefetcher.split_factor; // in not prefetching mode split_factor = 1;
+
+			_saveitem(readerBuf, itemIndexdiv, offnum, itup);
 			itemIndex++;
 		}
 
@@ -2735,19 +2732,19 @@ bool _readpage(IndexBoundReader readerbuf, Buffer buf, IndexScanDesc scan, ScanD
 	}
 
 	Assert(itemIndex <= MaxIndexTuplesPerPage + lastitem);
-	readerbuf->firstItemIdx = 0;
-	readerbuf->lastItem = itemIndex - 1;
-	if (readerbuf->prefetcher.is_prefetching) {
+	readerBuf->firstItemIdx = 0;
+	readerBuf->lastItem = itemIndex - 1;
+	if (readerBuf->prefetcher.is_prefetching) {
 
-			readerbuf->prefetcher.last_item = itemIndexdiv;
+			readerBuf->prefetcher.last_item = itemIndexdiv;
 
 
 //		printf("readr buffer lastItemDev : %d, itemIndex :%d, lastItem: %d  \n"
-//				,readerbuf->prefetcher.last_item , itemIndex,readerbuf->currPos.lastItem );
+//				,readerBuf->prefetcher.last_item , itemIndex,readerBuf->currPos.lastItem );
 	}
-	readerbuf->itemIndex = firstIndex;
+	readerBuf->itemIndex = firstIndex;
 
-	return (readerbuf->firstItemIdx <= readerbuf->lastItem);
+	return (readerBuf->firstItemIdx <= readerBuf->lastItem);
 }
 /*Return true if itup1 > itup2.
  *
@@ -2823,7 +2820,7 @@ void get_all_keys(IndexScanDesc scan) {
 	int pos, np, next, cmp, lastItem, split_factor, safe_size, itemIndex;
 	OffsetNumber offnum = 0;
 	bool result;
-
+	Size itupz = IndexTupleSize(lastTup);
 //	lastRootTup = NULL;
 	reader = readerBuf = curr_buf = NULL;
 	scan_length = 0;
@@ -2944,7 +2941,7 @@ void get_all_keys(IndexScanDesc scan) {
 
 
     readerBuf = MakeIndexBoundReader(32 * BLCKSZ);
-
+    readerBuf->itupz = itupz;
 	if (partitionsz > scan_length) {
 		int target_length = 1;
 		target_length = partitionsz;
