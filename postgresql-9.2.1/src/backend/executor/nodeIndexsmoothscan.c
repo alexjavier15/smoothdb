@@ -227,6 +227,7 @@ bool is_qual_attribute(Form_pg_attribute att, List *qual_list) {
 
 static ResultCache *
 smooth_resultcache_create_empty(IndexScanDesc scan, int numatt);
+static void build_partition_descriptor(IndexSmoothScanState *ss);
 
 static TupleIDCache *
 smooth_tuplecache_create_empty();
@@ -727,7 +728,8 @@ bool smooth_tuplecache_add_tuple(TupleIDCache * cache, const TID tupleID) {
  */
 
 bool smooth_resultcache_add_tuple(IndexScanDesc scan, const BlockNumber blknum, const OffsetNumber off,
-		const HeapTuple tpl, const TupleDesc tupleDesc, List *target_list, List *qual_list, Index index) {
+		const HeapTuple tpl, const TupleDesc tupleDesc, List *target_list, List *qual_list, Index index,
+		bool *pageHasOneResultTuple) {
 	ResultCacheEntry *resultEntry = NULL;
 	SmoothScanOpaque ss = (SmoothScanOpaque) scan->smoothInfo;
 
@@ -757,7 +759,13 @@ bool smooth_resultcache_add_tuple(IndexScanDesc scan, const BlockNumber blknum, 
 		inserted = true;
 		ss->prefetch_counter++;
 		ss->smooth_counter++;
-
+		//17.02.2014
+		//increase the counter just for the first time we calculate this page
+		if (!(*pageHasOneResultTuple)) {
+			ss->global_qualifying_pages++;
+			ss->local_qualifying_pages++;
+			*pageHasOneResultTuple = true;
+		}
 
 	} else {
 	//	printf("not inserted\n");
@@ -1591,7 +1599,7 @@ ExecInitIndexSmoothScan(IndexSmoothScan *node, EState *estate, int eflags) {
 	 */
 	indexstate->iss_ScanDesc = index_beginscan(currentRelation, indexstate->iss_RelationDesc, estate->es_snapshot,
 			indexstate->iss_NumScanKeys, indexstate->iss_NumOrderByKeys);
-
+	indexstate->iss_ScanDesc->xs_want_itup = true;
 	/**********************************************************/
 	//smooth scan part
 	ss = (SmoothScanOpaque) palloc(sizeof(SmoothScanOpaqueData));
@@ -1703,9 +1711,6 @@ ExecInitIndexSmoothScan(IndexSmoothScan *node, EState *estate, int eflags) {
 				printf("Found bitmap with : %d words\n", bms_num_members(ss->bs_vispages));
 
 			}
-
-			indexstate->iss_ScanDesc->xs_want_itup = true;
-
 			pfree(name3);
 
 			/*printf("Size of words shared : %d.\n", sizeof(bitmapword) * ss->bs_vispages->nwords);
