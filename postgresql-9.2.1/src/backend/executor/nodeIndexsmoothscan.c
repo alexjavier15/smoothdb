@@ -2706,7 +2706,18 @@ IndexBoundReader _read_allPages(IndexScanDesc scan, Buffer buf, IndexBoundReader
 	result = cmp = false;
 
 	lastTup = smoothDesc->itup_bounds[RightBound];
+	if (target_length == 1) {
+		*split_factor = 1;
+		*lenght = 1;
+		curr_buf = readerBuf;
 
+		_append_indextuple(readerBuf, SmoothScanGetLowerBound(smoothDesc));
+
+		_bt_relbuf(rel, buf);
+		return curr_buf;
+
+
+	}
 	if (target_length > scan_length) {
 
 		result = _findIndexBoundsWithPrefetch(&reader, &readerBuf, buf, scan, target_length);
@@ -2891,21 +2902,15 @@ void _get_all_keys(IndexScanDesc scan) {
 	printf("npartitions: %d\n", partitionsz);
 
 	printf("has more left : %d, has more right : %d \n", smoothDesc->moreLeft, smoothDesc->moreRight);
+	readerBuf = MakeIndexBoundReader(32 * BLCKSZ);
+			// initialize the result reader buffer with the very first tuple
+	_saveitem(reader, 0, 0, firstTup);
 
-	if (partitionsz == 1) {
 
-		curr_buf = reader;
-		next = 1;
-		lastItem = partitionsz;
-		_bt_relbuf(rel, buf);
-		goto set_bounds;
-	} else {
-		readerBuf = MakeIndexBoundReader(32 * BLCKSZ);
-		// initialize the result reader buffer with the very first tuple
-		_saveitem(reader, 0, 0, firstTup);
+
 		_read_allPages(scan, buf, reader, readerBuf, scan_length, partitionsz, &length, &next, &split_factor);
 
-	}
+
 
 	set_bounds:
 

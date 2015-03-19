@@ -875,6 +875,12 @@ typedef SmoothScanOpaqueData *SmoothScanOpaque;
 
 #define SmoothScanPosIsValid(scanpos) BufferIsValid((scanpos).buf)
 
+#define SmoothScanGetLowerBound(scanpos) ((scanpos)->itup_bounds[LeftBound])
+
+#define SmoothScanGetUpperBound(scanpos) ((scanpos)->itup_bounds[RightBound])
+
+#define SmoothScanPosIsValid(scanpos) BufferIsValid((scanpos).buf)
+
 /* Save an index item into so->currPos.items[itemIndex] */
 extern void
 _bt_saveheapitem(SmoothScanOpaque ss, int itemIndex,
