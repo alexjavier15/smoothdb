@@ -476,6 +476,7 @@ void smooth_resultcache_free(ResultCache *cache) {
 	int partitionz = cache->nbatch;
 	// checking//
 	if (enable_smoothshare) {
+		printf("Number of partitions : %d\n",cache->nbatch );
 		for (j = 0; j < partitionz; j++) {
 			BufFile *file;
 			printf("Number of buckets for partition  %d is %d \n", j, cache->partition_array[j].nbucket);
@@ -488,10 +489,10 @@ void smooth_resultcache_free(ResultCache *cache) {
 			file = cache->partition_array[j].BatchFile;
 			if (file != NULL)
 				BufFileClose(file);
-			pfree(cache->partition_array[j].upper_bound);
-
+			//pfree(cache->partition_array[j].upper_bound);
+			fflush(stdout);
 		}
-		fflush(stdout);
+
 		pfree(cache->bounds);
 	}
 	pfree(cache->partition_array);
@@ -751,15 +752,6 @@ bool smooth_resultcache_add_tuple(IndexScanDesc scan, const BlockNumber blknum, 
 
 	if (resultEntry != NULL) {
 
-		//	build_scanKey_from_tup(scan, ForwardScanDirection, tpl,tupleDesc);
-//
-//		//heap_copytuple_into_hash(tpl, &resultEntry->tuple);
-//		//heap_copytuple_with_tuple(tpl, &resultEntry->tuple);
-//		//resultEntry->tuple = heap_copytuple(tpl);
-//		/* old version that worked before */
-//		//memcpy((char *) &resultEntry->tuple_data, (char *) tpl->t_data, tpl->t_len);
-//		//TODO
-//		memcpy((char *) &resultEntry->tuple_data, (char *) projectedTuple->t_data, projectedTuple->t_len);
 
 		inserted = true;
 		ss->prefetch_counter++;
@@ -2492,7 +2484,7 @@ bool _findIndexBoundsWithPrefetch(IndexBoundReader * readerptr, IndexBoundReader
 void ib_free(IndexBound ibound){
 
 	pfree(ibound->tuple);
-	pfree(pfree);
+	pfree(ibound);
 
 }
 void ib_freeAll(IndexBoundReader buf) {
@@ -2618,7 +2610,7 @@ bool _readpage(IndexBoundReader readerBuf, Buffer buf, IndexScanDesc scan, ScanD
 			}
 
 
-			_append_indextuple(readerBuf,CopyIndexTuple(itup));
+			_append_indextuple(readerBuf,itup);
 			itemIndex++;
 		}
 		/*renata: move to next index tuple */
@@ -2674,7 +2666,7 @@ IndexBoundReader MakeIndexBoundReader(int size) {
 void _append_indextuple(IndexBoundReader buf, IndexTuple itup) {
 
 	IndexBoundData * lastTupIB = (IndexBoundData *) palloc(sizeof(IndexBoundData));
-	lastTupIB->tuple = itup;
+	lastTupIB->tuple = CopyIndexTuple(itup);
 	lastTupIB->link = NULL;
 	if (buf->firstItem == NULL) {
 
@@ -2707,7 +2699,7 @@ IndexBoundReader _read_allPages(IndexScanDesc scan, Buffer buf, IndexBoundReader
 
 	_append_indextuple(curr_buf, firstTup);
 	if (target_length == 1) {
-
+		printf("Creating 1  partition\n");
 		_append_indextuple(curr_buf, lastTup);
 
 	} else {
@@ -2729,7 +2721,7 @@ IndexBoundReader _read_allPages(IndexScanDesc scan, Buffer buf, IndexBoundReader
 				curr_buf->length = -1;
 				curr_buf->avaible_size = curr_buf->alloc_size;
 				curr_buf->lastItem = NULL;
-
+				curr_buf->firstItem = NULL;
 				return _read_allPages(scan, pageBuf, reader, readerBuf, scan_length, 1);
 
 			}
@@ -2940,8 +2932,8 @@ void _get_all_keys(IndexScanDesc scan) {
 		curr_partition->status = RC_INFILE;
 		curr_partition->cache_status = SS_HASH;
 		curr_partition->nbucket = 0;
-		curr_partition->lower_bound = resultCache->bounds[np - 1];
-		curr_partition->upper_bound = resultCache->bounds[np];
+		curr_partition->lower_bound = CopyIndexTuple(resultCache->bounds[np - 1]);
+		curr_partition->upper_bound = CopyIndexTuple(resultCache->bounds[np]);
 		/* TODO fix for sharing partitions;
 		 */
 		curr_partition->BatchFile = NULL;
@@ -3137,16 +3129,17 @@ void print_tuple(TupleDesc tupdesc, IndexTuple itup) {
 
  }*/
 void ExecResultCacheSwitchPartition(IndexScanDesc scan, SmoothScanOpaque smoothDesc, IndexTuple tuple) {
-	if (tuple != NULL && smoothDesc != NULL && smoothDesc->orderby && smoothDesc->result_cache->status == SS_HASH) {
+	//if (tuple != NULL && smoothDesc != NULL && smoothDesc->orderby && smoothDesc->result_cache->status == SS_HASH) {
 		int batchno = -1;
 
 		ExecResultCacheGetBatchFromIndex(scan, tuple, &batchno);
+
 		if (smoothDesc->result_cache->curbatch != batchno) {
-			//	print_tuple(RelationGetDescr(scan->he), tuple);
+			print_tuple(RelationGetDescr(scan->indexRelation), tuple);
 
 			ExecHashJoinNewBatch(scan, batchno);
 		}
-	}
+	//}
 
 }
 
@@ -3169,35 +3162,34 @@ void ExecResultCacheCheckStatus(ResultCache *resultCache, HashPartitionDesc part
 
 }
 ScanKey BuildScanKeyFromIndexTuple(SmoothScanOpaque smoothDesc, TupleDesc tupdesc, IndexTuple tuple) {
-	ScanKey this_scan_key;
-	ScanKey scankeys;
-	int keyz = smoothDesc->numberOfKeys;
+	//ScanKey this_scan_key;
+	//ScanKey scankeys;
+	int keyz = smoothDesc->keyz;
 	int i = 0;
 	bool isNull;
 
-	//Assert(smoothDesc->keyz <= INDEX_MAX_KEYS);
-	//Assert(smoothDesc->search_keyData != NULL);
-	scankeys = smoothDesc->keyData;
+	Assert(smoothDesc->keyz <= INDEX_MAX_KEYS);
+	Assert(smoothDesc->search_keyData != NULL);
+	//scankeys = smoothDesc->search_keyData;
 
-	this_scan_key = (ScanKey) palloc(smoothDesc->keyz * sizeof(ScanKeyData));
 
 	for (i = 0; i < keyz; i++) {
 
-		ScanKey cur = &scankeys[i];
-		int attnum = scankeys[i].sk_attno;
+		//ScanKey cur = &scankeys[i];
+		int attnum = smoothDesc->search_keyData[i].sk_attno;
 
 		//	printf("atton : %d ", attnum);
 		if (attnum > 0) {
 			Datum value = index_getattr(tuple,attnum,tupdesc,&isNull);
-			if (((scankeys[i].sk_flags & SK_ISNULL) && isNull) || (!(scankeys[i].sk_flags & SK_ISNULL) && !isNull)) /* key is NULL */
-			{
-				ScanKeyEntryInitializeWithInfo(&this_scan_key[i], cur->sk_flags, cur->sk_attno, InvalidStrategy,
-						cur->sk_subtype, cur->sk_collation, &cur->sk_func, value);
+			if (((smoothDesc->search_keyData[i].sk_flags & SK_ISNULL) && isNull) || (!(smoothDesc->search_keyData[i].sk_flags & SK_ISNULL) && !isNull)) /* key is NULL */
+			{ smoothDesc->search_keyData[i].sk_argument = value;
+				//ScanKeyEntryInitializeWithInfo(&this_scan_key[i], cur->sk_flags, cur->sk_attno, InvalidStrategy,
+				//		cur->sk_subtype, cur->sk_collation, &cur->sk_func, value);
 			}
 
 		}
 	}
-	return this_scan_key;
+	return smoothDesc->search_keyData;
 }
 ScanKey BuildScanKeyFromTuple(SmoothScanOpaque smoothDesc, TupleDesc tupdesc, HeapTuple tuple) {
 	ScanKey this_scan_key;
@@ -3236,9 +3228,9 @@ void ExecResultCacheGetBatchFromIndex(IndexScanDesc scan, IndexTuple tuple, int 
 	OffsetNumber offnum;
 	ScanKey scankeys;
 	//MemoryContextStats(CurrentMemoryContext);
-	//scankeys = BuildScanKeyFromIndexTuple(smoothDesc, RelationGetDescr(rel), tuple);
+	scankeys = BuildScanKeyFromIndexTuple(smoothDesc, RelationGetDescr(rel), tuple);
 
-	offnum = _binsrch(rel, scan, smoothDesc->keyz, smoothDesc->search_keyData);
+	offnum = _binsrch(rel, scan, smoothDesc->keyz, scankeys);
 	//pfree(scankeys);
 	//printf("Go to batch: %d\n", offnum);
 	//MemoryContextStats(CurrentMemoryContext);

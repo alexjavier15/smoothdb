@@ -1459,41 +1459,7 @@ HeapTuple index_smoothfetch_heap(IndexScanDesc scan, ScanDirection direction, do
 			/*check FOR CASE WHEN WE HAVE UPDATES - SINCE UPDATES KEEP OLD POINTERS TO NOTHING*/
 			if (bms_is_member(page, smoothDesc->bs_vispages) ) {
 				int batchno;
-				/*page is already considered and all the qualifying tuples are already produced */
-				// Or maybe find tuple return false because we are out of boud of the current batch
 
-//				if (smoothDesc->result_cache->status != SS_EMPTY) {
-//					Page dp;
-//					ItemId lpp;
-//					HeapTuple tup = &(scan->xs_ctup);
-//					ItemPointerData originalTupleID = tup->t_self;
-//					bool valid;
-//					OffsetNumber offset;
-//
-//					//LockBuffer(scan->xs_cbuf, BUFFER_LOCK_SHARE);
-//					/* get page information */
-//					dp = (Page) BufferGetPage(scan->xs_cbuf);
-//					offset = originalTupleID.ip_posid;
-//
-//					lpp = PageGetItemId(dp,offset );
-//					valid = false;
-//					if (ItemIdIsNormal(lpp)) {
-//						tup->t_data = (HeapTupleHeader) PageGetItem((Page) dp, lpp);
-//						tup->t_len = ItemIdGetLength(lpp);
-//						tup->t_tableOid = scan->heapRelation->rd_id;
-//						ItemPointerSet(&(tup->t_self), page, offset);
-//					}
-//
-//					int batchno = -1;
-//					print_tuple(RelationGetDescr(scan->indexRelation), tup);
-//
-//					ExecResultCacheGetBatch(scan, tup, &batchno);
-//					if (smoothDesc->result_cache->curbatch != batchno) {
-//
-//						//	print_tuple(RelationGetDescr(scan->heapRelation),heapTuple);
-//						ExecHashJoinNewBatch(scan, batchno);
-//					}
-//				}
 
 
 				ItemPointerSetInvalid(&(tuple->t_self));
