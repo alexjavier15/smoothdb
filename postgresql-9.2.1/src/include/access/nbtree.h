@@ -870,8 +870,8 @@ typedef struct SmoothScanOpaqueData
 
 typedef SmoothScanOpaqueData *SmoothScanOpaque;
 
-#define RightBound 2
-#define LeftBound 0
+#define RightBound 0
+#define LeftBound 2
 
 #define SmoothScanPosIsValid(scanpos) BufferIsValid((scanpos).buf)
 
