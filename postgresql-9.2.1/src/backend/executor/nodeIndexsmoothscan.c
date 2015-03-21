@@ -2749,6 +2749,7 @@ IndexBoundReader _read_allPages(IndexScanDesc scan, Buffer buf, IndexBoundReader
 				if ((itemidx % split_factor) == 0)
 					_append_indextuple(curr_buf, next_btup->tuple);
 				next_btup = next_btup->link;
+				itemidx++;
 
 			}
 
