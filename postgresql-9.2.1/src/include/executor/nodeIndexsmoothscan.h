@@ -12,6 +12,10 @@
 
 #include "nodes/execnodes.h"
 
+#define SHASHKEY  MAXALIGN(sizeof(TID))
+
+#define SHASHENTRY_MINTUPLE(shashen)  \
+	((MinimalTuple) ((char *) (shashen) + SHASHKEY))
 
 extern IndexSmoothScanState *ExecInitIndexSmoothScan(IndexSmoothScan *node, EState *estate, int eflags);
 extern TupleTableSlot *ExecIndexSmoothScan(IndexSmoothScanState *node);
@@ -20,7 +24,7 @@ extern void ExecIndexSmoothMarkPos(IndexSmoothScanState *node);
 extern void ExecIndexSmoothRestrPos(IndexSmoothScanState *node);
 extern void ExecReScanIndexSmoothScan(IndexSmoothScanState *node);
 extern bool ExecHashJoinNewBatch(IndexScanDesc scan, int batchindex);
-extern void ExecResultCacheGetBatch(IndexScanDesc scan, HeapTuple tuple,  int *batchno);
+extern void ExecResultCacheGetBatch(IndexScanDesc scan, MinimalTuple tuple,  int *batchno);
 extern void ExecResultCacheGetBatchFromIndex(IndexScanDesc scan, IndexTuple tuple,  int *batchno);
 extern void ExecResultCacheSwitchPartition(IndexScanDesc scan, SmoothScanOpaque smoothDesc, IndexTuple ituple );
 /* renata: this is added because with smooth scan with have to follow ScanKeys for Heap Scan and not Index Scan
@@ -40,6 +44,6 @@ smooth_resultcache_find_tuple(IndexScanDesc scan, HeapTuple tpl, BlockNumber blk
 extern bool
 smooth_resultcache_add_tuple(IndexScanDesc scan, const BlockNumber blknum, const OffsetNumber off, const HeapTuple tpl, const TupleDesc tupleDesc, List *target_list, List *qual_list, Index index, bool *pageHasOneResultTuple);
 
-extern HeapTuple project_tuple(const HeapTuple tuple, const TupleDesc tupleDesc, List *target_list, List *qual_list,
+extern MinimalTuple project_tuple(const HeapTuple tuple, const TupleDesc tupleDesc, List *target_list, List *qual_list,
 		Index index, Datum *values, bool * isnull);
 #endif   /* NODEINDEXSMOOTHSCAN_H */

@@ -645,8 +645,7 @@ typedef TID ResultCacheKey;
 
 typedef struct ResultCacheEntry
 {
-	ResultCacheKey 		tid;			/* Tuple id number (hashtable key) */
-	HeapTupleHeader tuple_data;			/* tuple = value*/
+	ResultCacheKey 		tid;			/* Tuple id number (hashtable key) */			/* tuple = value*/
 } ResultCacheEntry;
 
 #define RHASHENTRYSIZE	MAXALIGN(sizeof(ResultCacheEntry))
@@ -688,6 +687,7 @@ struct ResultCache
 	bool		isCached;
 	Size 		bs_size;
 	// Alex: for patined mode
+	HeapTuple   HeaptupleSlot;  /* slot for internal managing minimal tuples attributes*/
 	int			curbatch;		/* current batch #; 0 during 1st pass */
 	int			nbatch;			/* number of batches */
 	HashPartitionDesc   partition_array;      /*Array of batch files;*/
@@ -808,13 +808,13 @@ typedef struct SmoothScanOpaqueData
 	bool 		more_data_for_smooth; /* do we have more items to return before going to the next page */
 
 	/*information for pre-fetcher*/
-	int			prefetch_pages; 	/* how many pages in advance am I AT THE MOMENT */
-	int			prefetch_target;	/* my current GOAL is to this many pages prefetched
+	BlockNumber			prefetch_pages; 	/* how many pages in advance am I AT THE MOMENT */
+	BlockNumber			prefetch_target;	/* my current GOAL is to this many pages prefetched
 	 	 	 	 	 	 	 	 	   This number will increased - for instance 2, 4, 8, 16 etc. */
-	int 		prefetch_cumul; 	/* this is just for testing purpose */
-	BlockNumber nextPageId;			/*next page to process with smooth - this page is supposed to be already PREFETCHED*/
+	BlockNumber 		prefetch_cumul; 	/* this is just for testing purpose */
+	BlockNumber			nextPageId;			/*next page to process with smooth - this page is supposed to be already PREFETCHED*/
 
-	BlockNumber rel_nblocks;		/* number of block that relation has*/
+	BlockNumber			rel_nblocks;		/* number of block that relation has*/
 	bool 		orderby;		    /* should the order be respected */
 
 
@@ -822,13 +822,13 @@ typedef struct SmoothScanOpaqueData
 	/* option with static array */
 	//PageBitmap vispages[MAXPAGES];	/* their offsets */
 
-	int 		prefetch_counter;
+	BlockNumber 		prefetch_counter;
 
 	//for skew check
 	//NOTE: 01.05. This changed to global_qualifying_pages - from global_qualifying_tuples, the same for local_qualifying_pages
-	long 		global_qualifying_pages; //number of (qualifying) PAGES gathered so far
-	int 		local_qualifying_pages; //number of (qualifying) PAGES over the last prefech interval
-	int 		local_num_pages;  		//number of pages in the last prefetch interval
+	BlockNumber 		global_qualifying_pages; //number of (qualifying) PAGES gathered so far
+	BlockNumber 		local_qualifying_pages; //number of (qualifying) PAGES over the last prefech interval
+	BlockNumber 		local_num_pages;  		//number of pages in the last prefetch interval
 	//int 		num_tuples_per_page;     //numbers of tuples in a heap page - don't need this
 
 	int 		smooth_counter;
@@ -840,7 +840,7 @@ typedef struct SmoothScanOpaqueData
 	int 		num_result_tuples;
 
 	Bitmapset     *bs_vispages;		/* keep track of all visited pages  */
-	int				num_vispages;	/* keep track of number of visited pages  */
+	BlockNumber		   num_vispages;	/* keep track of number of visited pages  */
 	TupleIDCache  *tupleID_cache;		/* keep track of all visited tuples in a hash table (blok id = key, offset = value) */
 	//Bitmapset  *bs_tovispages;		/* keep track of all pages to visit */
 	/* keep these last in struct for efficiency */

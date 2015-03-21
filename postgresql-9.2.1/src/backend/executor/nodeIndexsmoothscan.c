@@ -117,20 +117,20 @@ static OffsetNumber _binsrch(Relation rel, IndexScanDesc scan, int keysz, ScanKe
 static void ExecResultCacheInitPartition(IndexScanDesc scan, ResultCache *res_cache);
 static void _get_all_keys(IndexScanDesc scan);
 ResultCacheEntry *
-ExecResultCacheInsert(IndexScanDesc scan, ResultCache *resultcache, HeapTuple tuple, ResultCacheKey hashkey,
+ExecResultCacheInsert(IndexScanDesc scan, ResultCache *resultcache, MinimalTuple tuple, ResultCacheKey hashkey,
 		HASHACTION action);
 ResultCacheEntry *
-ExecResultCacheInsertByBatch(IndexScanDesc scan, ResultCache *resultcache, HeapTuple tuple, ResultCacheKey hashkey,
+ExecResultCacheInsertByBatch(IndexScanDesc scan, ResultCache *resultcache, MinimalTuple tuple, ResultCacheKey hashkey,
 		int batchno, int action);
 
 void _check_tuple(TupleDesc tupdesc, IndexTuple itup);
-ScanKey BuildScanKeyFromTuple(SmoothScanOpaque smoothDesc, TupleDesc tupdesc, HeapTuple tuple);
+ScanKey BuildScanKeyFromTuple(SmoothScanOpaque smoothDesc, TupleDesc tupdesc, MinimalTuple tuple);
 ScanKey BuildScanKeyFromIndexTuple(SmoothScanOpaque smoothDesc, TupleDesc tupdesc, IndexTuple tuple);
 static void
-ExecResultCacheSaveTuple(BufFile **fileptr, ResultCacheKey *hashkey, HeapTuple tuple);
-static HeapTuple
+ExecResultCacheSaveTuple(BufFile **fileptr, ResultCacheKey *hashkey, MinimalTuple tuple);
+static MinimalTuple
 ExecResultCacheGetSavedTuple(IndexScanDesc scan, BufFile *file, ResultCacheKey *hashkey);
-
+void BuildHeapTupleSlotFromMinimal(ResultCache *res_cache, MinimalTuple mtup);
 /* renata
  * decladation of additional methods for index smooth scan
  * (mostly for dealing with result hash table)
@@ -252,7 +252,7 @@ void
 smooth_tuplecache_free(TupleIDCache *cache);
 
 static ResultCacheEntry *
-smooth_resultcache_get_resultentry(IndexScanDesc scan, HeapTuple tpl, BlockNumber blknum);
+smooth_resultcache_get_resultentry(IndexScanDesc scan,TID tid, MinimalTuple tpl);
 
 static ResultCacheEntry *
 smooth_resultcache_find_resultentry(IndexScanDesc scan, ResultCacheKey tid, HeapTuple tpl);
@@ -540,48 +540,48 @@ void smooth_tuplecache_free(TupleIDCache *cache) {
 static ResultCache *
 smooth_resultcache_create_empty(IndexScanDesc scan, int numatt) {
 	ResultCache *result;
-	bool found;
-	MemoryContext oldctx = CurrentMemoryContext;
-	StringInfoData str;
-	//long maxbytes= work_mem * 1024;
+		bool found;
+		MemoryContext oldctx = CurrentMemoryContext;
+		StringInfoData str;
+		//long maxbytes= work_mem * 1024;
 
-	initStringInfo(&str);
-	appendStringInfo(&str, "RC_");
-	appendStringInfo(&str, RelationGetRelationName(scan->indexRelation));
+		initStringInfo(&str);
+		appendStringInfo(&str, "RC_");
+		appendStringInfo(&str, RelationGetRelationName(scan->indexRelation));
 
-	/* Create ResultCache*/
-	if (enable_smoothshare) {
+		/* Create ResultCache*/
+		if (enable_smoothshare) {
+			printf("Creting shared result cache\n");
+			oldctx = MemoryContextSwitchTo(TopMemoryContext);
+			//Need initialize name properly
 
-		oldctx = MemoryContextSwitchTo(TopMemoryContext);
-		//Need initialize name properly
+			result = ShmemInitStruct(str.data, sizeof(ResultCache), &found);
+			result->type = T_ResultCache;
+			if (!found)
+				smooth_work_mem = smooth_work_mem - (Size) MAXALIGN(sizeof(ResultCache));
 
-		result = ShmemInitStruct(str.data, sizeof(ResultCache), &found);
-		result->type = T_ResultCache;
-		if (!found)
-			smooth_work_mem = smooth_work_mem - (Size) MAXALIGN(sizeof(ResultCache));
+		} else {
 
-	} else {
+			result = makeNode(ResultCache);
+		}
 
-		result = makeNode(ResultCache);
-	}
+		if (!found) {
+			memcpy(result->name, str.data, str.len);
+			result->mcxt = CurrentMemoryContext;
 
-	if (!found) {
-		memcpy(result->name, str.data, str.len);
-		result->mcxt = CurrentMemoryContext;
-		result->size = work_mem * 1024L;
-		result->status = SS_EMPTY;
-		pfree(str.data);
+			result->status = SS_EMPTY;
+			pfree(str.data);
 
-	}
+		}
+		result->size = mul_size(work_mem, 1024L);
+		result->isCached = found;
+		/*space for projection game */
 
-	result->isCached = found;
-	/*space for projection game */
-
-	result->projected_values = (Datum *) palloc(numatt * sizeof(Datum));
-	result->projected_isnull = (bool *) palloc(numatt * sizeof(bool));
-	MemoryContextSwitchTo(oldctx);
-	Assert(result!=NULL);
-	return result;
+		result->projected_values = (Datum *) palloc(numatt * sizeof(Datum));
+		result->projected_isnull = (bool *) palloc(numatt * sizeof(bool));
+		MemoryContextSwitchTo(oldctx);
+		Assert(result!=NULL);
+		return result;
 }
 static TupleIDCache * smooth_tuplecache_create_empty() {
 	HASHCTL hash_ctl;
@@ -607,29 +607,31 @@ static TupleIDCache * smooth_tuplecache_create_empty() {
  */
 
 static void smooth_resultcache_create(IndexScanDesc scan, uint32 tup_length) {
-	HASHCTL hash_ctl;
+
 	HASHCTL *hash_ctl_ptr;
 	bool found = false;
+	ResultCache * res_cache;
 	MemoryContext oldctx = CurrentMemoryContext;
-	SmoothScanOpaque smoothDesc = (SmoothScanOpaque) scan->smoothInfo;
-	ResultCache *res_cache = smoothDesc->result_cache;
+	Size entry;
 	int hash_tag = HASH_ELEM | HASH_FUNCTION | HASH_SMOOTH;
-	Size entry = RHASHENTRYSIZE + tup_length;
-	long nbuckets;
 	StringInfoData str;
+	long nbuckets;
 
-	res_cache->tuple_length = tup_length;
-	initStringInfo(&str);
+	res_cache = ((SmoothScanOpaque)scan->smoothInfo)->result_cache;
+
 	Assert(res_cache != NULL);
+
+	initStringInfo(&str);
+
+
+	res_cache->HeaptupleSlot = (HeapTuple )palloc(HEAPTUPLESIZE + MINIMAL_TUPLE_OFFSET+ tup_length);
+
 	if (enable_smoothshare) {
-
-		oldctx = MemoryContextSwitchTo(TopMemoryContext);
-
 		appendStringInfoString(&str, res_cache->name);
 		appendStringInfoString(&str, " HASHCTL");
 
-		hash_ctl_ptr = ShmemInitStruct(str.data, sizeof(HASHCTL), &found);
-		MemoryContextSwitchTo(oldctx);
+		oldctx = MemoryContextSwitchTo(TopMemoryContext);
+		hash_ctl_ptr = ShmemInitStruct("Result HASHCTL", sizeof(HASHCTL), &found);
 
 		if (found)
 			printf("\nHASHCTL struct for result cache was found\n");
@@ -641,13 +643,10 @@ static void smooth_resultcache_create(IndexScanDesc scan, uint32 tup_length) {
 			IsUnderPostmaster = true;
 
 		}
-		/* TODO fix for sharing partitions;
-		 */
 	} else {
-		hash_ctl_ptr = &hash_ctl;
-		MemSet(hash_ctl_ptr, 0, sizeof(hash_ctl));
+		hash_ctl_ptr = (HASHCTL*)palloc0(sizeof(HASHCTL));
+		//MemSet(hash_ctl_ptr, 0, sizeof(HASHCTL));
 	}
-
 	/*
 	 * Estimate number of hashtable entries we can have within maxbytes. This
 	 * estimates the hash overhead at MAXALIGN(sizeof(HASHELEMENT)) plus a
@@ -655,24 +654,31 @@ static void smooth_resultcache_create(IndexScanDesc scan, uint32 tup_length) {
 	 * Also count an extra Pointer per entry for the arrays created during
 	 * iteration readout.
 	 */
-	/* to do - I should calculate the size of ResultCacheEntry by hand */
+	entry =  RHASHENTRYSIZE + MAXALIGN(tup_length);
+	//entry32 = MAXALIGN(sizeof(ResultCacheKey)+ (sizeof(uint32)));
+	//entry64 = MAXALIGN(sizeof(ResultCacheKey)+ (sizeof(uint64)));
 
 	if (!enable_smoothshare || !found) {
-		nbuckets = hash_estimate_num_entries(res_cache->size, entry);
 
+		nbuckets = hash_estimate_num_entries(res_cache->size, entry);
 		nbuckets = Min(nbuckets, INT_MAX - 1); /* safety limit */
 		nbuckets = Max(nbuckets, 16); /* sanity limit */
 
-		res_cache->maxentries = (int) nbuckets;
-		//res_cache->nentries = 0;
+		res_cache->maxentries =  nbuckets;
+		res_cache->tuple_length = (tup_length);
+		res_cache->nentries=0;
+
+
+
 
 	}
-	res_cache->tuple_length = (tup_length);
+
+
 	//if (enable_benchmarking || enable_smoothnestedloop)
 	printf("\nMax number of entries in hash table is %ld\n", nbuckets);
 
 	/* Create the hashtable proper */
-	printf("\n to_leng: %d , ResCachEnt : %d, hash table entry size is %d\n", tup_length, sizeof(ResultCacheKey),
+	printf("\n to_leng: %d , ResCachEnt : %ld, hash table entry size is %ld\n", tup_length, sizeof(ResultCacheKey),
 			entry);
 	//printf("\n Size of result cache entry is %d, tuple length %d \n", sizeof(ResultCacheEntry), tup_length);
 	if (!found) {
@@ -688,22 +694,21 @@ static void smooth_resultcache_create(IndexScanDesc scan, uint32 tup_length) {
 	appendStringInfoString(&str, res_cache->name);
 	appendStringInfoString(&str, " Hashtable");
 
-	if (!enable_smoothshare) {
 
+	if (!enable_smoothshare) {
 		hash_tag |= HASH_CONTEXT;
-		res_cache->hashtable = hash_create(str.data, res_cache->maxentries, /* start small and extend */
+		res_cache->hashtable = hash_create("ResultCache Hash", 1024, /* start small and extend */
 		hash_ctl_ptr, hash_tag);
-		Assert(res_cache->hashtable != NULL);
 	} else {
+
 		MemoryContextSwitchTo(TopMemoryContext);
 
-		res_cache->hashtable = ShmemInitHash(str.data, res_cache->maxentries, res_cache->maxentries, hash_ctl_ptr,
-				hash_tag);
-
+		res_cache->hashtable = ShmemInitHash("ResultCache Hash", res_cache->maxentries,
+		res_cache->maxentries, hash_ctl_ptr, hash_tag);
 		IsUnderPostmaster = false;
-		MemoryContextSwitchTo(oldctx);
 	}
 
+	MemoryContextSwitchTo(oldctx);
 	res_cache->nentries = hash_get_num_entries(res_cache->hashtable);
 	res_cache->status = SS_HASH;
 	pfree(str.data);
@@ -738,17 +743,20 @@ bool smooth_resultcache_add_tuple(IndexScanDesc scan, const BlockNumber blknum, 
 		bool *pageHasOneResultTuple) {
 	ResultCacheEntry *resultEntry = NULL;
 	SmoothScanOpaque ss = (SmoothScanOpaque) scan->smoothInfo;
-
+	TID tid;
 	bool inserted = false;
 	/* safety check to ensure we don't overrun bit array bounds */
 	if (off < 1 || off > MaxHeapTuplesPerPage)
 		elog(ERROR, "tuple offset out of range: %u", off);
 
+	form_tuple_id(tpl, blknum, &tid);
 	//todo - see if i can change existing tuple here -not creating a new one
-	HeapTuple projectedTuple = project_tuple(tpl, tupleDesc, target_list, qual_list, index,
-			ss->result_cache->projected_values, ss->result_cache->projected_isnull);
+	MinimalTuple projectedTuple = project_tuple(tpl, tupleDesc, target_list, qual_list, index,
+				ss->result_cache->projected_values, ss->result_cache->projected_isnull);
 
-	resultEntry = smooth_resultcache_get_resultentry(scan, projectedTuple, blknum);
+
+
+		resultEntry = smooth_resultcache_get_resultentry(scan,tid, projectedTuple);
 
 	if (resultEntry != NULL) {
 
@@ -804,64 +812,64 @@ bool smooth_resultcache_add_tuple(IndexScanDesc scan, const BlockNumber blknum, 
 //
 //}
 
-HeapTuple project_tuple(const HeapTuple tuple, const TupleDesc tupleDesc, List *target_list, List *qual_list,
+MinimalTuple project_tuple(const HeapTuple tuple, const TupleDesc tupleDesc, List *target_list, List *qual_list,
 		Index index, Datum *values, bool * isnull) {
 	int numberOfAttributes = tupleDesc->natts;
-	Form_pg_attribute *att = tupleDesc->attrs;
-	int attoff;
-	HeapTuple newTuple = NULL;
-	bool found = false;
-	Bitmapset *attrs_used = NULL;
+		Form_pg_attribute *att = tupleDesc->attrs;
+		int attoff;
+		MinimalTuple newTuple = NULL;
+		bool found = false;
+		Bitmapset *attrs_used = NULL;
 
-	ListCell *tl;
+		ListCell *tl;
 
-	/*
-	 * Add all the attributes needed for joins or final output.  Note: we must
-	 * look at reltargetlist, not the attr_needed data, because attr_needed
-	 * isn't computed for inheritance child rels.
-	 */
-	//pull_varattnos((Node *) target_list, index, &attrs_used);
-	/* Add all the attributes used by restriction clauses. */
+		/*
+		 * Add all the attributes needed for joins or final output.  Note: we must
+		 * look at reltargetlist, not the attr_needed data, because attr_needed
+		 * isn't computed for inheritance child rels.
+		 */
+		//pull_varattnos((Node *) target_list, index, &attrs_used);
+		/* Add all the attributes used by restriction clauses. */
 
-	foreach(tl, qual_list) {
-		ExprState *exprstate = (ExprState *) lfirst(tl);
-		pull_varattnos((Node *) exprstate->expr, index, &attrs_used);
-	}
+		foreach(tl, qual_list) {
+			ExprState *exprstate = (ExprState *) lfirst(tl);
+			pull_varattnos((Node *) exprstate->expr, index, &attrs_used);
+		}
 
-	heap_deform_tuple(tuple, tupleDesc, values, isnull);
+		heap_deform_tuple(tuple, tupleDesc, values, isnull);
 
-	for (attoff = 0; attoff < numberOfAttributes; attoff++) {
-		Form_pg_attribute thisatt = att[attoff];
+		for (attoff = 0; attoff < numberOfAttributes; attoff++) {
+			Form_pg_attribute thisatt = att[attoff];
 
-		is_target_attribute(thisatt, target_list, found);
-		//2014 - sigmod 2015 - todo filter attributes should also be stored as attributes of interest
-		//if(!found){
-		//is_qual_attribute(thisatt, qual_list, found);
-		//found = is_qual_attribute(thisatt, qual_list);
-		//}
+			is_target_attribute(thisatt, target_list, found);
+			//2014 - sigmod 2015 - todo filter attributes should also be stored as attributes of interest
+			//if(!found){
+			//is_qual_attribute(thisatt, qual_list, found);
+			//found = is_qual_attribute(thisatt, qual_list);
+			//}
 
-		//old
-		//if (!found)
-//		if (!is_target_attribute(thisatt, target_list))
-		// 2014 - todo sigmod 2015 - new with bitmap
-		if (!found) {
-			if (qual_list == NULL
-					|| (!bms_is_member((thisatt->attnum - FirstLowInvalidHeapAttributeNumber), attrs_used))) { //FOR THE ONES I DON'T NEED - JUST SET IS NULL TO YES - AND HOPEFULLY I WON'T PICK IT UP WHEN I FORM NEW TUPLE
-				values[attoff] = (Datum) 0;
-				isnull[attoff] = true;
+			//old
+			//if (!found)
+	//		if (!is_target_attribute(thisatt, target_list))
+			// 2014 - todo sigmod 2015 - new with bitmap
+			if (!found) {
+				if (qual_list == NULL
+						|| (!bms_is_member((thisatt->attnum - FirstLowInvalidHeapAttributeNumber), attrs_used))) { //FOR THE ONES I DON'T NEED - JUST SET IS NULL TO YES - AND HOPEFULLY I WON'T PICK IT UP WHEN I FORM NEW TUPLE
+					values[attoff] = (Datum) 0;
+					isnull[attoff] = true;
+				}
 			}
 		}
-	}
 
-	/*
-	 * create a new tuple from the values and isnull arrays
-	 */
-	newTuple = heap_form_tuple(tupleDesc, values, isnull);
+		/*
+		 * create a new tuple from the values and isnull arrays
+		 */
+		newTuple = heap_form_minimal_tuple(tupleDesc, values, isnull);
 
-	newTuple->t_self = tuple->t_self;
-	newTuple->t_tableOid = tuple->t_tableOid;
+	//	newTuple->t_self = tuple->t_self;
+	//	newTuple->t_tableOid = tuple->t_tableOid;
 
-	return newTuple;
+		return newTuple;
 
 }
 //was tuple already processed in Stage 1 of Smooth Scan
@@ -879,10 +887,11 @@ bool smooth_tuplecache_find_tuple(TupleIDCache *cache, TID tid) {
 bool smooth_resultcache_find_tuple(IndexScanDesc scan, HeapTuple tpl, BlockNumber blkn) {
 	ResultCacheEntry *resultCache = NULL;
 	SmoothScanOpaque smoothDesc = (SmoothScanOpaque) scan->smoothInfo;
+	ResultCache *res_cache;
 	//HashPartitionDesc  *hashtable = smoothDesc->result_cache->partion_array;
 
 	bool found = false;
-
+	res_cache = smoothDesc->result_cache;
 //	TID tid = form_tuple_id(tpl, blkn);
 
 	TID tid;
@@ -893,18 +902,20 @@ bool smooth_resultcache_find_tuple(IndexScanDesc scan, HeapTuple tpl, BlockNumbe
 
 	/* if we have a bucket for this block */
 	if (resultCache != NULL) {
+		MinimalTuple mtup = (char *) resultCache + SHASHKEY;
 		//this works for regular
-		tpl->t_data = (HeapTupleHeader) (resultCache + RHASHENTRYSIZE);
+		//tpl->t_data = (HeapTupleHeader) (resultCache + RHASHENTRYSIZE);
+	//	printf("loading mtuple len : %d\n",mtup->t_len);
+		//res_cache->HeaptupleSlot->t_data = tpl->t_data;
+		//BuildHeapTupleSlotFromMinimal(res_cache,mtup);
+	//	tpl->t_data = (HeapTupleHeader) ((char *) tpl + HEAPTUPLESIZE);
+		memcpy((char *) tpl->t_data + MINIMAL_TUPLE_OFFSET, mtup, mtup->t_len);
+		memset(tpl->t_data, 0, offsetof(HeapTupleHeaderData, t_infomask2));
 
 		found = true;
 		smoothDesc->result_cache->curr_partition->hits++;
 		//smoothDesc->result_cache->curbatch = 0;
 	}
-//	else{
-//
-//		smoothDesc->result_cache->partion_array[smoothDesc->result_cache->curbatch].miss++;
-//	}
-//	smoothDesc->result_cache->curbatch = 0;
 	return found;
 }
 
@@ -950,18 +961,19 @@ smooth_resultcache_find_resultentry(IndexScanDesc scan, ResultCacheKey tid, Heap
  * This may cause the table to exceed the desired memory size.
  */
 static ResultCacheEntry *
-smooth_resultcache_get_resultentry(IndexScanDesc scan, HeapTuple tpl, BlockNumber blknum) {
+smooth_resultcache_get_resultentry(IndexScanDesc scan, TID tid,MinimalTuple tpl) {
 	ResultCacheEntry *resultCache = NULL;
 	bool found;
 	SmoothScanOpaque smoothDesc = (SmoothScanOpaque) scan->smoothInfo;
-	ResultCache *cache = smoothDesc->result_cache;
+	ResultCache *cache  = smoothDesc->result_cache;
 //	TID tid = form_tuple_id(tpl, blknum);
-	TID tid;
+	//TID tid;
 	//calling macro
-	form_tuple_id(tpl, blknum, &tid);
+	//form_tuple_id(tpl, blknum, &tid);
 
 	if (cache->status == SS_EMPTY) {
 		smooth_resultcache_create(scan, tpl->t_len);
+
 		printf("\nCreating hash...\n");
 	}
 
@@ -1597,6 +1609,7 @@ ExecInitIndexSmoothScan(IndexSmoothScan *node, EState *estate, int eflags) {
 	else
 		ss->keyData = NULL;
 
+
 	ss->work_mem = work_mem * 1024L;
 	ss->creatingBounds = false;
 	ss->max_offset = 0;
@@ -1639,7 +1652,7 @@ ExecInitIndexSmoothScan(IndexSmoothScan *node, EState *estate, int eflags) {
 	ss->prefetch_pages = 0;
 	ss->prefetch_target = 0;
 	ss->prefetch_cumul = 0;
-
+	ss->num_vispages=0;
 	ss->rel_nblocks = RelationGetNumberOfBlocks(currentRelation);
 
 	/* respect order constraint - yes or no*/
@@ -3138,6 +3151,7 @@ void ExecResultCacheSwitchPartition(IndexScanDesc scan, SmoothScanOpaque smoothD
 			print_tuple(RelationGetDescr(scan->indexRelation), tuple);
 
 			ExecHashJoinNewBatch(scan, batchno);
+			fflush(stdout);
 		}
 	//}
 
@@ -3191,16 +3205,33 @@ ScanKey BuildScanKeyFromIndexTuple(SmoothScanOpaque smoothDesc, TupleDesc tupdes
 	}
 	return smoothDesc->search_keyData;
 }
-ScanKey BuildScanKeyFromTuple(SmoothScanOpaque smoothDesc, TupleDesc tupdesc, HeapTuple tuple) {
+
+void BuildHeapTupleSlotFromMinimal(ResultCache *res_cache, MinimalTuple mtup){
+	res_cache->HeaptupleSlot->t_len = mtup->t_len + MINIMAL_TUPLE_OFFSET;
+	ItemPointerSetInvalid(&(res_cache->HeaptupleSlot->t_self));
+	res_cache->HeaptupleSlot->t_tableOid = InvalidOid;
+	res_cache->HeaptupleSlot->t_data = (HeapTupleHeader) ((char *) res_cache->HeaptupleSlot + HEAPTUPLESIZE);
+	memcpy((char *) res_cache->HeaptupleSlot->t_data + MINIMAL_TUPLE_OFFSET, mtup, mtup->t_len);
+	memset(res_cache->HeaptupleSlot->t_data, 0, offsetof(HeapTupleHeaderData, t_infomask2));
+
+
+}
+
+
+ScanKey BuildScanKeyFromTuple(SmoothScanOpaque smoothDesc, TupleDesc tupdesc, MinimalTuple tuple) {
 	ScanKey this_scan_key;
 	ScanKey scankeys;
 	int keyz = smoothDesc->keyz;
 	int i = 0;
 	bool isNull;
+	ResultCache * res_cache = smoothDesc->result_cache;
+
 
 	Assert(smoothDesc->keyz <= INDEX_MAX_KEYS);
 	Assert(smoothDesc->search_keyData != NULL);
 	scankeys = smoothDesc->search_keyData;
+	//Build  the heap tuple
+	BuildHeapTupleSlotFromMinimal(res_cache, tuple);
 
 	this_scan_key = (ScanKey) palloc(smoothDesc->keyz * sizeof(ScanKeyData));
 
@@ -3211,7 +3242,7 @@ ScanKey BuildScanKeyFromTuple(SmoothScanOpaque smoothDesc, TupleDesc tupdesc, He
 
 		//	printf("atton : %d ", attnum);
 		if (attnum > 0) {
-			Datum value = heap_getattr(tuple,attnum,tupdesc,&isNull);
+			Datum value = heap_getattr(res_cache->HeaptupleSlot,attnum,tupdesc,&isNull);
 			if (((scankeys[i].sk_flags & SK_ISNULL) && isNull) || (!(scankeys[i].sk_flags & SK_ISNULL) && !isNull)) /* key is NULL */
 			{
 				ScanKeyEntryInitializeWithInfo(&this_scan_key[i], cur->sk_flags, cur->sk_attno, InvalidStrategy,
@@ -3238,7 +3269,7 @@ void ExecResultCacheGetBatchFromIndex(IndexScanDesc scan, IndexTuple tuple, int 
 	*batchno = offnum;
 
 }
-void ExecResultCacheGetBatch(IndexScanDesc scan, HeapTuple tuple, int *batchno) {
+void ExecResultCacheGetBatch(IndexScanDesc scan, MinimalTuple tuple, int *batchno) {
 	Relation rel = scan->indexRelation;
 	SmoothScanOpaque smoothDesc = (SmoothScanOpaque) scan->smoothInfo;
 	OffsetNumber offnum;
@@ -3270,14 +3301,12 @@ void ExecResultCacheGetBatch(IndexScanDesc scan, HeapTuple tuple, int *batchno) 
  */
 
 ResultCacheEntry *
-ExecResultCacheInsertByBatch(IndexScanDesc scan, ResultCache *resultcache, HeapTuple tuple, ResultCacheKey hashkey,
+ExecResultCacheInsertByBatch(IndexScanDesc scan, ResultCache *resultcache, MinimalTuple tuple, ResultCacheKey hashkey,
 		int batchno, int action) {
 	ResultCacheEntry *resultEntry = NULL;
-	SmoothScanOpaque smoothDesc = (SmoothScanOpaque) scan->smoothInfo;
-	ResultCache *cache = smoothDesc->result_cache;
+	//SmoothScanOpaque smoothDesc = (SmoothScanOpaque) scan->smoothInfo;
 	HashPartitionDesc partition;
-	MemoryContext oldcxt;
-	oldcxt = CurrentMemoryContext;
+
 
 	/*
 	 * decide whether to put the tuple in the hash table or a temp file
@@ -3297,13 +3326,13 @@ ExecResultCacheInsertByBatch(IndexScanDesc scan, ResultCache *resultcache, HeapT
 		if (resultEntry != NULL) {
 			if (!found) {
 
-				size_t entry = RHASHENTRYSIZE + tuple->t_len;
+				size_t entry = MAXALIGN(RHASHENTRYSIZE + tuple->t_len);
 
-				MemSet(resultEntry, 0, entry);
-
-				resultEntry->tid = hashkey;
-
-				memcpy((char *) (resultEntry + RHASHENTRYSIZE), (char *) tuple->t_data, tuple->t_len);
+				//MemSet(resultEntry, 0, entry);
+				resultEntry->tid =hashkey;
+				//memcpy((char *)resultEntry , (char *)  &hashkey, SHASHKEY);
+				//printf("Inserting len : %d\n", tuple->t_len);
+				memcpy((char *) resultEntry + SHASHKEY, (char *) tuple, tuple->t_len);
 				ExecResultCacheCheckStatus(resultcache, partition);
 
 			} else {
@@ -3319,14 +3348,14 @@ ExecResultCacheInsertByBatch(IndexScanDesc scan, ResultCache *resultcache, HeapT
 	} else {
 
 		//	printf("Saving tuple in file... \n");
-		size_t entry = RHASHENTRYSIZE + tuple->t_len;
+		//size_t entry = RHASHENTRYSIZE + tuple->t_len;
 
 		partition = &resultcache->partition_array[batchno];
 
 		// bug!
 		if (partition->status != RC_SWAP) {
 			if (resultcache->curbatch >= batchno) {
-				return tuple;
+				return (ResultCacheEntry *)tuple;
 
 			}
 
@@ -3336,13 +3365,13 @@ ExecResultCacheInsertByBatch(IndexScanDesc scan, ResultCache *resultcache, HeapT
 
 		ExecResultCacheCheckStatus(resultcache, partition);
 
-		return tuple;
+		return (ResultCacheEntry *)tuple;
 
 	}
 
 }
 ResultCacheEntry *
-ExecResultCacheInsert(IndexScanDesc scan, ResultCache *resultcache, HeapTuple tuple, ResultCacheKey hashkey,
+ExecResultCacheInsert(IndexScanDesc scan, ResultCache *resultcache, MinimalTuple tuple, ResultCacheKey hashkey,
 		HASHACTION action) {
 	int batchno;
 
@@ -3359,12 +3388,13 @@ ExecResultCacheInsert(IndexScanDesc scan, ResultCache *resultcache, HeapTuple tu
 void ExecResultCacheInitPartition(IndexScanDesc scan, ResultCache *res_cache) {
 	SmoothScanOpaque smoothDesc = (SmoothScanOpaque) scan->smoothInfo;
 	if (enable_smoothshare) {
+		int j = 0;
+		int partitionz = 1;
 		smoothDesc->creatingBounds = true;
 
 		_get_all_keys(scan);
 		smoothDesc->creatingBounds = false;
-		int j = 0;
-		int partitionz = res_cache->nbatch;
+		partitionz = res_cache->nbatch;
 		// checking//
 		for (j = 0; j < partitionz; j++) {
 			printf("Printing bounds for partition : %d \n", j);
@@ -3402,13 +3432,13 @@ void ExecResultCacheInitPartition(IndexScanDesc scan, ResultCache *res_cache) {
 
 }
 static
-void ExecResultCacheSaveTuple(BufFile **fileptr, ResultCacheKey *hashkey, HeapTuple tuple) {
+void ExecResultCacheSaveTuple(BufFile **fileptr, ResultCacheKey *hashkey, MinimalTuple tuple) {
 	BufFile *file = *fileptr;
 	size_t written;
-	MemoryContext oldcxt;
+	//MemoryContext oldcxt;
 	int offset;
 	if (file == NULL) {
-		oldcxt = CurrentMemoryContext;
+		//oldcxt = CurrentMemoryContext;
 		//MemoryContextSwitchTo(CacheMemoryContext);
 		/* First write to this batch file, so open it. */
 		printf("Creating file.....\n");
@@ -3418,7 +3448,7 @@ void ExecResultCacheSaveTuple(BufFile **fileptr, ResultCacheKey *hashkey, HeapTu
 	}
 
 	written = BufFileWrite(file, (char *) hashkey, sizeof(uint64));
-	offset += written;
+
 	if (written != sizeof(uint64))
 		ereport(ERROR, (errcode_for_file_access(), errmsg("could not write to result-cache temporary file: %m")));
 
@@ -3426,25 +3456,22 @@ void ExecResultCacheSaveTuple(BufFile **fileptr, ResultCacheKey *hashkey, HeapTu
 	if (written != sizeof(uint32))
 		ereport(ERROR, (errcode_for_file_access(), errmsg("could not write to result-cache temporary file: %m")));
 
-	offset += written;
 
-	written = BufFileWrite(file, (char *) tuple->t_data, tuple->t_len);
+	written = BufFileWrite(file, (char *) tuple, tuple->t_len);
 	if (written != tuple->t_len)
 		ereport(ERROR, (errcode_for_file_access(), errmsg("could not write to result-cache temporary file: %m")));
 
-	offset += written;
-	offset = offset % 56;
 	//printf("write in file : %X\n", file);
-	Assert(offset == 0);
+
 
 }
-static HeapTuple ExecResultCacheGetSavedTuple(IndexScanDesc scan, BufFile *file, ResultCacheKey *hashkey) {
+static MinimalTuple ExecResultCacheGetSavedTuple(IndexScanDesc scan, BufFile *file, ResultCacheKey *hashkey) {
 
-	uint32 header[3];
+	//uint32 header[3];
 	size_t nread;
 	uint32 tuplen;
 	size_t tup_size;
-	HeapTuple tuple;
+	MinimalTuple tuple;
 
 	/*
 	 * Since both the hash value and the MinimalTuple length word are uint32,
@@ -3470,11 +3497,12 @@ static HeapTuple ExecResultCacheGetSavedTuple(IndexScanDesc scan, BufFile *file,
 
 	//memcpy(hashkey,header, sizeof(ResultCacheKey));
 	//*hashkey = header[0];
-	tup_size = HEAPTUPLESIZE + tuplen;
+	//tup_size = HEAPTUPLESIZE + tuplen;
+	tup_size =  tuplen;
 	tuple = palloc(tup_size);
 	tuple->t_len = tuplen;
-	Assert(tuple->t_len == 44);
-	tuple->t_data = (HeapTupleHeader) ((char *) tuple + HEAPTUPLESIZE);
+	//Assert(tuple->t_len == 44);
+	//tuple->t_data = (HeapTupleHeader) ((char *) tuple + HEAPTUPLESIZE);
 	//*tuple_length = header[2];
 	//(*tuple)->t_data = (HeapTupleHeader)(*tuple) + HEAPTUPLESIZE;
 	//	HeapTupleHeader t_data =
@@ -3483,11 +3511,11 @@ static HeapTuple ExecResultCacheGetSavedTuple(IndexScanDesc scan, BufFile *file,
 	//memset(*tuple_data, 0,*tuple_length);
 
 	//printf("HEader address : ")
-	nread = BufFileRead(file, (char *) tuple->t_data, tuple->t_len);
+	nread = BufFileRead(file, (char *) tuple, tuple->t_len);
 	//memcpy(&(*tuple)->t_data,(char *) t_data,header[2] );
 
 	if (nread != tuple->t_len) {
-		printf("error in file : %X\n", file);
+
 		ereport(ERROR,
 				(errcode_for_file_access(), errmsg("could not read  tup data from result-cache temporary file: %m")));
 	}
@@ -3585,14 +3613,14 @@ bool ExecHashJoinNewBatch(IndexScanDesc scan, int batchindex) {
 	(&hashtable[prevBatch])->status = RC_SWAP;
 	iter.elemindex = 0;
 	while ((hashEntry = (ResultCacheEntry *) hash_get_next(res_cache->hashtable, &iter))) {
-		HeapTupleData tuple;
+		MinimalTuple tuple;
 		bool found;
-		tuple.t_data = (HeapTupleHeader) (hashEntry + RHASHENTRYSIZE);
-		tuple.t_len = res_cache->tuple_length;
+		tuple= (MinimalTuple) (hashEntry + RHASHENTRYSIZE);
+		//tuple->t_len = res_cache->tuple_length;
 
 		hash_search(res_cache->hashtable, &hashEntry->tid, HASH_REMOVE, &found);
 		Assert(found = true);
-		hashEntry = ExecResultCacheInsertByBatch(scan, res_cache, &tuple, hashEntry->tid, prevBatch, HASH_ENTER);
+		hashEntry = ExecResultCacheInsertByBatch(scan, res_cache, tuple, hashEntry->tid, prevBatch, HASH_ENTER);
 
 		//if(hashEntry)
 		//		pfree(hashEntry);
@@ -3605,7 +3633,7 @@ bool ExecHashJoinNewBatch(IndexScanDesc scan, int batchindex) {
 	(&hashtable[prevBatch])->status = RC_INFILE;
 
 	if (bufferFile != NULL) {
-		HeapTuple tuple;
+		MinimalTuple tuple;
 		//MemoryContext oldctx;
 		//uint32 size;
 		//bool found;

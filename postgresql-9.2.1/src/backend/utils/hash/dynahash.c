@@ -982,14 +982,13 @@ hash_search_with_hash_value(HTAB *hashp,
 				/* out of memory */
 				if (action == HASH_ENTER_NULL || hashp->issmooth){
 
-					printf("Num entries : %d\n", hashp->hctl->nentries);
+					printf("Num entries : %ld\n", hashp->hctl->nentries);
 					ereport(ERROR,
 												(errcode(ERRCODE_OUT_OF_MEMORY),
 												 errmsg("out of shared memory NULL")));}
 
 				/* report a generic message */
 				if (hashp->isshared){
-					printf("Num entries : %d\n", hashp->hctl->nentries);
 					ereport(ERROR,
 							(errcode(ERRCODE_OUT_OF_MEMORY),
 							 errmsg("out of shared memory")));}
