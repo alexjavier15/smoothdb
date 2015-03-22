@@ -3376,10 +3376,13 @@ ExecResultCacheInsert(IndexScanDesc scan, ResultCache *resultcache, MinimalTuple
 		HASHACTION action) {
 	int batchno;
 
+	if(resultcache->nbatch == 1)
+		batchno=0;
+	else{
 	ExecResultCacheGetBatch(scan, tuple, &batchno);
 
 	Assert(batchno < resultcache->nbatch);
-
+	}
 	if (action == HASH_ENTER && resultcache->partition_array[batchno].cache_status == SS_FULL)
 		return NULL;
 
