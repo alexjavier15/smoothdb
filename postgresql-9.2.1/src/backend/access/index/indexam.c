@@ -88,6 +88,8 @@
 #include "access/valid.h"
 #include "smooth/smoothscanopaque.h"
 #include "executor/executor.h"
+#include "executor/nodeIndexsmoothscan.h"
+
 
 /* ----------------------------------------------------------------
  *					macros used in index_ routines
@@ -1114,7 +1116,7 @@ HeapTuple SmoothProcessOnePage(IndexScanDesc scan, BlockNumber page, ScanDirecti
 	OffsetNumber lineoff;
 	int linesleft;
 	ItemId lpp;
-	bool valid;
+	bool valid = false;
 	bool pageHasOneResultTuple = false; // does page have at least one match
 	bool got_heap_tuple = false;
 	bool backward = ScanDirectionIsBackward(direction);
@@ -1424,12 +1426,13 @@ HeapTuple index_smoothfetch_heap(IndexScanDesc scan, ScanDirection direction, do
 				used_prefetcher = true;
 
 			} else {
+				IndexTuple indexTuple =scan->xs_itup;
 				/* not in the prefetching mode */
 				/* when order by logic is similar but we are using result cache instead of bitmap*/
 				/* if the page is in the cache - fill tuple with it*/
 				/* NO ORDER BY - return all tuples from a page */
 				page = ItemPointerGetBlockNumber(tid);
-				IndexTuple indexTuple =scan->xs_itup;
+
 				if (smoothDesc->result_cache->status != SS_EMPTY && indexTuple && enable_smoothshare) {
 					ExecResultCacheSwitchPartition(scan,smoothDesc,indexTuple);
 				}
@@ -1515,7 +1518,7 @@ HeapTuple index_smoothfetch_heap(IndexScanDesc scan, ScanDirection direction, do
 							;
 						}
 						if (enable_benchmarking)
-							printf("\n Normal Smooth Scan. Number of pages checked %ld. Prefetch target %ld  ",
+							printf("\n Normal Smooth Scan. Number of pages checked %d. Prefetch target %d  ",
 									smoothDesc->num_vispages, smoothDesc->prefetch_target);
 
 						//17.02.2014 - starting a new cycle
@@ -1596,7 +1599,7 @@ HeapTuple index_smoothfetch_heap(IndexScanDesc scan, ScanDirection direction, do
 							smoothDesc->prefetch_target++;
 
 						if (enable_benchmarking)
-							printf("\n Normal Smooth Scan. Number of pages checked %ld. Prefetch target %ld  ",
+							printf("\n Normal Smooth Scan. Number of pages checked %d. Prefetch target %d  ",
 									smoothDesc->num_vispages, smoothDesc->prefetch_target);
 
 						//17.02.2014 - starting a new cycle
@@ -1671,9 +1674,9 @@ HeapTuple index_smoothfetch_heap(IndexScanDesc scan, ScanDirection direction, do
 				//IF HOT REGION >1 DO PREFETCHER
 				if (!enable_skewcheck || (enable_skewcheck && (hotRegion == 2 || !used_prefetcher))) {
 					while (smoothDesc->prefetch_pages < smoothDesc->prefetch_target) {
-						smoothDesc->prefetch_pages++;
+						BlockNumber nextPage = page + ++smoothDesc->prefetch_pages;
+
 						smoothDesc->prefetch_cumul++;
-						BlockNumber nextPage = page + smoothDesc->prefetch_pages;
 
 						/* prefetch pages only until end of existing relation = NO AFTER and only until you encounter visited page */
 						//before enable_skewcheck
@@ -1845,7 +1848,7 @@ HeapTuple index_smoothfetch_heap(IndexScanDesc scan, ScanDirection direction, do
 									;
 								}
 								if (enable_benchmarking)
-									printf("\n Normal Smooth Scan. Number of pages checked %ld. Prefetch target %ld  ",
+									printf("\n Normal Smooth Scan. Number of pages checked %d. Prefetch target %d  ",
 											smoothDesc->num_vispages, smoothDesc->prefetch_target);
 
 								//17.02.2014 - starting a new cycle
@@ -1925,7 +1928,7 @@ HeapTuple index_smoothfetch_heap(IndexScanDesc scan, ScanDirection direction, do
 									smoothDesc->prefetch_target++;
 
 								if (enable_benchmarking)
-									printf("\n Normal Smooth Scan. Number of pages checked %ld. Prefetch target %ld  ",
+									printf("\n Normal Smooth Scan. Number of pages checked %d. Prefetch target %d  ",
 											smoothDesc->num_vispages, smoothDesc->prefetch_target);
 
 								//17.02.2014 - starting a new cycle
@@ -1999,9 +2002,10 @@ HeapTuple index_smoothfetch_heap(IndexScanDesc scan, ScanDirection direction, do
 						//IF HOT REGION >1 DO PREFETCHER
 						if (!enable_skewcheck || (enable_skewcheck && (hotRegion == 2 || !used_prefetcher))) {
 							while (smoothDesc->prefetch_pages < smoothDesc->prefetch_target) {
-								smoothDesc->prefetch_pages++;
+								BlockNumber nextPage = page + ++smoothDesc->prefetch_pages;
+
 								smoothDesc->prefetch_cumul++;
-								BlockNumber nextPage = page + smoothDesc->prefetch_pages;
+
 
 								/* prefetch pages only until end of existing relation = NO AFTER and only until you encounter visited page */
 								//before enable_skewcheck
@@ -2366,7 +2370,7 @@ HeapTuple smoothscan_getnext(IndexScanDesc scan, ScanDirection direction) {
 		 * 	  }
 		 *  */
 
-		heapTuple = index_smoothfetch_heap(scan, direction, 0, 0, NULL, NULL, NULL, NULL, 0, NULL, NULL, NULL, NULL);
+		heapTuple = index_smoothfetch_heap(scan, direction, 0, 0, NULL, NULL, NULL, 0, 0, NULL, NULL, NULL, NULL);
 		if (heapTuple != NULL) {
 			((SmoothScanOpaque) scan->smoothInfo)->num_result_tuples++;
 			return heapTuple;
