@@ -654,7 +654,7 @@ static void smooth_resultcache_create(IndexScanDesc scan, uint32 tup_length) {
 	 * Also count an extra Pointer per entry for the arrays created during
 	 * iteration readout.
 	 */
-	entry =  RHASHENTRYSIZE + MAXALIGN(tup_length);
+	entry =  RHASHENTRYSIZE + tup_length;
 	//entry32 = MAXALIGN(sizeof(ResultCacheKey)+ (sizeof(uint32)));
 	//entry64 = MAXALIGN(sizeof(ResultCacheKey)+ (sizeof(uint64)));
 
