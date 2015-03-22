@@ -1710,7 +1710,7 @@ ExecInitIndexSmoothScan(IndexSmoothScan *node, EState *estate, int eflags) {
 			} else {
 
 				printf("Found bitmap with : %d words\n", bms_num_members(ss->bs_vispages));
-
+				ss->num_vispages = bms_num_members(ss->bs_vispages);
 			}
 			pfree(name3);
 

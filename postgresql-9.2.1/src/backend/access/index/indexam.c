@@ -84,11 +84,9 @@
 #include "utils/tqual.h"
 /*renata */
 #include "optimizer/cost.h"
-#include "executor/execdebug.h"
 #include "access/nbtree.h"
 #include "access/valid.h"
 #include "smooth/smoothscanopaque.h"
-#include "executor/nodeIndexsmoothscan.h"
 #include "executor/executor.h"
 
 /* ----------------------------------------------------------------
@@ -117,7 +115,7 @@
 	AssertMacro(PointerIsValid(scan->indexRelation->rd_am)) \
 )
 
-//#define SmoothProcesmoothDescnePage(scan, page, direction, no_orig_keys, orig_keys ) \
+//#define SmoothProcessOnePage(scan, page, direction, no_orig_keys, orig_keys ) \
 //( \
 //	Page		dp; \
 //	int			lines; \
@@ -652,7 +650,7 @@ ItemPointer smoothscan_getnext_tid(IndexScanDesc scan, ScanDirection direction) 
 /* ----------------
  *		index_fetch_heap - get the scan's next heap tuple
  *
- * The result is a visible heap tuple asmoothDescciated with the index TID most
+ * The result is a visible heap tuple associated with the index TID most
  * recently fetched by index_getnext_tid, or NULL if no more matching tuples
  * exist.  (There can be more than one matching tuple because of HOT chains,
  * although when using an MVCC snapshot it should be impossible for more than
@@ -718,7 +716,7 @@ HeapTuple index_fetch_heap(IndexScanDesc scan) {
 	return NULL;
 }
 
-HeapTuple SmoothProcesmoothDescnePageOrder(IndexScanDesc scan, BlockNumber page, ScanDirection direction, int no_orig_keys,
+HeapTuple SmoothProcessOnePageOrder(IndexScanDesc scan, BlockNumber page, ScanDirection direction, int no_orig_keys,
 		ScanKey orig_keys, bool prefetcher, List *target_list, List *qual_list, Index index, int no_orig_smooth_keys,
 		ScanKey orig_smooth_keys, List *allqual, ExprContext *econtext, TupleTableSlot *slot) {
 	Page dp;
@@ -737,13 +735,12 @@ HeapTuple SmoothProcesmoothDescnePageOrder(IndexScanDesc scan, BlockNumber page,
 	int itemIndex = 0;
 
 	SmoothScanOpaque smoothDesc = (SmoothScanOpaque) scan->smoothInfo;
-	ResultCache *resultcache = smoothDesc->result_cache;
 
 	LockBuffer(scan->xs_cbuf, BUFFER_LOCK_SHARE);
 	/* get page information */
 	dp = (Page) BufferGetPage(scan->xs_cbuf);
 
-	if (resultcache->status != SS_FULL) {
+	if (smoothDesc->result_cache->status != SS_FULL) {
 
 		if (ScanDirectionIsForward(direction)) {
 			/* start from the first tuple */
@@ -927,8 +924,8 @@ HeapTuple SmoothProcesmoothDescnePageOrder(IndexScanDesc scan, BlockNumber page,
 								itemIndex++;
 
 							} else {
-								if(resultcache->status == SS_FULL)
-									break;
+								/*hash table is full no more this behavior*/
+								break;
 							}
 
 						}
@@ -956,8 +953,8 @@ HeapTuple SmoothProcesmoothDescnePageOrder(IndexScanDesc scan, BlockNumber page,
 		/* we have processed all tuples from this page */
 		if (!linesleft) {
 			smoothDesc->bs_vispages = bms_add_member(smoothDesc->bs_vispages, page);
-			smoothDesc->num_vispages++;
 			/* set next page to process in a sequential manner */
+			smoothDesc->num_vispages++;
 			if (smoothDesc->prefetch_pages)
 				smoothDesc->nextPageId = page + 1;
 
@@ -968,24 +965,10 @@ HeapTuple SmoothProcesmoothDescnePageOrder(IndexScanDesc scan, BlockNumber page,
 
 		/*we have obtained the tuple we needed*/
 		if (copyTuple) {
-//			int batchno = -1;
-//			ExecResultCacheGetBatch(scan, tuple, &batchno);
-//							if (smoothDesc->result_cache->curbatch != batchno) {
-//
-//								//	print_tuple(RelationGetDescr(scan->heapRelation),heapTuple);
-//								ExecHashJoinNewBatch(scan, batchno);
-//							}
-
 			/* copy tuple is the one we need to return */
 			heap_copytuple_with_tuple(copyTuple, tuple);
-			heap_freetuple(copyTuple);
-			//print_slot(slot);
-
-			//fflush(stdout);
-
-
 			/* free copy, since we don't need it anymore */
-
+			heap_freetuple(copyTuple);
 			LockBuffer(scan->xs_cbuf, BUFFER_LOCK_UNLOCK);
 
 		} else {
@@ -1123,7 +1106,7 @@ HeapTuple SmoothProcesmoothDescnePageOrder(IndexScanDesc scan, BlockNumber page,
 
 }
 
-HeapTuple SmoothProcesmoothDescnePage(IndexScanDesc scan, BlockNumber page, ScanDirection direction, int no_orig_keys,
+HeapTuple SmoothProcessOnePage(IndexScanDesc scan, BlockNumber page, ScanDirection direction, int no_orig_keys,
 		ScanKey orig_keys, int no_orig_smooth_keys, ScanKey orig_smooth_keys, List *allqual, ExprContext *econtext,
 		TupleTableSlot *slot) {
 	Page dp;
@@ -1385,7 +1368,7 @@ HeapTuple SmoothProcesmoothDescnePage(IndexScanDesc scan, BlockNumber page, Scan
  * 	  	1.4 Increase 'Page check' #tuples - first time add one row
  * 	  }
  *
- * The result is a visible heap tuple asmoothDescciated with the index TID most
+ * The result is a visible heap tuple associated with the index TID most
  * recently fetched by index_getnext_tid, or NULL if no more matching tuples
  * exist.  (There can be more than one matching tuple because of HOT chains,
  * although when using an MVCC snapshot it should be impossible for more than
@@ -1410,7 +1393,6 @@ HeapTuple index_smoothfetch_heap(IndexScanDesc scan, ScanDirection direction, do
 	bool got_heap_tuple = false;
 	bool used_prefetcher = false;
 	BlockNumber page;
-	Page pageorig;
 	HeapTuple tuple = &(scan->xs_ctup);
 
 	int max_number_of_pages = 0; /*maximal number of pages for prefetcher */
@@ -1442,25 +1424,26 @@ HeapTuple index_smoothfetch_heap(IndexScanDesc scan, ScanDirection direction, do
 				used_prefetcher = true;
 
 			} else {
-
+				/* not in the prefetching mode */
+				/* when order by logic is similar but we are using result cache instead of bitmap*/
+				/* if the page is in the cache - fill tuple with it*/
+				/* NO ORDER BY - return all tuples from a page */
+				page = ItemPointerGetBlockNumber(tid);
 				IndexTuple indexTuple =scan->xs_itup;
 				if (smoothDesc->result_cache->status != SS_EMPTY && indexTuple && enable_smoothshare) {
 					ExecResultCacheSwitchPartition(scan,smoothDesc,indexTuple);
 				}
-				page = ItemPointerGetBlockNumber(tid);
-				if (smooth_resultcache_find_tuple(scan, tuple, page)) {
+				if ( smooth_resultcache_find_tuple(scan, tuple, page)) {
 
 					smoothDesc->num_result_cache_hits++;
-
 					return tuple;
-				}
-					}
+				} else
+					smoothDesc->num_result_cache_misses++;
+			}
 
 			/*check FOR CASE WHEN WE HAVE UPDATES - SINCE UPDATES KEEP OLD POINTERS TO NOTHING*/
-			if (bms_is_member(page, smoothDesc->bs_vispages) ) {
-				int batchno;
-
-
+			if (bms_is_member(page, smoothDesc->bs_vispages) && !smoothDesc->result_cache->isCached) {
+				/*page is already considered and all the qualifying tuples are already produced */
 
 				ItemPointerSetInvalid(&(tuple->t_self));
 				tuple->t_tableOid = InvalidOid;
@@ -1491,7 +1474,7 @@ HeapTuple index_smoothfetch_heap(IndexScanDesc scan, ScanDirection direction, do
 			/* if hash table exist */
 			if (smoothDesc->result_cache->maxentries > 0)
 				/* -1 because we are about to process one page which will increase number of entries */
-				max_number_of_pages = smoothDesc->result_cache->maxtuples - smoothDesc->result_cache->nentries - 1;
+				max_number_of_pages = smoothDesc->result_cache->maxentries - smoothDesc->result_cache->nentries - 1;
 			else
 				/* hash table not yet created*/
 				max_number_of_pages = smooth_prefetch_target;
@@ -1535,10 +1518,6 @@ HeapTuple index_smoothfetch_heap(IndexScanDesc scan, ScanDirection direction, do
 							printf("\n Normal Smooth Scan. Number of pages checked %ld. Prefetch target %ld  ",
 									smoothDesc->num_vispages, smoothDesc->prefetch_target);
 
-
-//							printf("\n Normal Smooth Scan. Number of pages checked %ld. Prefetch target %ld  ",
-//									bms_num_members(smoothDesc->bs_vispages), smoothDesc->prefetch_target);
-
 						//17.02.2014 - starting a new cycle
 						//printf("\nLocal number of tuples for prefetcher size %ld, is %ld, ", smoothDesc->local_num_pages, smoothDesc->local_qualifying_tuples);
 						smoothDesc->local_num_pages = 0;
@@ -1548,16 +1527,16 @@ HeapTuple index_smoothfetch_heap(IndexScanDesc scan, ScanDirection direction, do
 						//enable_skewcheck
 						double localSelectivity;
 						double globalSelectivity;
-						double numPages = smoothDesc->num_vispages;
+
 						if (smoothDesc->local_num_pages)
 							localSelectivity = (double) smoothDesc->local_qualifying_pages
 									/ (double) smoothDesc->local_num_pages;
 						else
 							localSelectivity = 0;
 
-						if (numPages)
+						if (smoothDesc->num_vispages > 0)
 							globalSelectivity = (double) smoothDesc->global_qualifying_pages
-									/ (double) numPages;
+									/ (double) smoothDesc->num_vispages;
 						else
 							globalSelectivity = 0;
 
@@ -1637,9 +1616,9 @@ HeapTuple index_smoothfetch_heap(IndexScanDesc scan, ScanDirection direction, do
 						else
 							localSelectivity = 0;
 
-						if (smoothDesc->num_vispages)
+						if (smoothDesc->num_vispages > 0)
 							globalSelectivity = (double) smoothDesc->global_qualifying_pages
-									/ (double)smoothDesc->num_vispages;
+									/ (double) smoothDesc->num_vispages;
 						else
 							globalSelectivity = 0;
 
@@ -1728,7 +1707,7 @@ HeapTuple index_smoothfetch_heap(IndexScanDesc scan, ScanDirection direction, do
 				} //if !enable_skewcheck...
 
 			}
-			return SmoothProcesmoothDescnePageOrder(scan, page, direction, no_orig_keys, orig_keys, used_prefetcher,
+			return SmoothProcessOnePageOrder(scan, page, direction, no_orig_keys, orig_keys, used_prefetcher,
 					target_list, qual_list, index, no_orig_smooth_keys, orig_smooth_keys, allqual, econtext, slot);
 
 		} /* if order by is imposed*/
@@ -1778,7 +1757,6 @@ HeapTuple index_smoothfetch_heap(IndexScanDesc scan, ScanDirection direction, do
 						/* bitmap set option */
 						smoothDesc->bs_vispages = bms_add_member(smoothDesc->bs_vispages, page);
 						smoothDesc->num_vispages++;
-
 						/* this page is done */
 						smoothDesc->more_data_for_smooth = false;
 
@@ -1886,7 +1864,7 @@ HeapTuple index_smoothfetch_heap(IndexScanDesc scan, ScanDirection direction, do
 								else
 									localSelectivity = 0;
 
-								if (smoothDesc->num_vispages)
+								if (smoothDesc->num_vispages > 0)
 									globalSelectivity = (double) smoothDesc->global_qualifying_pages
 											/ (double) smoothDesc->num_vispages;
 								else
@@ -1967,9 +1945,9 @@ HeapTuple index_smoothfetch_heap(IndexScanDesc scan, ScanDirection direction, do
 								else
 									localSelectivity = 0;
 
-								if (smoothDesc->num_vispages)
+								if (smoothDesc->num_vispages > 0)
 									globalSelectivity = (double) smoothDesc->global_qualifying_pages
-											/ (double) smoothDesc->num_vispages;
+											/ (double) 	smoothDesc->num_vispages;
 								else
 									globalSelectivity = 0;
 
@@ -2060,7 +2038,7 @@ HeapTuple index_smoothfetch_heap(IndexScanDesc scan, ScanDirection direction, do
 
 					}
 
-					return SmoothProcesmoothDescnePage(scan, page, direction, no_orig_keys, orig_keys, no_orig_smooth_keys,
+					return SmoothProcessOnePage(scan, page, direction, no_orig_keys, orig_keys, no_orig_smooth_keys,
 							orig_smooth_keys, allqual, econtext, slot);
 
 				}/* end of else that puts new tuples in currPos.items */
@@ -2283,9 +2261,6 @@ HeapTuple indexsmooth_getnext(IndexScanDesc scan, ScanDirection direction, doubl
 		ScanKey orig_smooth_keys, List *allqual, ExprContext *econtext, TupleTableSlot *slot) {
 	HeapTuple heapTuple;
 	ItemPointer tid;
-	SmoothScanOpaque smoothDesc = (SmoothScanOpaque) scan->smoothInfo;
-
-	//int batchno;
 
 	for (;;) { /* we are either processing current page, or have more pages in prefetcher
 	 In any case, I should not fetch next TID from the index, until I don't consume all prefetched pages
@@ -2301,20 +2276,12 @@ HeapTuple indexsmooth_getnext(IndexScanDesc scan, ScanDirection direction, doubl
 				Assert(ItemPointerGetBlockNumber(&scan->xs_ctup.t_self) == BufferGetBlockNumber(scan->xs_cbuf));
 			}
 		} else {
-			HeapTuple tuple;
-			Buffer buf =  InvalidBuffer;
 			/* Time to fetch the next TID from the index */
 			tid = index_getnext_tid(scan, direction);
 
 			/* If we're out of index entries, we're done */
 			if (tid == NULL)
-					break;
-
-
-
-
-
-
+				break;
 		}
 
 		/*
@@ -2326,13 +2293,10 @@ HeapTuple indexsmooth_getnext(IndexScanDesc scan, ScanDirection direction, doubl
 		 * in this method we will fetch heaptuple -but we will also fill scan->smoothdescriptor->items with the rest of tuples
 		 *
 		 * */
-		//	print_tuple(RelationGetDescr(scan->indexRelation), scan->xs_itup);
-
 		heapTuple = index_smoothfetch_heap(scan, direction, plan_rows, no_orig_keys, orig_keys, target_list, qual_list,
 				index, no_orig_smooth_keys, orig_smooth_keys, allqual, econtext, slot);
 		if (heapTuple != NULL) {
-
-			smoothDesc->num_result_tuples++;
+			((SmoothScanOpaque) scan->smoothInfo)->num_result_tuples++;
 			return heapTuple;
 		}
 	}
