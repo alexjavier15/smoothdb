@@ -706,7 +706,7 @@ static void smooth_resultcache_create(IndexScanDesc scan, uint32 tup_length) {
 		res_cache->hashtable = ShmemInitHash("ResultCache Hash", res_cache->maxentries,
 		res_cache->maxentries, hash_ctl_ptr, hash_tag);
 		IsUnderPostmaster = false;
-		prinf( "size of hash table : %ld\n",hash_get_shared_size(hash_ctl_ptr, hash_tag));
+		printf( "size of hash table : %ld\n",hash_get_shared_size(hash_ctl_ptr, hash_tag));
 	}
 
 	MemoryContextSwitchTo(oldctx);
