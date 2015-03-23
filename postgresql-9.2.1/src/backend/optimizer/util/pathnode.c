@@ -352,6 +352,10 @@ set_cheapest(RelOptInfo *parent_rel)
 		}
 		else
 		{
+			if (path->pathtype == T_BitmapHeapScan && enable_bitmapscan) {
+				cheapest_startup_path = cheapest_total_path = path;
+				continue;
+			}
 			/* Unparameterized path, so consider it for cheapest slots */
 			if (cheapest_total_path == NULL)
 			{
