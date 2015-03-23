@@ -316,5 +316,7 @@ ExecInitBitmapIndexScan(BitmapIndexScan *node, EState *estate, int eflags)
 	/*
 	 * all done.
 	 */
+
+
 	return indexstate;
 }

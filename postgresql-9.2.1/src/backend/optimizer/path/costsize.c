@@ -1218,8 +1218,8 @@ cost_bitmap_heap_scan(Path *path, PlannerInfo *root, RelOptInfo *baserel,
 
 	if(enable_bitmapscan){
 
-			path->startup_cost = 0.00001;
-			path->total_cost = 0.00001;
+			path->startup_cost = 0.0000;
+			path->total_cost = 0.0000;
 
 		}
 }
