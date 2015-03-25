@@ -1477,7 +1477,7 @@ HeapTuple index_smoothfetch_heap(IndexScanDesc scan, ScanDirection direction, do
 			/* if hash table exist */
 			if (smoothDesc->result_cache->maxentries > 0)
 				/* -1 because we are about to process one page which will increase number of entries */
-				max_number_of_pages = smoothDesc->result_cache->maxentries - smoothDesc->result_cache->nentries - 1;
+				max_number_of_pages = smoothDesc->result_cache->maxtuples - smoothDesc->result_cache->nentries - 1;
 			else
 				/* hash table not yet created*/
 				max_number_of_pages = smooth_prefetch_target;
