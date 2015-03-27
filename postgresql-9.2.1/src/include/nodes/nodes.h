@@ -107,6 +107,7 @@ typedef enum NodeTag
 	T_IndexSmoothScanState,
 	T_SmoothHeapScanState,
 	T_SmoothIndexScanState,
+	T_MJoinState,
 
 	T_IndexOnlyScanState,
 	T_BitmapIndexScanState,

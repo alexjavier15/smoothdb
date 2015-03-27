@@ -104,7 +104,7 @@ typedef struct HashSkewBucket
 
 
 typedef struct HashJoinTableData
-{
+{ /*Alex : MJoinTableData fields*/
 	int			nbuckets;		/* # buckets in the in-memory hash table */
 	int			log2_nbuckets;	/* its log2 (nbuckets must be a power of 2) */
 
@@ -114,11 +114,6 @@ typedef struct HashJoinTableData
 
 	bool		keepNulls;		/* true to store unmatchable NULL tuples */
 
-	bool		skewEnabled;	/* are we using skew optimization? */
-	HashSkewBucket **skewBucket;	/* hashtable of skew buckets */
-	int			skewBucketLen;	/* size of skewBucket array (a power of 2!) */
-	int			nSkewBuckets;	/* number of active skew buckets */
-	int		   *skewBucketNums; /* array indexes of active skew buckets */
 
 	int			nbatch;			/* number of batches */
 	int			curbatch;		/* current batch #; 0 during 1st pass */
@@ -129,6 +124,23 @@ typedef struct HashJoinTableData
 	bool		growEnabled;	/* flag to shut off nbatch increases */
 
 	double		totalTuples;	/* # tuples obtained from inner plan */
+
+
+	Size		spaceUsed;		/* memory space currently used by tuples */
+	Size		spaceAllowed;	/* upper limit for space used */
+	Size		spacePeak;		/* peak space used */
+
+	MemoryContext hashCxt;		/* context for whole-hash-join storage */
+	MemoryContext batchCxt;		/* context for this-batch-only storage */
+
+	bool		skewEnabled;	/* are we using skew optimization? */
+	HashSkewBucket **skewBucket;	/* hashtable of skew buckets */
+	int			skewBucketLen;	/* size of skewBucket array (a power of 2!) */
+	int			nSkewBuckets;	/* number of active skew buckets */
+	int		   *skewBucketNums; /* array indexes of active skew buckets */
+
+	/*Alex : HashJoinTableData fields*/
+
 
 	/*
 	 * These arrays are allocated for the life of the hash join, but only if
@@ -149,14 +161,10 @@ typedef struct HashJoinTableData
 	FmgrInfo   *inner_hashfunctions;	/* lookup data for hash functions */
 	bool	   *hashStrict;		/* is each hash join operator strict? */
 
-	Size		spaceUsed;		/* memory space currently used by tuples */
-	Size		spaceAllowed;	/* upper limit for space used */
-	Size		spacePeak;		/* peak space used */
+
 	Size		spaceUsedSkew;	/* skew hash table's current space usage */
 	Size		spaceAllowedSkew;		/* upper limit for skew hashtable */
 
-	MemoryContext hashCxt;		/* context for whole-hash-join storage */
-	MemoryContext batchCxt;		/* context for this-batch-only storage */
 }	HashJoinTableData;
 
 #endif   /* HASHJOIN_H */

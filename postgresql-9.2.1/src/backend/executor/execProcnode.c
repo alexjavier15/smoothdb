@@ -98,6 +98,7 @@
 #include "executor/nodeMaterial.h"
 #include "executor/nodeMergeAppend.h"
 #include "executor/nodeMergejoin.h"
+#include "executor/nodeMHashjoin.h"
 #include "executor/nodeModifyTable.h"
 #include "executor/nodeNestloop.h"
 #include "executor/nodeRecursiveunion.h"
@@ -280,8 +281,13 @@ ExecInitNode(Plan *node, EState *estate, int eflags)
 			break;
 
 		case T_HashJoin:
+			if(!enable_mhashjoin)
 			result = (PlanState *) ExecInitHashJoin((HashJoin *) node,
 													estate, eflags);
+			else
+			result = (PlanState *) ExecInitMJoin((HashJoin *) node,
+													estate, eflags);
+
 			break;
 
 			/*
@@ -481,11 +487,15 @@ ExecProcNode(PlanState *node)
 		case T_MergeJoinState:
 			result = ExecMergeJoin((MergeJoinState *) node);
 			break;
-
-		case T_HashJoinState:
-			result = ExecHashJoin((HashJoinState *) node);
+		case T_MJoinState:
+			result = ExecMJoin((MJoinState *) node);
 			break;
 
+		case T_HashJoinState:
+
+			result = ExecHashJoin((HashJoinState *) node);
+
+			break;
 			/*
 			 * materialization nodes
 			 */
@@ -733,9 +743,13 @@ ExecEndNode(PlanState *node)
 		case T_MergeJoinState:
 			ExecEndMergeJoin((MergeJoinState *) node);
 			break;
-
+		case T_MJoinState:
+			ExecEndMJoin((MJoinState *) node);
+			break;
 		case T_HashJoinState:
+
 			ExecEndHashJoin((HashJoinState *) node);
+
 			break;
 
 			/*

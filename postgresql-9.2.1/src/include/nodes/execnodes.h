@@ -1679,7 +1679,7 @@ typedef struct MergeJoinState
 /* these structs are defined in executor/hashjoin.h: */
 typedef struct HashJoinTupleData *HashJoinTuple;
 typedef struct HashJoinTableData *HashJoinTable;
-
+typedef struct MJoinTableData *MJoinTable;
 typedef struct HashJoinState
 {
 	JoinState	js;				/* its first field is NodeTag */
@@ -1700,14 +1700,41 @@ typedef struct HashJoinState
 	int			hj_JoinState;
 	bool		hj_MatchedOuter;
 	bool		hj_OuterNotEmpty;
-	/*Alex : MJoin fields:
-	 *
-	 *
-	 */
-	HashJoinTable mj_innerHashTable;
-	HashJoinTable mj_outerHashTable;
+
 } HashJoinState;
 
+
+typedef struct MJoinState
+{
+	JoinState	js;				/* its first field is NodeTag */
+	List	   *hashclauses;	/* list of ExprState nodes */
+	List	   *mhj_OuterHashKeys;		/* list of ExprState nodes */
+	List	   *mhj_InnerHashKeys;		/* list of ExprState nodes */
+	List	   *mhj_HashOperators;		/* list of operator OIDs */
+	MJoinTable mhj_InnerHashTable;
+	MJoinTable mhj_OuterHashTable;
+	uint32		mhj_CurHashValue;
+	int			mhj_CurBucketNo;
+	HashJoinTuple mhj_CurTuple;
+	TupleTableSlot *mhj_OuterTupleSlot;
+	TupleTableSlot *mhj_InnerTupleSlot;
+	int			mhj_JoinState;
+	int			mhj_LastState;
+	bool		mhj_MatchedOuter;
+	bool		mhj_OuterNotEmpty;
+	bool		  	mhj_MatchedInner;
+	bool		  	mhj_InnerNotEmpty;
+	MJoinTable	mhj_ScanHashTable;
+	TupleTableSlot  **mhj_ScanEcxt_slot;
+	bool			mhj_HasMoreOuter;
+	bool			mhj_HasMoreInner;
+	/*Fields for hybrid MJoin */
+	MJoinTable	mhj_NextHashTable;
+	int			mhj_NextBucketNo;
+	TupleTableSlot  **mhj_NextEcxt_slot;
+	HashJoinTuple mhj_NextTuple;
+
+} MJoinState;
 
 /*Alex:
  *  ----------------------------------------------------------------
@@ -1926,6 +1953,8 @@ typedef struct HashState
 	/*ALex  MJOIN*/
 	//HashJoinTable innerHashtable;
 	//HashJoinTable outerHashtable;
+	bool isOuter;
+
 
 } HashState;
 

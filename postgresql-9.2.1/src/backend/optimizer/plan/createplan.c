@@ -2948,7 +2948,7 @@ create_hashjoin_plan(PlannerInfo *root,
 	 * most common combinations of outer values, which we don't currently have
 	 * enough stats for.)
 	 */
-	if (list_length(hashclauses) == 1)
+	if (list_length(hashclauses) == 1 && !enable_mhashjoin)
 	{
 		OpExpr	   *clause = (OpExpr *) linitial(hashclauses);
 		Node	   *node;
@@ -2983,6 +2983,17 @@ create_hashjoin_plan(PlannerInfo *root,
 						  skewInherit,
 						  skewColType,
 						  skewColTypmod);
+	if(enable_mhashjoin){
+
+		outer_plan = (Plan *)make_hash(outer_plan,
+										skewTable,
+										skewColumn,
+										skewInherit,
+										skewColType,
+										skewColTypmod);
+
+
+	}
 	join_plan = make_hashjoin(tlist,
 							  joinclauses,
 							  otherclauses,
