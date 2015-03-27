@@ -53,6 +53,7 @@ static void ExecHashSkewTableInsert(HashJoinTable hashtable,
 						int bucketNumber);
 static void ExecHashRemoveNextSkewBucket(HashJoinTable hashtable);
 static void ExecMHashDumpBatch(MJoinTable hashtable);
+static TupleTableSlot *  ExecMJoinGetNextTuple(MJoinState *hjstate);
 
 /* ----------------------------------------------------------------
  *	Alex: Return and insert one tuple from  the outer node scan
@@ -89,8 +90,13 @@ ExecHash(HashState *node) {
 	/*
 	 * get all inner tuples and insert into the hash table (or temp files)
 	 */
-
+		if(hashtable->bufferedBuckets!=NULL){
+			printf ("getting buffered\n");
+			slot = ExecMJoinGetNextTuple(hashtable->parent);
+		}
+		else
 		slot = ExecProcNode(outerNode);
+
 		if (TupIsNull(slot))
 			return NULL;
 
@@ -436,11 +442,12 @@ ExecHashTableCreate(Hash *node, List *hashOperators, bool keepNulls)
 	 * Set up for skew optimization, if possible and there's a need for more
 	 * than one batch.	(In a one-batch join, there's no point in it.)
 	 */
-	if (nbatch > 1)
-		ExecHashBuildSkewHash(hashtable, node, num_skew_mcvs);
+//	if (nbatch > 1)
+//		ExecHashBuildSkewHash(hashtable, node, num_skew_mcvs);
 
 	MemoryContextSwitchTo(oldcxt);
-
+	printf("\n Hash table created for %d entries \n", hashtable->nbuckets);
+	printf("\n TOTAL BACTHES  %d  \n", hashtable->nbatch);
 	return hashtable;
 }
 
@@ -509,6 +516,8 @@ ExecMHashTableCreate(Hash *node, List *hashOperators, bool keepNulls, bool isLef
 	hashtable->status = MHJ_EMPTY;
 	hashtable->bufferedBuckets= NULL;
 
+	hashtable->nBuffered = 0;
+	hashtable->nInserted = 0;
 	/*
 	 * Get info about the hash functions to be used for each hash key. Also
 	 * remember whether the join operators are strict.
@@ -758,9 +767,11 @@ ExecMHashTableDestroy(MJoinTable hashtable)
 	 */
 	for (i = 1; i < hashtable->nbatch; i++)
 	{   MJoinBatchDesc batch =hashtable->batches[i];
-		if (batch)
+		if (batch->batchFile){
 
 			BufFileClose(batch->batchFile);
+			pfree(batch);
+		}
 
 	}
 
@@ -817,6 +828,8 @@ ExecHashIncreaseNumBatches(HashJoinTable hashtable)
 	MemoryContext oldcxt;
 	long		ninmemory;
 	long		nfreed;
+
+	printf("Incresing batches\n");
 
 	/* do nothing if we've decided to shut off growth */
 	if (!hashtable->growEnabled)
@@ -991,7 +1004,7 @@ static void ExecMHashDumpBatch(MJoinTable hashtable) {
 				hashtable->spaceUsed -= HJTUPLE_OVERHEAD + HJTUPLE_MINTUPLE(tuple)->t_len;
 				pfree(tuple);
 				batch->nentries++;
-				curbatch->nentries--;
+				hashtable->nInserted--;
 				nfreed++;
 			}
 
@@ -1023,7 +1036,7 @@ static void ExecMHashDumpBatch(MJoinTable hashtable) {
 			hashtable->spaceUsed -= HJTUPLE_OVERHEAD + HJTUPLE_MINTUPLE(tuple)->t_len;
 			pfree(tuple);
 			batch->nentries++;
-			curbatch->nentries--;
+			hashtable->nBuffered--;
 
 		}
 
@@ -1043,13 +1056,13 @@ static void ExecMHashDumpBatch(MJoinTable hashtable) {
 	 * Increasing nbatch will not fix it since there's no way to subdivide the
 	 * group any more finely. We have to just gut it out and hope the server
 	 * has enough RAM.
-	 */
-	if (nfreed == 0 || nfreed == ninmemory) {
-		hashtable->growEnabled = false;
-#ifdef HJDEBUG
-		printf("Disabling further increase of nbatch\n");
-#endif
-	}
+//	 */
+//	if (nfreed == 0 || nfreed == ninmemory) {
+//		hashtable->growEnabled = false;
+//#ifdef HJDEBUG
+//		printf("Disabling further increase of nbatch\n");
+//#endif
+//	}
 }
 /*
  * ExecHashIncreaseNumBatches
@@ -1236,13 +1249,15 @@ ExecMHashTableInsert(MJoinState *mhjstate,MJoinTable hashtabledest,
 		HeapTupleHeaderClearMatch(HJTUPLE_MINTUPLE(hashTuple));
 
 		/* Push it onto the front of the bucket's list */
-		if(saved){
+		if(!saved){
 			hashTuple->next = 	hashtabledest->bufferedBuckets;
 			hashtabledest->bufferedBuckets = hashTuple;
+			hashtabledest->nBuffered++;
 		}
 		else{
 		hashTuple->next = hashtabledest->buckets[bucketno];
 		hashtabledest->buckets[bucketno] = hashTuple;
+		hashtabledest->nInserted++;
 		}
 		/* Account for space used, and back off if we've used too much */
 		hashtabledest->spaceUsed += hashTupleSize;
@@ -1257,9 +1272,12 @@ ExecMHashTableInsert(MJoinState *mhjstate,MJoinTable hashtabledest,
 		 * put the tuple into a temp file for later batches
 		 */
 		Assert(batchno > hashtabledest->curbatch);
+		printf("\ninserting in batch : %d ", batchno);
+		fflush(stdout);
 		if(hashtabledest->batches[batchno] == NULL){
 			hashtabledest->batches[batchno] = palloc0(sizeof(MJoinBatchData));
 		}
+		hashtabledest->batches[batchno]->nentries++;
 		ExecHashJoinSaveTuple(tuple,
 							  hashvalue,
 							  &(hashtabledest->batches[batchno]->batchFile));
@@ -1642,6 +1660,32 @@ ExecScanHashTableForUnmatched(HashJoinState *hjstate, ExprContext *econtext)
  */
 void
 ExecHashTableReset(HashJoinTable hashtable)
+{
+	MemoryContext oldcxt;
+	int			nbuckets = hashtable->nbuckets;
+
+	/*
+	 * Release all the hash buckets and tuples acquired in the prior pass, and
+	 * reinitialize the context for a new pass.
+	 */
+	MemoryContextReset(hashtable->batchCxt);
+	oldcxt = MemoryContextSwitchTo(hashtable->batchCxt);
+
+	/* Reallocate and reinitialize the hash bucket headers. */
+	hashtable->buckets = (HashJoinTuple *)
+		palloc0(nbuckets * sizeof(HashJoinTuple));
+
+	hashtable->spaceUsed = 0;
+
+	MemoryContextSwitchTo(oldcxt);
+}
+/*
+ * ExecHashTableReset
+ *
+ *		reset hash table header for new batch
+ */
+void
+ExecMHashTableReset(MJoinTable hashtable)
 {
 	MemoryContext oldcxt;
 	int			nbuckets = hashtable->nbuckets;
@@ -2060,11 +2104,43 @@ ExecHashRemoveNextSkewBucket(HashJoinTable hashtable)
 }
 
 
-
-/*
- * ExecHashJoinGetSavedTuple
- *		read the next tuple from a batch file.	Return NULL if no more.
- *
- * On success, *hashvalue is set to the tuple's hash value, and the tuple
- * itself is stored in the given slot.
+/* Alex:  From a batch loaded from disk return the next tuple. the tuple are
+ * iterated by bucket natural order (array index);
  */
+static TupleTableSlot * ExecMJoinGetNextTuple(MJoinState *hjstate) {
+
+
+
+	HashJoinTuple hashTuple = hjstate->mhj_NextTuple;
+
+
+	/*
+	 * hj_CurTuple is the address of the tuple last returned from the current
+	 * bucket, or NULL if it's time to start scanning a new bucket.
+	 *
+	 * If the tuple hashed to a skew bucket then scan the skew bucket
+	 * otherwise scan the standard hashtable bucket.
+	 */
+
+
+
+	if (hashTuple != NULL) {
+
+		TupleTableSlot *nexttuple = *(hjstate->mhj_NextEcxt_slot);
+
+		/* insert hashtable's tuple into exec slot so ExecQual sees it */
+		nexttuple = ExecStoreMinimalTuple(HJTUPLE_MINTUPLE(hashTuple), nexttuple, false); /* do not pfree */
+		*(hjstate->mhj_NextEcxt_slot) = nexttuple;
+
+		hjstate->mhj_NextTuple = hashTuple->next;
+
+		return nexttuple;
+
+	}
+
+	/*
+	 * no match
+	 */
+	return NULL;
+
+}

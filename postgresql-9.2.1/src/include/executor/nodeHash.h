@@ -56,6 +56,7 @@ extern void ExecPrepHashTableForUnmatched(HashJoinState *hjstate);
 extern bool ExecScanHashTableForUnmatched(HashJoinState *hjstate,
 							  ExprContext *econtext);
 extern void ExecHashTableReset(HashJoinTable hashtable);
+extern void ExecMHashTableReset(MJoinTable hashtable);
 extern void ExecHashTableResetMatchFlags(HashJoinTable hashtable);
 extern void ExecChooseHashTableSize(double ntuples, int tupwidth, bool useskew,
 						int *numbuckets,
