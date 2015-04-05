@@ -234,6 +234,10 @@ standard_ExecutorStart(QueryDesc *queryDesc, int eflags)
 	estate->es_crosscheck_snapshot = RegisterSnapshot(queryDesc->crosscheck_snapshot);
 	estate->es_top_eflags = eflags;
 	estate->es_instrument = queryDesc->instrument_options;
+	if(enable_mhashjoin){
+		estate->es_instrument|=INSTRUMENT_ROWS;
+
+	}
 
 	/*
 	 * Initialize the plan state tree

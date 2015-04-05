@@ -1732,8 +1732,9 @@ typedef struct MJoinState
 	MJoinTable	mhj_NextHashTable;
 	int			mhj_NextBucketNo;
 	TupleTableSlot  **mhj_NextEcxt_slot;
+	HashJoinTuple mhj_NextInnerTuple;
+	HashJoinTuple mhj_NextOuterTuple;
 	HashJoinTuple mhj_NextTuple;
-
 } MJoinState;
 
 /*Alex:

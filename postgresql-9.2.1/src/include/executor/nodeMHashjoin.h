@@ -36,7 +36,8 @@ typedef enum
 	MHJ_EMPTY,				/* no entries in the hashtable*/
 	MHJ_HASH,				/* we have has table */
 	MHJ_FULL,				/* No more tuples can be added in the in memory batch*/
-	MHJ_EXAHUSTED 			/* No more tuples can be fetched from the child plan */
+	MHJ_EXAHUSTED, 			/* No more tuples can be fetched from the child plan */
+	MHJ_BUFFERED 			/* No more tuples can be fetched from the child plan */
 } HashTableStatus;
 
 typedef struct MJoinBatchData{

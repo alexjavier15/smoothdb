@@ -25,7 +25,7 @@ extern void ExecReScanHash(HashState *node);
 extern HashJoinTable ExecHashTableCreate(Hash *node, List *hashOperators,
 					bool keepNulls);
 extern MJoinTable
-ExecMHashTableCreate(Hash *node, List *hashOperators, bool keepNulls, bool isLeft);
+ExecMHashTableCreate(Hash *node, List *hashOperators, bool keepNulls, bool isLeft, int nbuckets, int nbatch);
 
 extern void ExecHashTableDestroy(HashJoinTable hashtable);
 extern void ExecMHashTableDestroy(MJoinTable hashtable);
