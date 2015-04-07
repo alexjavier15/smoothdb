@@ -701,6 +701,7 @@ typedef struct Path
 
 	List	   *pathkeys;		/* sort ordering of path's output */
 	/* pathkeys is a List of PathKey nodes; see above */
+	List	   *restrict_list;
 } Path;
 
 /* Macro for extracting a path's parameterization relids; beware double eval */
@@ -1114,6 +1115,16 @@ typedef struct HashPath
 	List	   *path_hashclauses;		/* join clauses used for hashing */
 	int			num_batches;	/* number of batches expected */
 } HashPath;
+
+typedef struct MHashPath
+{
+	JoinPath	jpath;
+	List	   *path_hashclauses;		/* join clauses used for hashing */
+	int			num_batches;	/* number of batches expected */
+	List	   *restrictList;
+} MHashPath;
+
+
 
 /*
  * Restriction clause info.

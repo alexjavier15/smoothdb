@@ -43,8 +43,6 @@ ExecMHash_get_op_hash_functions(Oid hashop,
 					  RegProcedure *hashfn, bool isLeft);
 
 static void ExecHashIncreaseNumBatches(HashJoinTable hashtable);
-static void
-ExecMHashIncreaseNumBatches(MJoinState *mhjstate);
 static void ExecHashBuildSkewHash(HashJoinTable hashtable, Hash *node,
 					  int mcvsToUse);
 static void ExecHashSkewTableInsert(HashJoinTable hashtable,
@@ -470,9 +468,7 @@ MJoinTable
 ExecMHashTableCreate(Hash *node, List *hashOperators, bool keepNulls, bool isLeft, int nbuckets, int nbatch)
 {
 	MJoinTable hashtable;
-	Plan	   *outerNode;
 
-	int			num_skew_mcvs;
 	int			log2_nbuckets;
 	int			nkeys;
 	int			i;
@@ -484,7 +480,7 @@ ExecMHashTableCreate(Hash *node, List *hashOperators, bool keepNulls, bool isLef
 	 * "outer" subtree of this node, but the inner relation of the hashjoin).
 	 * Compute the appropriate size of the hash table.
 	 */
-	outerNode = outerPlan(node);
+
 
 
 #ifdef HJDEBUG
@@ -519,9 +515,6 @@ ExecMHashTableCreate(Hash *node, List *hashOperators, bool keepNulls, bool isLef
 	hashtable->spaceAllowed = work_mem * 1024L;
 
 	hashtable->status = MHJ_EMPTY;
-	hashtable->bufferedBuckets= NULL;
-
-	hashtable->nBuffered = 0;
 	hashtable->nInserted = 0;
 	/*
 	 * Get info about the hash functions to be used for each hash key. Also
@@ -577,7 +570,9 @@ ExecMHashTableCreate(Hash *node, List *hashOperators, bool keepNulls, bool isLef
 
 		for (i = 0; i< nbatch ; i++){
 
-			hashtable->batches[i] = palloc0(sizeof(MJoinBatchData));
+			hashtable->batches[i] = palloc(sizeof(MJoinBatchData));
+			ExecMHashJoinResetBatch(hashtable->batches[i]);
+			hashtable->batches[i]->spaceAllowed = hashtable->spaceAllowed;
 
 		}
 //		hashtable->batchFile = (BufFile **)
@@ -971,6 +966,12 @@ static void ExecMHashDumpBatch(MJoinTable hashtable) {
 	 * Scan through the existing hash table entries and dump out any that are
 	 * no longer of the current batch.
 	 */
+
+	curbatch->nentries = 0;
+	curbatch->spaceUsed = 0;
+	hashtable->spaceUsed = 0;
+
+
 	ninmemory = nfreed = 0;
 
 	for (i = 0; i < hashtable->nbuckets; i++) {
@@ -985,13 +986,17 @@ static void ExecMHashDumpBatch(MJoinTable hashtable) {
 			HashJoinTuple nexttuple = tuple->next;
 			int bucketno;
 			int batchno;
+			int tuplesize = HJTUPLE_OVERHEAD + HJTUPLE_MINTUPLE(tuple)->t_len;
 
 			ninmemory++;
 			ExecHashGetBucketAndBatch((HashJoinTable) hashtable, tuple->hashvalue, &bucketno, &batchno);
 
 			if (batchno == curbatchno) {
 				/* keep tuple */
+				curbatch->nentries++;
 				prevtuple = tuple;
+				hashtable->spaceUsed += tuplesize;
+				curbatch->spaceUsed +=tuplesize;
 			} else {
 				MJoinBatchDesc batch = hashtable->batches[batchno];
 				/* dump it out */
@@ -1004,10 +1009,10 @@ static void ExecMHashDumpBatch(MJoinTable hashtable) {
 				else
 					hashtable->buckets[i] = nexttuple;
 				/* prevtuple doesn't change */
-				hashtable->spaceUsed -= HJTUPLE_OVERHEAD + HJTUPLE_MINTUPLE(tuple)->t_len;
+
 				pfree(tuple);
 				batch->nentries++;
-				hashtable->batches[curbatchno]->nentries--;
+				curbatch->spaceUsed +=tuplesize;
 				hashtable->nInserted--;
 				nfreed++;
 			}
@@ -1016,38 +1021,7 @@ static void ExecMHashDumpBatch(MJoinTable hashtable) {
 		}
 	}
 
-	printf("Num of saved tuples : %d\n", nfreed);
-
-	tuple = hashtable->bufferedBuckets;
-
-	while (tuple != NULL) {
-		/* save link in case we delete */
-		HashJoinTuple nexttuple = tuple->next;
-		int bucketno;
-		int batchno;
-
-		ExecHashGetBucketAndBatch((HashJoinTable) hashtable, tuple->hashvalue, &bucketno, &batchno);
-
-		if (batchno != curbatchno) {
-			MJoinBatchDesc batch = hashtable->batches[batchno];
-			/* dump it out */
-			Assert(batchno > curbatchno);
-			if (batch == NULL) {
-
-				batch = palloc0(sizeof(MJoinBatchData));
-
-			}
-			ExecHashJoinSaveTuple(HJTUPLE_MINTUPLE(tuple), tuple->hashvalue, &batch->savedFile);
-			/* prevtuple doesn't change */
-			hashtable->spaceUsed -= HJTUPLE_OVERHEAD + HJTUPLE_MINTUPLE(tuple)->t_len;
-			pfree(tuple);
-			batch->nentries++;
-			hashtable->nBuffered--;
-
-		}
-
-		tuple = nexttuple;
-	}
+	printf("Num of saved tuples : %ld\n", nfreed);
 
 
 #ifdef HJDEBUG
@@ -1075,14 +1049,14 @@ static void ExecMHashDumpBatch(MJoinTable hashtable) {
  *		increase the original number of batches in order to reduce
  *		current memory consumption
  */
-static void
+void
 ExecMHashIncreaseNumBatches(MJoinState * mhjstate)
 {
 	MJoinTable innerhashtable = mhjstate->mhj_InnerHashTable;
 	MJoinTable outerhashtable = mhjstate->mhj_OuterHashTable;
 	int			oldnbatch = innerhashtable->nbatch;
-	int 		i=0;
 	int			nbatch;
+	int bno = 0;
 
 	MemoryContext oldcxt;
 
@@ -1101,25 +1075,38 @@ ExecMHashIncreaseNumBatches(MJoinState * mhjstate)
 		   nbatch, (unsigned long) hashtable->spaceUsed);
 #endif
 
+
+
 	oldcxt = MemoryContextSwitchTo(innerhashtable->hashCxt);
 
+	innerhashtable->batches = (MJoinBatchDesc *) repalloc(innerhashtable->batches, nbatch * sizeof(MJoinBatchDesc));
 
+	MemoryContextSwitchTo(outerhashtable->hashCxt);
 
-		innerhashtable->batches = (MJoinBatchDesc *) repalloc(innerhashtable->batches, nbatch * sizeof(MJoinBatchDesc));
-		outerhashtable->batches = (MJoinBatchDesc *) repalloc(outerhashtable->batches, nbatch * sizeof(MJoinBatchDesc));
-		MemSet(innerhashtable->batches + oldnbatch, 0, (nbatch - oldnbatch) * sizeof(MJoinBatchDesc));
-		MemSet(outerhashtable->batches + oldnbatch, 0, (nbatch - oldnbatch) * sizeof(MJoinBatchDesc));
+	outerhashtable->batches = (MJoinBatchDesc *) repalloc(outerhashtable->batches, nbatch * sizeof(MJoinBatchDesc));
 
-		for(;oldnbatch <  nbatch; oldnbatch++){
-			innerhashtable->batches[oldnbatch] = (MJoinBatchDesc )palloc0(sizeof(MJoinBatchData));
-			outerhashtable->batches[oldnbatch] = (MJoinBatchDesc) palloc0(sizeof(MJoinBatchData));
-		}
+	MemoryContextSwitchTo(oldcxt);
 
+	MemSet(innerhashtable->batches + oldnbatch, 0, (nbatch - oldnbatch) * sizeof(MJoinBatchDesc));
+	MemSet(outerhashtable->batches + oldnbatch, 0, (nbatch - oldnbatch) * sizeof(MJoinBatchDesc));
 
+	MemoryContextSwitchTo(innerhashtable->hashCxt);
 
+	for (bno = oldnbatch; bno < nbatch; bno++) {
 
+		innerhashtable->batches[bno] = (MJoinBatchDesc) palloc(sizeof(MJoinBatchData));
+		ExecMHashJoinResetBatch(innerhashtable->batches[bno]);
+		innerhashtable->batches[bno]->spaceAllowed = innerhashtable->spaceAllowed;
 
+	}
+	MemoryContextSwitchTo(outerhashtable->hashCxt);
 
+	for (bno = oldnbatch; bno < nbatch; bno++) {
+
+		outerhashtable->batches[bno] = (MJoinBatchDesc) palloc(sizeof(MJoinBatchData));
+		ExecMHashJoinResetBatch(outerhashtable->batches[bno]);
+		outerhashtable->batches[bno]->spaceAllowed = outerhashtable->spaceAllowed;
+	}
 
 
 	MemoryContextSwitchTo(oldcxt);
@@ -1143,33 +1130,26 @@ ExecMHashIncreaseNumBatches(MJoinState * mhjstate)
  * case by not forcing the slot contents into minimal form; not clear if it's
  * worth the messiness required.
  */
-void
-ExecHashTableInsert(HashJoinTable hashtable,
-					TupleTableSlot *slot,
-					uint32 hashvalue)
-{
+void ExecHashTableInsert(HashJoinTable hashtable, TupleTableSlot *slot, uint32 hashvalue) {
 	MinimalTuple tuple = ExecFetchSlotMinimalTuple(slot);
-	int			bucketno;
-	int			batchno;
+	int bucketno;
+	int batchno;
 
-	ExecHashGetBucketAndBatch(hashtable, hashvalue,
-							  &bucketno, &batchno);
+	ExecHashGetBucketAndBatch(hashtable, hashvalue, &bucketno, &batchno);
 
 	/*
 	 * decide whether to put the tuple in the hash table or a temp file
 	 */
-	if (batchno == hashtable->curbatch)
-	{
+	if (batchno == hashtable->curbatch) {
 		/*
 		 * put the tuple in hash table
 		 */
 		HashJoinTuple hashTuple;
-		int			hashTupleSize;
+		int hashTupleSize;
 
 		/* Create the HashJoinTuple */
 		hashTupleSize = HJTUPLE_OVERHEAD + tuple->t_len;
-		hashTuple = (HashJoinTuple) MemoryContextAlloc(hashtable->batchCxt,
-													   hashTupleSize);
+		hashTuple = (HashJoinTuple) MemoryContextAlloc(hashtable->batchCxt, hashTupleSize);
 		hashTuple->hashvalue = hashvalue;
 		memcpy(HJTUPLE_MINTUPLE(hashTuple), tuple, tuple->t_len);
 
@@ -1222,12 +1202,13 @@ ExecMHashTableInsert(MJoinState *mhjstate,MJoinTable hashtabledest,
 	 * decide whether to put the tuple in the hash table or a temp file
 	 */
 
-	hashtabledest->batches[batchno]->nentries++;
+
 
 	// precheck  hashtable overflow before adding a new tuple
+	hashTupleSize = HJTUPLE_OVERHEAD + tuple->t_len;
 	if (batchno == hashtabledest->curbatch) {
 
-		hashTupleSize = HJTUPLE_OVERHEAD + tuple->t_len;
+
 		hashtabledest->spaceUsed += hashTupleSize;
 		if (hashtabledest->spaceUsed > hashtabledest->spaceAllowed) {
 			hashtabledest->spaceUsed -= hashTupleSize;
@@ -1264,17 +1245,11 @@ ExecMHashTableInsert(MJoinState *mhjstate,MJoinTable hashtabledest,
 		HeapTupleHeaderClearMatch(HJTUPLE_MINTUPLE(hashTuple));
 
 		/* Push it onto the front of the bucket's list */
-		if(saved){
 
-			hashTuple->next = 	hashtabledest->bufferedBuckets;
-			hashtabledest->bufferedBuckets = hashTuple;
-			hashtabledest->nBuffered++;
-		}
-		else{
 		hashTuple->next = hashtabledest->buckets[bucketno];
 		hashtabledest->buckets[bucketno] = hashTuple;
 		hashtabledest->nInserted++;
-		}
+		hashtabledest->batches[batchno]->nentries++;
 
 	}
 	else
@@ -1283,15 +1258,21 @@ ExecMHashTableInsert(MJoinState *mhjstate,MJoinTable hashtabledest,
 		 * put the tuple into a temp file for later batches
 		 */
 		Assert(batchno > hashtabledest->curbatch);
-		fflush(stdout);
-		if(hashtabledest->batches[batchno] == NULL){
-			hashtabledest->batches[batchno] = palloc0(sizeof(MJoinBatchData));
-		}
-		hashtabledest->batches[batchno]->nentries++;
+
+
+		if(!saved)
 		ExecHashJoinSaveTuple(tuple,
 							  hashvalue,
 							  &(hashtabledest->batches[batchno]->batchFile));
+		else
+		ExecHashJoinSaveTuple(tuple,
+							hashvalue,
+							 &(hashtabledest->batches[batchno]->savedFile));
+
+
 	}
+	hashtabledest->batches[batchno]->spaceUsed+=hashTupleSize;
+
 }
 
 /*
@@ -1712,7 +1693,6 @@ ExecMHashTableReset(MJoinTable hashtable)
 		palloc0(nbuckets * sizeof(HashJoinTuple));
 
 	hashtable->spaceUsed = 0;
-	hashtable->nBuffered = 0;
 	hashtable->nInserted = 0;
 	MemoryContextSwitchTo(oldcxt);
 }
@@ -2119,10 +2099,14 @@ ExecHashRemoveNextSkewBucket(HashJoinTable hashtable)
  * iterated by bucket natural order (array index);
  */
 static TupleTableSlot * ExecMJoinGetNextTuple(HashState * node) {
+
 	MJoinTable hashtable = (MJoinTable)node->hashtable;
+	MJoinBatchDesc batch = hashtable->batches[hashtable->curbatch];
+	uint32 hashvalue;
+	BufFile *bufFile = batch->batchFile;
+	TupleTableSlot *slot = node->ps.ps_ResultTupleSlot;
 
 
-	HashJoinTuple hashTuple = hashtable->bufferedBuckets;
 
 
 	/*
@@ -2132,35 +2116,12 @@ static TupleTableSlot * ExecMJoinGetNextTuple(HashState * node) {
 	 * If the tuple hashed to a skew bucket then scan the skew bucket
 	 * otherwise scan the standard hashtable bucket.
 	 */
+	ExecClearTuple(slot);
+	slot = ExecMJoinGetSavedTuple(bufFile,&hashvalue,slot);
+	if (!TupIsNull(slot))
+		ExecMHashTableInsert(hashtable->parent, hashtable, slot, hashvalue, false);
 
-
-
-	if (hashTuple != NULL) {
-		int			bucketno;
-		int			batchno;
-		TupleTableSlot *slot = node->ps.ps_ResultTupleSlot;
-		// set the enxt tuple as buffer head
-
-
-		ExecClearTuple(slot);
-		slot = ExecStoreMinimalTuple(HJTUPLE_MINTUPLE(hashTuple), slot, false);
-		// Insert it
-
-		hashtable->bufferedBuckets = hashTuple->next;
-		ExecHashGetBucketAndBatch((HashJoinTable)hashtable, hashTuple->hashvalue,
-									  &bucketno, &batchno);
-
-		hashTuple->next = hashtable->buckets[bucketno];
-		hashtable->buckets[bucketno] = hashTuple;
-		hashtable->nInserted++;
-		hashtable->nBuffered--;
-		return slot;
-
-	}
-
-	/*
-	 * no match
-	 */
-	return NULL;
+	return slot;
 
 }
+

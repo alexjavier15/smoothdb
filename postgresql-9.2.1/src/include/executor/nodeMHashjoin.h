@@ -25,10 +25,7 @@
 #include "nodes/execnodes.h"
 #include "storage/buffile.h"
 
-extern MJoinState *ExecInitMJoin(HashJoin *node, EState *estate, int eflags);
-extern TupleTableSlot *ExecMJoin(MJoinState *node);
-extern void ExecEndMJoin(MJoinState *node);
-extern void ExecReScanMHashJoin(MJoinState *node);
+
 
 
 typedef enum
@@ -42,10 +39,11 @@ typedef enum
 
 typedef struct MJoinBatchData{
 
-	BufFile *batchFile;
-	BufFile *savedFile;
-
-	int		nentries;
+	BufFile		*batchFile;
+	BufFile 	*savedFile;
+	Size		spaceUsed;		/* memory space currently used by tuples */
+	Size		spaceAllowed;	/* upper limit for space used */
+	int			nentries;
 
 
 }MJoinBatchData;
@@ -78,12 +76,18 @@ typedef struct MJoinTableData
 	/* ^ Alex Field above must be the same as HashJoinTableData  ^*/
 	FmgrInfo   *hashfunctions;	/* lookup data for hash functions */
 	MJoinBatchDesc   *batches; /* buffered virtual temp file per batch */
-	struct HashJoinTupleData *bufferedBuckets;
-	int 	nBuffered;
 	int     nInserted;
 	MJoinState *parent;
 	HashTableStatus status;
 }	MJoinTableData;
 
+extern MJoinState *ExecInitMJoin(HashJoin *node, EState *estate, int eflags);
+extern TupleTableSlot *ExecMJoin(MJoinState *node);
+extern void ExecEndMJoin(MJoinState *node);
+extern void ExecReScanMHashJoin(MJoinState *node);
+extern void ExecMHashJoinResetBatch(MJoinBatchDesc batch);
+TupleTableSlot *ExecMJoinGetSavedTuple( BufFile *file,
+						  uint32 *hashvalue,
+						  TupleTableSlot *tupleSlot);
 #endif /* NODEMHASHJOIN_H_ */
 

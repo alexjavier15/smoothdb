@@ -25,8 +25,6 @@
 #include "miscadmin.h"
 #include "utils/memutils.h"
 
-
-
 /*
  * States of the ExecHashJoin state machine
  */
@@ -39,27 +37,18 @@
 #define HJ_NEED_NEW_BATCH		7
 #define HJ_END					8
 
-
 #define OuterIsExhausted(node) ( node->mhj_OuterHashTable->status == MHJ_EXAHUSTED)
 
 #define InnerIsExhausted(node) ( node->mhj_InnerHashTable->status == MHJ_EXAHUSTED)
 
-static TupleTableSlot *ExecMJoinGetTuple(PlanState *hashNode,
-						MJoinTable hashtable,
-						MJoinState *hjstate,
-						uint32 *hashvalue,bool outer_tuple,
-						bool *isNotEmpty);
-static TupleTableSlot *ExecMJoinGetSavedTuple(MJoinState *hjstate,
-						  BufFile *file,
-						  uint32 *hashvalue,
-						  TupleTableSlot *tupleSlot);
+static TupleTableSlot *ExecMJoinGetTuple(PlanState *hashNode, MJoinTable hashtable,
+		MJoinState *hjstate, uint32 *hashvalue, bool outer_tuple, bool *isNotEmpty);
 
 static bool
 ExecMJoinNewBatch(MJoinState *hjstate);
 
 static bool
-ExecMJoinScanHashBucket(MJoinState *hjstate,
-				   ExprContext *econtext);
+ExecMJoinScanHashBucket(MJoinState *hjstate, ExprContext *econtext);
 
 static int nextState(MJoinState *node);
 /* ----------------------------------------------------------------
@@ -71,7 +60,7 @@ static int nextState(MJoinState *node);
  *			  the other one is "outer".
  * ----------------------------------------------------------------
  */
-static int nextState(MJoinState *node){
+static int nextState(MJoinState *node) {
 
 	switch (node->mhj_LastState) {
 
@@ -88,7 +77,6 @@ static int nextState(MJoinState *node){
 
 			}
 
-
 			break;
 		case HJ_NEED_NEW_INNER:
 
@@ -100,7 +88,6 @@ static int nextState(MJoinState *node){
 			}
 			if (!InnerIsExhausted(node)) {
 				//printf("Asking INNER \n");
-
 
 				return HJ_NEED_NEW_INNER;
 
@@ -114,26 +101,23 @@ static int nextState(MJoinState *node){
 
 	}
 
-
 	return HJ_NEED_NEW_BATCH;
 
-
 }
-TupleTableSlot *				/* return: a tuple or NULL */
-ExecMJoin(MJoinState *node)
-{
-	HashState  *innerHashNode;
-	HashState  *outerHashNode;
-	List	   *joinqual;
-	List	   *otherqual;
+TupleTableSlot * /* return: a tuple or NULL */
+ExecMJoin(MJoinState *node) {
+	HashState *innerHashNode;
+	HashState *outerHashNode;
+	List *joinqual;
+	List *otherqual;
 	ExprContext *econtext;
 	ExprDoneCond isDone;
 	MJoinTable outerHashtable;
 	MJoinTable innerHashtable;
 	TupleTableSlot *outerTupleSlot;
 	TupleTableSlot *innerTupleSlot;
-	uint32		hashvalue;
-	int			batchno;
+	uint32 hashvalue;
+	int batchno;
 	int outernbuckets;
 	int outernbatchs;
 	int innernbuckets;
@@ -148,7 +132,6 @@ ExecMJoin(MJoinState *node)
 	innerHashNode = (HashState *) innerPlanState(node);
 	outerHashNode = (HashState *) outerPlanState(node);
 
-
 	innerHashtable = node->mhj_InnerHashTable;
 	outerHashtable = node->mhj_OuterHashTable;
 	econtext = node->js.ps.ps_ExprContext;
@@ -158,8 +141,7 @@ ExecMJoin(MJoinState *node)
 	 * tuple (because there is a function-returning-set in the projection
 	 * expressions).  If so, try to project another one.
 	 */
-	if (node->js.ps.ps_TupFromTlist)
-	{
+	if (node->js.ps.ps_TupFromTlist) {
 		TupleTableSlot *result;
 
 		result = ExecProject(node->js.ps.ps_ProjInfo, &isDone);
@@ -179,12 +161,9 @@ ExecMJoin(MJoinState *node)
 	/*
 	 * run the hash join state machine
 	 */
-	for (;;)
-	{
-		switch (node->mhj_JoinState)
-		{
+	for (;;) {
+		switch (node->mhj_JoinState) {
 			case HJ_BUILD_HASHTABLE:
-
 
 				/*
 				 * First time through: build hash table for inner relation.
@@ -235,47 +214,58 @@ ExecMJoin(MJoinState *node)
 //				}
 //				else
 //					node->mhj_FirstOuterTupleSlot = NULL;
-
 				/*
 				 * create the inner hash table
 				 */
-				ExecChooseHashTableSize((outerPlan((Hash *) outerHashNode->ps.plan))->plan_rows, (outerPlan((Hash *) outerHashNode->ps.plan))->plan_width,
-						false, &outernbuckets, &outernbatchs, &nskew);
+				ExecChooseHashTableSize((outerPlan((Hash *) outerHashNode->ps.plan))->plan_rows,
+						(outerPlan((Hash *) outerHashNode->ps.plan))->plan_width,
+						false,
+						&outernbuckets,
+						&outernbatchs,
+						&nskew);
 
-				ExecChooseHashTableSize((outerPlan((Hash *) innerHashNode->ps.plan))->plan_rows, (outerPlan((Hash *) innerHashNode->ps.plan))->plan_width,
-						false, &innernbuckets, &innernbatchs, &nskew);
+				ExecChooseHashTableSize((outerPlan((Hash *) innerHashNode->ps.plan))->plan_rows,
+						(outerPlan((Hash *) innerHashNode->ps.plan))->plan_width,
+						false,
+						&innernbuckets,
+						&innernbatchs,
+						&nskew);
 
 				outernbuckets = Max(outernbuckets,innernbuckets);
-			    outernbatchs = Max(outernbatchs,innernbatchs);
+				outernbatchs = Max(outernbatchs,innernbatchs);
 
 				innerHashtable = ExecMHashTableCreate((Hash *) innerHashNode->ps.plan,
-												node->mhj_HashOperators,
-												false, false, outernbuckets,outernbatchs);
-
-
+						node->mhj_HashOperators,
+						false,
+						false,
+						outernbuckets,
+						outernbatchs);
 
 				node->mhj_InnerHashTable = innerHashtable;
 				innerHashtable->parent = node;
 				/*
 				 * create the  outer hash table
 				 */
-				outerHashtable = ExecMHashTableCreate((Hash *) outerHashNode->ps.plan, node->mhj_HashOperators,
-						false, true, outernbuckets,outernbatchs);
+				outerHashtable = ExecMHashTableCreate((Hash *) outerHashNode->ps.plan,
+						node->mhj_HashOperators,
+						false,
+						true,
+						outernbuckets,
+						outernbatchs);
 
 				node->mhj_OuterHashTable = outerHashtable;
 
 				outerHashtable->parent = node;
 
-				innerHashNode->hashtable = (HashJoinTable)innerHashtable;
+				innerHashNode->hashtable = (HashJoinTable) innerHashtable;
 
-				outerHashNode->hashtable =  (HashJoinTable)outerHashtable;
+				outerHashNode->hashtable = (HashJoinTable) outerHashtable;
 
 				/*
 				 * execute the Inner Hash node, to get the first inner tuple
 				 */
 
 				//(void) ExecProcNode((PlanState *) innerHashNode);
-
 				/*
 				 * If the inner relation is completely empty, and we're not
 				 * doing a left outer join, we can quit without scanning the
@@ -283,14 +273,11 @@ ExecMJoin(MJoinState *node)
 				 */
 				//if (innerHashtable->totalTuples == 0 && !HJ_FILL_OUTER(node))
 				//	return NULL;
-
-
 				/*
 				 * need to remember whether nbatch has increased since we
 				 * began scanning the outer relation
 				 */
 				//innerHashtable->nbatch_outstart = innerHashtable->nbatch;
-
 				/*
 				 * Reset OuterNotEmpty for scan.  (It's OK if we fetched a
 				 * tuple above, because ExecHashJoinOuterGetTuple will
@@ -305,8 +292,12 @@ ExecMJoin(MJoinState *node)
 			case HJ_NEED_NEW_INNER:
 				node->mhj_LastState = HJ_NEED_NEW_INNER;
 
-				innerTupleSlot = ExecMJoinGetTuple((PlanState *)innerHashNode,innerHashtable,
-						node,&hashvalue,false,&node->mhj_InnerNotEmpty);
+				innerTupleSlot = ExecMJoinGetTuple((PlanState *) innerHashNode,
+						innerHashtable,
+						node,
+						&hashvalue,
+						false,
+						&node->mhj_InnerNotEmpty);
 				/*
 				 * We don't have an inner tuple, try to get the next one
 				 */
@@ -317,10 +308,9 @@ ExecMJoin(MJoinState *node)
 
 					continue;
 				}
-				if (! innerHashtable->status == MHJ_BUFFERED)
+				if (!innerHashtable->status == MHJ_BUFFERED)
 
-				innerHashtable->status = MHJ_HASH;
-
+					innerHashtable->status = MHJ_HASH;
 
 				econtext->ecxt_innertuple = innerTupleSlot;
 				node->mhj_MatchedInner = false;
@@ -330,10 +320,12 @@ ExecMJoin(MJoinState *node)
 				 * hash table or skew hash table.
 				 */
 				node->mhj_CurHashValue = hashvalue;
-				ExecHashGetBucketAndBatch((HashJoinTable)outerHashtable, hashvalue, &node->mhj_CurBucketNo, &batchno);
+				ExecHashGetBucketAndBatch((HashJoinTable) outerHashtable,
+						hashvalue,
+						&node->mhj_CurBucketNo,
+						&batchno);
 
 				node->mhj_CurTuple = NULL;
-
 
 				/*
 				 * The tuple might not belong to the current batch (where
@@ -343,15 +335,12 @@ ExecMJoin(MJoinState *node)
 				if (batchno != innerHashtable->curbatch)
 					continue;
 
-
 				/* OK, let's scan the bucket for matches */
 
 				//printf("Go to scan OUTER \n");
-
 				node->mhj_ScanHashTable = outerHashtable;
 				node->mhj_ScanEcxt_slot = &econtext->ecxt_outertuple;
 				node->mhj_JoinState = HJ_SCAN_BUCKET;
-
 
 				break;
 			case HJ_NEED_NEW_OUTER:
@@ -360,20 +349,27 @@ ExecMJoin(MJoinState *node)
 				 * We don't have an outer tuple, try to get the next one
 				 */
 
-				outerTupleSlot = ExecMJoinGetTuple((PlanState *)outerHashNode,outerHashtable,
-						node,&hashvalue,true,&node->mhj_OuterNotEmpty);
+				outerTupleSlot = ExecMJoinGetTuple((PlanState *) outerHashNode,
+						outerHashtable,
+						node,
+						&hashvalue,
+						true,
+						&node->mhj_OuterNotEmpty);
 
-				if (TupIsNull(outerTupleSlot))
-				{
+				if (TupIsNull(outerTupleSlot)) {
 					outerHashtable->status = MHJ_EXAHUSTED;
 					/* end of batch, or maybe whole join */
 					node->mhj_JoinState = nextState(node);
 					continue;
 				}
-				if (! outerHashtable->status == MHJ_BUFFERED)
+				if (!outerHashtable->status == MHJ_BUFFERED)
 
 					outerHashtable->status = MHJ_HASH;
-		    	econtext->ecxt_outertuple = outerTupleSlot;
+
+//				if (outerHashtable->status == MHJ_BUFFERED){
+//					printf("buffered slot .. ");
+//				}
+				econtext->ecxt_outertuple = outerTupleSlot;
 				node->mhj_MatchedOuter = false;
 
 				/*
@@ -381,11 +377,12 @@ ExecMJoin(MJoinState *node)
 				 * hash table or skew hash table.
 				 */
 				node->mhj_CurHashValue = hashvalue;
-				ExecHashGetBucketAndBatch((HashJoinTable)innerHashtable, hashvalue, &node->mhj_CurBucketNo, &batchno);
-
+				ExecHashGetBucketAndBatch((HashJoinTable) innerHashtable,
+						hashvalue,
+						&node->mhj_CurBucketNo,
+						&batchno);
 
 				node->mhj_CurTuple = NULL;
-
 
 				/*
 				 * The tuple might not belong to the current batch (where
@@ -398,15 +395,12 @@ ExecMJoin(MJoinState *node)
 				/* OK, let's scan the bucket for matches */
 
 				//printf("Go to scan INNER \n");
-
 				node->mhj_JoinState = HJ_SCAN_BUCKET;
 				node->mhj_ScanEcxt_slot = &econtext->ecxt_innertuple;
 				node->mhj_ScanHashTable = innerHashtable;
 
-
 				/* FALL THRU */
 				break;
-
 
 			case HJ_SCAN_BUCKET:
 
@@ -421,14 +415,12 @@ ExecMJoin(MJoinState *node)
 				 * Scan the selected hash bucket for matches to current outer
 				 */
 				node->mhj_JoinState = nextState(node);
-				if (!ExecMJoinScanHashBucket(node, econtext))
-				{
+				if (!ExecMJoinScanHashBucket(node, econtext)) {
 					/* end of batch, or maybe whole join */
-
 
 					continue;
 				}
-				node->mhj_JoinState =HJ_SCAN_BUCKET;
+				node->mhj_JoinState = HJ_SCAN_BUCKET;
 
 				/*
 				 * We've got a match, but still need to test non-hashed quals.
@@ -442,8 +434,7 @@ ExecMJoin(MJoinState *node)
 				 * Only the joinquals determine tuple match status, but all
 				 * quals must pass to actually return the tuple.
 				 */
-				if (joinqual == NIL || ExecQual(joinqual, econtext, false))
-				{
+				if (joinqual == NIL || ExecQual(joinqual, econtext, false)) {
 					node->mhj_MatchedOuter = true;
 					HeapTupleHeaderSetMatch(HJTUPLE_MINTUPLE(node->mhj_CurTuple));
 
@@ -461,26 +452,20 @@ ExecMJoin(MJoinState *node)
 //					if (node->js.jointype == JOIN_SEMI)
 //						node->mhj_JoinState = HJ_NEED_NEW_OUTER;
 
-					if (otherqual == NIL ||
-						ExecQual(otherqual, econtext, false))
-					{
+					if (otherqual == NIL || ExecQual(otherqual, econtext, false)) {
 						TupleTableSlot *result;
 
 						result = ExecProject(node->js.ps.ps_ProjInfo, &isDone);
 
-						if (isDone != ExprEndResult)
-						{
-							node->js.ps.ps_TupFromTlist =
-								(isDone == ExprMultipleResult);
+						if (isDone != ExprEndResult) {
+							node->js.ps.ps_TupFromTlist = (isDone == ExprMultipleResult);
 
 							node->js.ps.instrument->ntuples++;
 							return result;
 						}
-					}
-					else
+					} else
 						InstrCountFiltered2(node, 1);
-				}
-				else
+				} else
 					InstrCountFiltered1(node, 1);
 				break;
 
@@ -489,18 +474,16 @@ ExecMJoin(MJoinState *node)
 				/*
 				 * Try to advance to next batch.  Done if there are no more.
 				 */
-				printf("produced tuples : %0.f \n",node->js.ps.instrument->ntuples);
-				if (!ExecMJoinNewBatch(node) )
-					return NULL;	/* end of join */
+				printf("produced tuples : %0.f \n", node->js.ps.instrument->ntuples);
+				if (!ExecMJoinNewBatch(node))
+					return NULL; /* end of join */
 				node->mhj_JoinState = HJ_NEED_NEW_INNER;
-
 
 				break;
 			case HJ_END:
 				return NULL;
 			default:
-				elog(ERROR, "unrecognized hashjoin state: %d",
-					 (int) node->mhj_JoinState);
+				elog(ERROR, "unrecognized hashjoin state: %d", (int) node->mhj_JoinState);
 				break;
 		}
 	}
@@ -514,15 +497,14 @@ ExecMJoin(MJoinState *node)
  * ----------------------------------------------------------------
  */
 MJoinState *
-ExecInitMJoin(HashJoin *node, EState *estate, int eflags)
-{
+ExecInitMJoin(HashJoin *node, EState *estate, int eflags) {
 	MJoinState *hjstate;
-	Hash	   *outerHashNode;
-	Hash	   *innerHashNode;
-	List	   *lclauses;
-	List	   *rclauses;
-	List	   *hoperators;
-	ListCell   *l;
+	Hash *outerHashNode;
+	Hash *innerHashNode;
+	List *lclauses;
+	List *rclauses;
+	List *hoperators;
+	ListCell *l;
 
 	/* check for unsupported flags */
 	Assert(!(eflags & (EXEC_FLAG_BACKWARD | EXEC_FLAG_MARK)));
@@ -544,19 +526,14 @@ ExecInitMJoin(HashJoin *node, EState *estate, int eflags)
 	/*
 	 * initialize child expressions
 	 */
-	hjstate->js.ps.targetlist = (List *)
-		ExecInitExpr((Expr *) node->join.plan.targetlist,
-					 (PlanState *) hjstate);
-	hjstate->js.ps.qual = (List *)
-		ExecInitExpr((Expr *) node->join.plan.qual,
-					 (PlanState *) hjstate);
+	hjstate->js.ps.targetlist = (List *) ExecInitExpr((Expr *) node->join.plan.targetlist,
+			(PlanState *) hjstate);
+	hjstate->js.ps.qual = (List *) ExecInitExpr((Expr *) node->join.plan.qual,
+			(PlanState *) hjstate);
 	hjstate->js.jointype = node->join.jointype;
-	hjstate->js.joinqual = (List *)
-		ExecInitExpr((Expr *) node->join.joinqual,
-					 (PlanState *) hjstate);
-	hjstate->hashclauses = (List *)
-		ExecInitExpr((Expr *) node->hashclauses,
-					 (PlanState *) hjstate);
+	hjstate->js.joinqual = (List *) ExecInitExpr((Expr *) node->join.joinqual,
+			(PlanState *) hjstate);
+	hjstate->hashclauses = (List *) ExecInitExpr((Expr *) node->hashclauses, (PlanState *) hjstate);
 
 	/*
 	 * initialize child nodes
@@ -571,13 +548,10 @@ ExecInitMJoin(HashJoin *node, EState *estate, int eflags)
 	outerPlanState(hjstate) = ExecInitNode((Plan *) outerHashNode, estate, eflags);
 	innerPlanState(hjstate) = ExecInitNode((Plan *) innerHashNode, estate, eflags);
 
-
-
 	/*
 	 * tuple table initialization
 	 */
 	ExecInitResultTupleSlot(estate, &hjstate->js.ps);
-
 
 	//Mjoin: inner tuple slot
 
@@ -610,7 +584,6 @@ ExecInitMJoin(HashJoin *node, EState *estate, int eflags)
 //			elog(ERROR, "unrecognized join type: %d",
 //				 (int) node->join.jointype);
 //	}
-
 	/*
 	 * now for some voodoo.  our temporary tuple slot is actually the result
 	 * tuple slot of the Hash node (which is our inner plan).  we can do this
@@ -619,7 +592,7 @@ ExecInitMJoin(HashJoin *node, EState *estate, int eflags)
 	 * the hash table.	-cim 6/9/91
 	 */
 	{
-		HashState  *hashstate = (HashState *) outerPlanState(hjstate);
+		HashState *hashstate = (HashState *) outerPlanState(hjstate);
 		hjstate->mhj_OuterTupleSlot = hashstate->ps.ps_ResultTupleSlot;
 
 		hashstate = (HashState *) innerPlanState(hjstate);
@@ -632,11 +605,9 @@ ExecInitMJoin(HashJoin *node, EState *estate, int eflags)
 	ExecAssignResultTypeFromTL(&hjstate->js.ps);
 	ExecAssignProjectionInfo(&hjstate->js.ps, NULL);
 
-	ExecSetSlotDescriptor(hjstate->mhj_OuterTupleSlot,
-						  ExecGetResultType(outerPlanState(hjstate)));
+	ExecSetSlotDescriptor(hjstate->mhj_OuterTupleSlot, ExecGetResultType(outerPlanState(hjstate)));
 
-	ExecSetSlotDescriptor(hjstate->mhj_InnerTupleSlot,
-							  ExecGetResultType(outerPlanState(hjstate)));
+	ExecSetSlotDescriptor(hjstate->mhj_InnerTupleSlot, ExecGetResultType(outerPlanState(hjstate)));
 
 	/*
 	 * initialize hash-specific info
@@ -646,9 +617,8 @@ ExecInitMJoin(HashJoin *node, EState *estate, int eflags)
 
 	hjstate->mhj_CurHashValue = 0;
 	hjstate->mhj_CurBucketNo = 0;
-	hjstate->mhj_NextBucketNo =0;
+	hjstate->mhj_NextBucketNo = 0;
 	hjstate->mhj_CurTuple = NULL;
-
 
 	/*
 	 * Deconstruct the hash clauses into outer and inner argument values, so
@@ -659,10 +629,9 @@ ExecInitMJoin(HashJoin *node, EState *estate, int eflags)
 	lclauses = NIL;
 	rclauses = NIL;
 	hoperators = NIL;
-	foreach(l, hjstate->hashclauses)
-	{
+	foreach(l, hjstate->hashclauses) {
 		FuncExprState *fstate = (FuncExprState *) lfirst(l);
-		OpExpr	   *hclause;
+		OpExpr *hclause;
 
 		Assert(IsA(fstate, FuncExprState));
 		hclause = (OpExpr *) fstate->xprstate.expr;
@@ -696,33 +665,29 @@ ExecInitMJoin(HashJoin *node, EState *estate, int eflags)
  *		clean up routine for HashJoin node
  * ----------------------------------------------------------------
  */
-void
-ExecEndMJoin(MJoinState *node)
-{
+void ExecEndMJoin(MJoinState *node) {
 	int bno = 0;
 	/*
 	 * Free hash table
 	 */
 	MemoryContextStats(node->mhj_InnerHashTable->hashCxt);
 	MemoryContextStats(node->mhj_OuterHashTable->hashCxt);
-	for(;bno < node->mhj_InnerHashTable->nbatch; bno++){
+	for (; bno < node->mhj_InnerHashTable->nbatch; bno++) {
 
 		printf("Info pour inner ;\n");
-		printf ("nentries : %d \n", node->mhj_InnerHashTable->batches[bno]->nentries);
-		 printf("Info pour outer ;\n");
-		 printf ("nentries : %d \n",node->mhj_OuterHashTable->batches[bno]->nentries);
+		printf("nentries : %d \n", node->mhj_InnerHashTable->batches[bno]->nentries);
+		printf("Info pour outer ;\n");
+		printf("nentries : %d \n", node->mhj_OuterHashTable->batches[bno]->nentries);
 
 	}
 
 	printf(" \nENDING MJOIN");
 	fflush(stdout);
-	if (node->mhj_InnerHashTable)
-	{
+	if (node->mhj_InnerHashTable) {
 		ExecMHashTableDestroy(node->mhj_InnerHashTable);
 
 	}
-	if (node->mhj_OuterHashTable)
-	{
+	if (node->mhj_OuterHashTable) {
 		ExecMHashTableDestroy(node->mhj_OuterHashTable);
 
 	}
@@ -812,47 +777,49 @@ ExecMJoinGetTuple(PlanState *hashNode, MJoinTable hashtable, MJoinState *hjstate
  *
  * Returns true if successful, false if there are no more batches.
  */
-static bool
-ExecMJoinNewBatch(MJoinState *hjstate)
-{
+static bool ExecMJoinNewBatch(MJoinState *hjstate) {
 	MJoinTable innerhashtable = hjstate->mhj_InnerHashTable;
 	MJoinTable outerhashtable = hjstate->mhj_OuterHashTable;
-	int			nbatch;
-	int			curbatch;
-	BufFile    *innerFile;
-	BufFile    *outerFile;
-	BufFile    *savedInnerFile;
-	BufFile    *savedOuterFile;
+	int nbatch;
+	int curbatch;
+	BufFile *innerFile;
+	BufFile *outerFile;
+	BufFile *savedInnerFile;
+	BufFile *savedOuterFile;
 	TupleTableSlot *slot;
-	uint32		hashvalue;
-
-
+	uint32 hashvalue;
+	MJoinBatchDesc innerBatch;
+	MJoinBatchDesc outerBatch;
 
 	nbatch = innerhashtable->nbatch;
 	curbatch = innerhashtable->curbatch;
-	printf("Num entries in inner %.0f\n", innerhashtable->totalTuples);
-			printf("Num entries in outer %.0f\n", outerhashtable->totalTuples);
-			printf("Num entries Buffered  inner %d\n", innerhashtable->nBuffered);
-			printf("Num entries Buffered outer  %d\n", outerhashtable->nBuffered);
-			printf("Num entries Already Scanned  inner%d\n", innerhashtable->nInserted);
-			printf("Num entries  Already Scanned  outer  %d\n", outerhashtable->nInserted);
-	printf("\nNew batch\n");
 
-	if (curbatch > 0)
-	{
+	printf("\n GEtting new Batch ! \n ");
+	printf("Num entries in inner %.0f\n", innerhashtable->totalTuples);
+	printf("Num entries in outer %.0f\n", outerhashtable->totalTuples);
+
+	printf("Num entries Already Scanned  inner%d\n", innerhashtable->nInserted);
+	printf("Num entries  Already Scanned  outer  %d\n", outerhashtable->nInserted);
+	printf("\nNew batch\n");
+	innerBatch = innerhashtable->batches[curbatch];
+	outerBatch = outerhashtable->batches[curbatch];
+
+
+	if (curbatch > 0) {
 		/*
 		 * We no longer need the previous outer batch file; close it right
 		 * away to free disk space.
 		 */
-		if (innerhashtable->batches[curbatch]->batchFile)
-			BufFileClose(innerhashtable->batches[curbatch]->batchFile);
-		innerhashtable->batches[curbatch]->batchFile = NULL;
+		if (innerBatch->batchFile)
+			BufFileClose(innerBatch->batchFile);
 
-		if (outerhashtable->batches[curbatch]->batchFile)
-					BufFileClose(outerhashtable->batches[curbatch]->batchFile);
-		outerhashtable->batches[curbatch]->batchFile = NULL;
+		innerBatch->batchFile = NULL;
+
+
+		if (outerBatch->batchFile)
+			BufFileClose(outerBatch->batchFile);
+		outerBatch->batchFile = NULL;
 	}
-
 
 	/*
 	 * We can always skip over any batches that are completely empty on both
@@ -872,34 +839,36 @@ ExecMJoinNewBatch(MJoinState *hjstate)
 	 * need to be reassigned.
 	 */
 	curbatch++;
-	while (curbatch < nbatch &&
-		   (innerhashtable->batches[curbatch] == NULL ||
-				   outerhashtable->batches[curbatch] == NULL))
-	{
+	while (curbatch < nbatch
+			&& (innerBatch == NULL
+					|| outerBatch == NULL)) {
 
-			/* must process due to rule 1 */
-		if (innerhashtable->batches[curbatch]->batchFile &&
-			nbatch != innerhashtable->nbatch_original)
-			break;				/* must process due to rule 2 */
-		if (outerhashtable->batches[curbatch]->batchFile &&
-			nbatch != innerhashtable->nbatch_outstart)
-			break;				/* must process due to rule 3 */
+		/* must process due to rule 1 */
+		if (innerBatch->batchFile
+				&& nbatch != innerhashtable->nbatch_original)
+			break; /* must process due to rule 2 */
+		if (outerBatch->batchFile
+				&& nbatch != innerhashtable->nbatch_outstart)
+			break; /* must process due to rule 3 */
 		/* We can ignore this batch. */
 		/* Release associated temp files right away. */
-		if (innerhashtable->batches[curbatch]->batchFile)
-			BufFileClose(innerhashtable->batches[curbatch]->batchFile);
-		innerhashtable->batches[curbatch]->batchFile = NULL;
-		if (outerhashtable->batches[curbatch]->batchFile)
-			BufFileClose(outerhashtable->batches[curbatch]->batchFile);
-		outerhashtable->batches[curbatch]->batchFile = NULL;
+		if (innerBatch->batchFile)
+			BufFileClose(innerBatch->batchFile);
+		innerBatch->batchFile = NULL;
+		if (outerBatch->batchFile)
+			BufFileClose(outerBatch->batchFile);
+		outerBatch->batchFile = NULL;
 		curbatch++;
 	}
 
 	if (curbatch >= nbatch)
-		return false;			/* no more batches */
+		return false; /* no more batches */
 
 	innerhashtable->curbatch = curbatch;
 	outerhashtable->curbatch = curbatch;
+
+	innerBatch = innerhashtable->batches[curbatch];
+	outerBatch = outerhashtable->batches[curbatch];
 
 	/*
 	 * Reload the hash table with the new inner batch (which could be empty)
@@ -907,138 +876,128 @@ ExecMJoinNewBatch(MJoinState *hjstate)
 	ExecMHashTableReset(innerhashtable);
 	ExecMHashTableReset(outerhashtable);
 
-	innerFile = innerhashtable->batches[curbatch]->batchFile;
-	outerFile = outerhashtable->batches[curbatch]->batchFile;
+	innerFile = innerBatch->batchFile;
+	outerFile = outerBatch->batchFile;
 
-	savedInnerFile = innerhashtable->batches[curbatch]->savedFile;
-	savedOuterFile = outerhashtable->batches[curbatch]->savedFile;
+	savedInnerFile = innerBatch->savedFile;
+	savedOuterFile = outerBatch->savedFile;
 
 
-	if (innerFile != NULL)
-	{
-		if (BufFileSeek(innerFile, 0, 0L, SEEK_SET))
+	//check if we are about to split;
+
+
+	innerBatch->nentries= 0;
+	outerBatch->nentries = 0;
+	if( innerBatch->spaceUsed > innerhashtable->spaceAllowed ||
+			outerBatch->spaceUsed > outerhashtable->spaceAllowed){
+
+		ExecMHashIncreaseNumBatches(hjstate);
+		//rewind
+		innerhashtable->curbatch--;
+		return   ExecMJoinNewBatch(hjstate);
+	}
+
+
+
+	if (savedInnerFile != NULL) {
+		if (BufFileSeek(savedInnerFile, 0, 0L, SEEK_SET))
 			ereport(ERROR,
-					(errcode_for_file_access(),
-				   errmsg("could not rewind hash-join temporary file: %m")));
+					(errcode_for_file_access(), errmsg("could not rewind hash-join temporary file: %m")));
 
-		while ((slot = ExecMJoinGetSavedTuple(hjstate,
-												 innerFile,
-												 &hashvalue,
-												 hjstate->mhj_InnerTupleSlot)))
-		{
+		while ((slot = ExecMJoinGetSavedTuple(savedInnerFile,
+				&hashvalue,
+				hjstate->mhj_InnerTupleSlot))) {
 			/*
 			 * NOTE: some tuples may be sent to future batches.  Also, it is
 			 * possible for hashtable->nbatch to be increased here!
 			 */
-			ExecMHashTableInsert(hjstate ,innerhashtable, slot, hashvalue, true);
+			ExecMHashTableInsert(hjstate, innerhashtable, slot, hashvalue, true);
 		}
 
-
+		/*
+		 * after we build the hash table, the inner batch file is no longer
+		 * needed
+		 */
 
 	}
-	if (savedInnerFile != NULL)
-		{
-			if (BufFileSeek(savedInnerFile, 0, 0L, SEEK_SET))
-				ereport(ERROR,
-						(errcode_for_file_access(),
-					   errmsg("could not rewind hash-join temporary file: %m")));
 
-			while ((slot = ExecMJoinGetSavedTuple(hjstate,
-													savedInnerFile,
-													 &hashvalue,
-													 hjstate->mhj_InnerTupleSlot)))
-			{
-				/*
-				 * NOTE: some tuples may be sent to future batches.  Also, it is
-				 * possible for hashtable->nbatch to be increased here!
-				 */
-				ExecMHashTableInsert(hjstate ,innerhashtable, slot, hashvalue, false);
-			}
+	if (innerFile != NULL) {
+		if (BufFileSeek(innerFile, 0, 0L, SEEK_SET))
+			ereport(ERROR,
+					(errcode_for_file_access(), errmsg("could not rewind hash-join temporary file: %m")));}
 
-			/*
-			 * after we build the hash table, the inner batch file is no longer
-			 * needed
-			 */
+//		while ((slot = ExecMJoinGetSavedTuple(innerFile, &hashvalue, hjstate->mhj_InnerTupleSlot))) {
+//			/*
+//			 * NOTE: some tuples may be sent to future batches.  Also, it is
+//			 * possible for hashtable->nbatch to be increased here!
+//			 */
+//			ExecMHashTableInsert(hjstate, innerhashtable, slot, hashvalue, true);
+//		}
+//
+//	}
 
-
-		}
-
-	if(savedInnerFile)
+	if (savedInnerFile)
 		BufFileClose(savedInnerFile);
-	if(innerFile)
-		BufFileClose(innerFile);
-	innerhashtable->batches[curbatch]->batchFile=NULL;
-	innerhashtable->batches[curbatch]->savedFile=NULL;
+//	if (innerFile)
+//		BufFileClose(innerFile);
+//	innerBatch->batchFile = NULL;
+	innerBatch->savedFile = NULL;
 	/*
 	 * Rewind outer batch file (if present), so that we can start reading it.
 	 */
+	if (outerFile != NULL) {
+		if (BufFileSeek(outerFile, 0, 0L, SEEK_SET))
+			ereport(ERROR,
+					(errcode_for_file_access(), errmsg("could not rewind hash-join temporary file: %m")));}
+//
+//		while ((slot = ExecMJoinGetSavedTuple(outerFile, &hashvalue, hjstate->mhj_OuterTupleSlot))) {
+//			/*
+//			 * NOTE: some tuples may be sent to future batches.  Also, it is
+//			 * possible for hashtable->nbatch to be increased here!
+//			 */
+//			ExecMHashTableInsert(hjstate, outerhashtable, slot, hashvalue, true);
+//		}
+//
+//	}
+	if (savedOuterFile != NULL) {
+		if (BufFileSeek(savedOuterFile, 0, 0L, SEEK_SET))
+			ereport(ERROR,
+					(errcode_for_file_access(),
+							errmsg("could not rewind hash-join temporary file: %m")));
 
-	if (outerFile != NULL)
-		{
-			if (BufFileSeek(outerFile, 0, 0L, SEEK_SET))
-				ereport(ERROR,
-						(errcode_for_file_access(),
-					   errmsg("could not rewind hash-join temporary file: %m")));
-
-			while ((slot = ExecMJoinGetSavedTuple(hjstate,
-													outerFile,
-													 &hashvalue,
-													 hjstate->mhj_OuterTupleSlot)))
-			{
-				/*
-				 * NOTE: some tuples may be sent to future batches.  Also, it is
-				 * possible for hashtable->nbatch to be increased here!
-				 */
-				ExecMHashTableInsert(hjstate ,outerhashtable, slot, hashvalue, true);
-			}
-
-
-
+		while ((slot = ExecMJoinGetSavedTuple(savedOuterFile,
+				&hashvalue,
+				hjstate->mhj_OuterTupleSlot))) {
+			/*
+			 * NOTE: some tuples may be sent to future batches.  Also, it is
+			 * possible for hashtable->nbatch to be increased here!
+			 */
+			ExecMHashTableInsert(hjstate, outerhashtable, slot, hashvalue, true);
 		}
-		if (savedOuterFile != NULL)
-			{
-				if (BufFileSeek(savedOuterFile, 0, 0L, SEEK_SET))
-					ereport(ERROR,
-							(errcode_for_file_access(),
-						   errmsg("could not rewind hash-join temporary file: %m")));
 
-				while ((slot = ExecMJoinGetSavedTuple(hjstate,
-														savedOuterFile,
-														 &hashvalue,
-														 hjstate->mhj_OuterTupleSlot)))
-				{
-					/*
-					 * NOTE: some tuples may be sent to future batches.  Also, it is
-					 * possible for hashtable->nbatch to be increased here!
-					 */
-					ExecMHashTableInsert(hjstate ,outerhashtable, slot, hashvalue, false);
-				}
+		/*
+		 * after we build the hash table, the inner batch file is no longer
+		 * needed
+		 */
 
-				/*
-				 * after we build the hash table, the inner batch file is no longer
-				 * needed
-				 */
+	}
 
-			}
-		if(savedOuterFile)
-			BufFileClose(savedOuterFile);
+	if (savedOuterFile)
+		BufFileClose(savedOuterFile);
 
-		if(outerFile)
-			BufFileClose(outerFile);
+//	if (outerFile)
+//		BufFileClose(outerFile);
+//
+//	outerBatch->batchFile = NULL;
+	outerBatch->savedFile = NULL;
 
-		outerhashtable->batches[curbatch]->batchFile=NULL;
-		outerhashtable->batches[curbatch]->savedFile=NULL;
-		outerhashtable->status = MHJ_BUFFERED;
-		innerhashtable->status = MHJ_BUFFERED;
-		hjstate->mhj_NextInnerTuple = innerhashtable->bufferedBuckets;
-		hjstate->mhj_NextOuterTuple = outerhashtable->bufferedBuckets;
-		printf("Num entries in inner %.0f\n", innerhashtable->totalTuples);
-		printf("Num entries in outer %.0f\n", outerhashtable->totalTuples);
-		printf("Num entries Buffered  inner %d\n", innerhashtable->nBuffered);
-		printf("Num entries Buffered outer  %d\n", outerhashtable->nBuffered);
-		printf("Num entries Already Scanned  inner%d\n", innerhashtable->nInserted);
-		printf("Num entries  Already Scanned  outer  %d\n", outerhashtable->nInserted);
-		return true;
+	outerhashtable->status = MHJ_BUFFERED;
+	innerhashtable->status = MHJ_BUFFERED;
+	printf("Num entries in inner %.0f\n", innerhashtable->totalTuples);
+	printf("Num entries in outer %.0f\n", outerhashtable->totalTuples);
+	printf("Num entries Already Scanned  inner%d\n", innerhashtable->nInserted);
+	printf("Num entries  Already Scanned  outer  %d\n", outerhashtable->nInserted);
+	return true;
 
 }
 
@@ -1053,15 +1012,11 @@ ExecMJoinNewBatch(MJoinState *hjstate)
  * context, not in a shorter-lived context; else the temp file buffers
  * will get messed up.
  */
-void
-ExecMJoinSaveTuple(MinimalTuple tuple, uint32 hashvalue,
-					  BufFile **fileptr)
-{
-	BufFile    *file = *fileptr;
-	size_t		written;
+void ExecMJoinSaveTuple(MinimalTuple tuple, uint32 hashvalue, BufFile **fileptr) {
+	BufFile *file = *fileptr;
+	size_t written;
 
-	if (file == NULL)
-	{
+	if (file == NULL) {
 		/* First write to this batch file, so open it. */
 		file = BufFileCreateTemp(false);
 		*fileptr = file;
@@ -1070,14 +1025,12 @@ ExecMJoinSaveTuple(MinimalTuple tuple, uint32 hashvalue,
 	written = BufFileWrite(file, (void *) &hashvalue, sizeof(uint32));
 	if (written != sizeof(uint32))
 		ereport(ERROR,
-				(errcode_for_file_access(),
-				 errmsg("could not write to hash-join temporary file: %m")));
+				(errcode_for_file_access(), errmsg("could not write to hash-join temporary file: %m")));
 
 	written = BufFileWrite(file, (void *) tuple, tuple->t_len);
 	if (written != tuple->t_len)
 		ereport(ERROR,
-				(errcode_for_file_access(),
-				 errmsg("could not write to hash-join temporary file: %m")));
+				(errcode_for_file_access(), errmsg("could not write to hash-join temporary file: %m")));
 }
 
 /*
@@ -1087,14 +1040,10 @@ ExecMJoinSaveTuple(MinimalTuple tuple, uint32 hashvalue,
  * On success, *hashvalue is set to the tuple's hash value, and the tuple
  * itself is stored in the given slot.
  */
-static TupleTableSlot *
-ExecMJoinGetSavedTuple(MJoinState *hjstate,
-						  BufFile *file,
-						  uint32 *hashvalue,
-						  TupleTableSlot *tupleSlot)
-{
-	uint32		header[2];
-	size_t		nread;
+TupleTableSlot *
+ExecMJoinGetSavedTuple(BufFile *file, uint32 *hashvalue, TupleTableSlot *tupleSlot) {
+	uint32 header[2];
+	size_t nread;
 	MinimalTuple tuple;
 
 	/*
@@ -1102,33 +1051,41 @@ ExecMJoinGetSavedTuple(MJoinState *hjstate,
 	 * we can read them both in one BufFileRead() call without any type
 	 * cheating.
 	 */
+	if(file == NULL){
+		ExecClearTuple(tupleSlot);
+		return NULL;
+	}
+
 	nread = BufFileRead(file, (void *) header, sizeof(header));
-	if (nread == 0)				/* end of file */
+	if (nread == 0) /* end of file */
 	{
 		ExecClearTuple(tupleSlot);
 		return NULL;
 	}
 	if (nread != sizeof(header))
 		ereport(ERROR,
-				(errcode_for_file_access(),
-				 errmsg("could not read from hash-join temporary file: %m")));
+				(errcode_for_file_access(), errmsg("could not read from hash-join temporary file: %m")));
 	*hashvalue = header[0];
 	tuple = (MinimalTuple) palloc(header[1]);
 	tuple->t_len = header[1];
 	nread = BufFileRead(file,
-						(void *) ((char *) tuple + sizeof(uint32)),
-						header[1] - sizeof(uint32));
+			(void *) ((char *) tuple + sizeof(uint32)),
+			header[1] - sizeof(uint32));
 	if (nread != header[1] - sizeof(uint32))
 		ereport(ERROR,
-				(errcode_for_file_access(),
-				 errmsg("could not read from hash-join temporary file: %m")));
+				(errcode_for_file_access(), errmsg("could not read from hash-join temporary file: %m")));
 	return ExecStoreMinimalTuple(tuple, tupleSlot, true);
 }
 
+void ExecMHashJoinResetBatch(MJoinBatchDesc batch) {
 
-void
-ExecReScanMHashJoin(MJoinState *node)
-{
+	batch->batchFile = NULL;
+	batch->nentries = 0;
+	batch->savedFile = NULL;
+	batch->spaceAllowed = 0;
+	batch->spaceUsed = 0;
+}
+void ExecReScanMHashJoin(MJoinState *node) {
 //	/*
 //	 * In a multi-batch join, we currently have to do rescans the hard way,
 //	 * primarily because batch temp files may have already been released. But
@@ -1198,16 +1155,12 @@ ExecReScanMHashJoin(MJoinState *node)
 //		ExecReScan(node->js.ps.lefttree);
 }
 
-static bool
-ExecMJoinScanHashBucket(MJoinState *hjstate,
-				   ExprContext *econtext)
-{
-	List	   *hjclauses = hjstate->hashclauses;
+static bool ExecMJoinScanHashBucket(MJoinState *hjstate, ExprContext *econtext) {
+	List *hjclauses = hjstate->hashclauses;
 	MJoinTable hashtable = hjstate->mhj_ScanHashTable;
 	bool test = false;
 	HashJoinTuple hashTuple = hjstate->mhj_CurTuple;
-	uint32		hashvalue = hjstate->mhj_CurHashValue;
-
+	uint32 hashvalue = hjstate->mhj_CurHashValue;
 
 	/*
 	 * hj_CurTuple is the address of the tuple last returned from the current
@@ -1221,23 +1174,18 @@ ExecMJoinScanHashBucket(MJoinState *hjstate,
 	else
 		hashTuple = hashtable->buckets[hjstate->mhj_CurBucketNo];
 
-	while (hashTuple != NULL)
-	{
-		if (hashTuple->hashvalue == hashvalue)
-		{
+	while (hashTuple != NULL) {
+		if (hashTuple->hashvalue == hashvalue) {
 			TupleTableSlot *nexttuple = *(hjstate->mhj_ScanEcxt_slot);
 
 			/* insert hashtable's tuple into exec slot so ExecQual sees it */
-			nexttuple = ExecStoreMinimalTuple(HJTUPLE_MINTUPLE(hashTuple),
-											nexttuple,
-											 false);	/* do not pfree */
+			nexttuple = ExecStoreMinimalTuple(HJTUPLE_MINTUPLE(hashTuple), nexttuple, false); /* do not pfree */
 			*(hjstate->mhj_ScanEcxt_slot) = nexttuple;
 
 			/* reset temp memory each time to avoid leaks from qual expr */
 			ResetExprContext(econtext);
 
-			if (ExecQual(hjclauses, econtext, false))
-			{
+			if (ExecQual(hjclauses, econtext, false)) {
 				hjstate->mhj_CurTuple = hashTuple;
 				return true;
 			}
@@ -1245,7 +1193,6 @@ ExecMJoinScanHashBucket(MJoinState *hjstate,
 
 		hashTuple = hashTuple->next;
 	}
-
 
 	/*
 	 * no match

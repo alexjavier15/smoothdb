@@ -398,6 +398,12 @@ build_join_rel(PlannerInfo *root,
 	 */
 	restrictlist = build_joinrel_restrictlist(root, joinrel,
 											  outer_rel, inner_rel);
+	if(bms_num_members(joinrel->relids) == 2){
+		pprint(restrictlist);
+
+
+	}
+
 	if (restrictlist_ptr)
 		*restrictlist_ptr = restrictlist;
 	build_joinrel_joinlist(joinrel, outer_rel, inner_rel);
