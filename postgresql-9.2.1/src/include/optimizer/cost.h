@@ -62,6 +62,7 @@ extern bool enable_material;
 extern bool enable_mergejoin;
 extern bool enable_hashjoin;
 extern bool enable_mhashjoin;
+extern bool enable_multi_join;
 extern int	constraint_exclusion;
 /*renata */
 extern bool enable_smoothscan;

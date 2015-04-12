@@ -35,6 +35,9 @@ extern List *make_restrictinfos_from_actual_clauses(PlannerInfo *root,
 									   List *clause_list);
 extern bool restriction_is_or_clause(RestrictInfo *restrictinfo);
 extern List *get_actual_clauses(List *restrictinfo_list);
+extern List *get_switched_clauses(List *clauses, Relids outerrelids);
+extern List *order_qual_clauses(PlannerInfo *root, List *clauses);
+
 extern List *get_all_actual_clauses(List *restrictinfo_list);
 extern List *extract_actual_clauses(List *restrictinfo_list,
 					   bool pseudoconstant);

@@ -878,6 +878,15 @@ static struct config_bool ConfigureNamesBool[] =
 		false,
 		NULL, NULL, NULL
 	},
+	{
+		{"enable_multi_join", PGC_USERSET, QUERY_TUNING_METHOD,
+			gettext_noop("Enables the planner's use of Mhash join plans."),
+			NULL
+		},
+		&enable_multi_join,
+		false,
+		NULL, NULL, NULL
+	},
 
 	{
 		{"geqo", PGC_USERSET, QUERY_TUNING_GEQO,

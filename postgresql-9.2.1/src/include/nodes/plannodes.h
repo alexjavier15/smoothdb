@@ -125,6 +125,11 @@ typedef struct Plan
 	 */
 	Bitmapset  *extParam;
 	Bitmapset  *allParam;
+	/*Alex : Multi join  fields;*/
+	List	   *plan_list;
+	List	   *all_quals;
+
+
 } Plan;
 
 /* ----------------
@@ -598,6 +603,7 @@ typedef struct Join
 	List	   *joinqual;		/* JOIN quals (in addition to plan.qual) */
 } Join;
 
+
 /* ----------------
  *		nest loop join node
  *
@@ -654,6 +660,12 @@ typedef struct HashJoin
 	List	   *hashclauses;
 } HashJoin;
 
+
+typedef struct MultiJoin
+{
+	Join		join;
+	List	   *hashclauses;
+} MultiJoin;
 /* ----------------
  *		materialization node
  * ----------------

@@ -41,6 +41,8 @@ static void add_parameterized_path(RelOptInfo *parent_rel, Path *new_path);
 static List *translate_sub_tlist(List *tlist, int relid);
 static bool query_is_distinct_for(Query *query, List *colnos, List *opids);
 static Oid	distinct_col_search(int colno, List *colnos, List *opids);
+static void	set_MultiJoinInfo(PlannerInfo *root ,JoinPath  *joinpath, Path*inner_path, Path*outer_path,
+		List * restrict_clauses, List *join_clauses);
 
 
 /*****************************************************************************
@@ -455,6 +457,12 @@ add_path(RelOptInfo *parent_rel, Path *new_path)
 	ListCell   *p1;
 	ListCell   *p1_prev;
 	ListCell   *p1_next;
+
+
+	/*Alex : when using  multi join we explore all the possible path but we discard
+	 * we can still discard
+	 */
+
 
 	/*
 	 * This is a convenient place to check for query cancel --- no part of the
@@ -2205,6 +2213,9 @@ create_mergejoin_path(PlannerInfo *root,
 	pathnode->innersortkeys = innersortkeys;
 	/* pathnode->materialize_inner will be set by final_cost_mergejoin */
 
+	pathnode->jpath.path.multijoin_info = NULL;
+	set_MultiJoinInfo(root, (JoinPath *) &pathnode->jpath,inner_path, outer_path,restrict_clauses,mergeclauses);
+
 	final_cost_mergejoin(root, pathnode, workspace, sjinfo);
 
 	return pathnode;
@@ -2242,6 +2253,7 @@ create_hashjoin_path(PlannerInfo *root,
 	HashPath   *pathnode = makeNode(HashPath);
 
 	pathnode->jpath.path.pathtype = T_HashJoin;
+
 	pathnode->jpath.path.parent = joinrel;
 	pathnode->jpath.path.param_info =
 		get_joinrel_parampathinfo(root,
@@ -2270,6 +2282,14 @@ create_hashjoin_path(PlannerInfo *root,
 	pathnode->jpath.joinrestrictinfo = restrict_clauses;
 	pathnode->path_hashclauses = hashclauses;
 	/* final_cost_hashjoin will fill in pathnode->num_batches */
+//
+	pathnode->jpath.path.multijoin_info = NULL;
+	set_MultiJoinInfo(root, (JoinPath*) &pathnode->jpath,inner_path, outer_path,restrict_clauses,hashclauses);
+
+
+
+
+
 
 	final_cost_hashjoin(root, pathnode, workspace, sjinfo, semifactors);
 
@@ -2372,4 +2392,84 @@ reparameterize_path(PlannerInfo *root, Path *path,
 			break;
 	}
 	return NULL;
+}
+static void	set_MultiJoinInfo(PlannerInfo *root, JoinPath * joinpath, Path*inner_path, Path*outer_path,
+		List * restrict_clauses, List *join_clauses){
+
+	//Check if we can generate a multijoin info.
+
+	if (enable_multi_join
+			&& (inner_path->parent->rtekind == RTE_RELATION || outer_path->parent->rtekind== RTE_RELATION)) {
+
+		MultiJoinInfo * mJoinInfo = makeNode(MultiJoinInfo);
+
+		RelOptInfo *relation = NULL;
+		//List *tlist = build_relation_tlist(joinpath.path.parent);
+		List *allclauses;
+		List *otherclauses;
+		List *joinclauses;
+		mJoinInfo->nextJoin = NULL;
+		relation = joinpath->path.parent;
+		/* Sort join qual clauses into best execution order */
+		allclauses = order_qual_clauses(root, join_clauses);
+		/* There's no point in sorting the hash clauses ... */
+
+		/* Get the join qual clauses (in plain expression form) */
+		/* Any pseudoconstant clauses are ignored here */
+		if (IS_OUTER_JOIN(joinpath->jointype)) {
+			extract_actual_join_clauses(allclauses, &allclauses, &otherclauses);
+		} else {
+			/* We can treat all clauses alike for an inner join */
+			allclauses = extract_actual_clauses(allclauses, false);
+			otherclauses = NIL;
+		}
+
+		/*
+		 * Remove the join_clauses from the list of join qual clauses, leaving the
+		 * list of quals that must be checked as qpquals.
+		 */
+		joinclauses = get_actual_clauses(join_clauses);
+		allclauses = list_difference(allclauses, joinclauses);
+
+		/*
+		 * Rearrange join_clauses, if needed, so that the outer variable is always
+		 * on the left.
+		 */
+		joinclauses = get_switched_clauses(join_clauses, outer_path->parent->relids);
+
+		mJoinInfo->innerRel = inner_path->parent;
+		mJoinInfo->outerRel = outer_path->parent;
+		mJoinInfo->all_quals = lappend(mJoinInfo->all_quals, list_copy(restrict_clauses));
+		mJoinInfo->join_quals = lappend(mJoinInfo->join_quals, list_copy(join_clauses));
+
+		if (inner_path->parent->rtekind == RTE_JOIN) {
+
+			relation->multijoin_info = inner_path->parent->multijoin_info;
+		//	joinpath->path.multijoin_info = inner_path->multijoin_info;
+
+		}
+
+		if (outer_path->parent->rtekind == RTE_JOIN) {
+
+			relation->multijoin_info = outer_path->parent->multijoin_info;
+			//joinpath->path.multijoin_info = outer_path->multijoin_info;
+
+		}
+		if (relation->multijoin_info == NULL) {
+			relation->multijoin_info = mJoinInfo;
+			//joinpath->path.multijoin_info = mJoinInfo;
+		} else {
+			relation->multijoin_info->nextJoin = mJoinInfo;
+			//joinpath->path.multijoin_info->nextJoin = mJoinInfo;
+		}
+
+	}
+	else{
+
+		printf ("Failing for : ");
+		pprint(joinpath->path.parent->relids);
+	}
+
+
+
 }

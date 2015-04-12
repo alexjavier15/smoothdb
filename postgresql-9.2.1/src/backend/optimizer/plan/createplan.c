@@ -98,8 +98,6 @@ static Node *replace_nestloop_params_mutator(Node *node, PlannerInfo *root);
 static List *fix_indexqual_references(PlannerInfo *root, IndexPath *index_path);
 static List *fix_indexorderby_references(PlannerInfo *root, IndexPath *index_path);
 static Node *fix_indexqual_operand(Node *node, IndexOptInfo *index, int indexcol);
-static List *get_switched_clauses(List *clauses, Relids outerrelids);
-static List *order_qual_clauses(PlannerInfo *root, List *clauses);
 static void copy_path_costsize(Plan *dest, Path *src);
 static void copy_plan_costsize(Plan *dest, Plan *src);
 static SeqScan *make_seqscan(List *qptlist, List *qpqual, Index scanrelid);
@@ -3399,7 +3397,7 @@ fix_indexqual_operand(Node *node, IndexOptInfo *index, int indexcol)
  *	  touched; a modified list is returned.  We do, however, set the transient
  *	  outer_is_left field in each RestrictInfo to show which side was which.
  */
-static List *
+List *
 get_switched_clauses(List *clauses, Relids outerrelids)
 {
 	List	   *t_list = NIL;
@@ -3465,7 +3463,7 @@ get_switched_clauses(List *clauses, Relids outerrelids)
  * instead of bare clauses.  It's OK because we only sort by cost, but
  * a cost/selectivity combination would likely do the wrong thing.
  */
-static List *
+List *
 order_qual_clauses(PlannerInfo *root, List *clauses)
 {
 	typedef struct

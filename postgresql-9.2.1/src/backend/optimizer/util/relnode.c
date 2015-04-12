@@ -378,6 +378,7 @@ build_join_rel(PlannerInfo *root,
 	joinrel->baserestrictcost.per_tuple = 0;
 	joinrel->joininfo = NIL;
 	joinrel->has_eclass_joins = false;
+	joinrel->multijoin_info = NULL;
 
 	/*
 	 * Create a new tlist containing just the vars that need to be output from

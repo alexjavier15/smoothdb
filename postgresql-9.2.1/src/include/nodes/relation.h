@@ -391,6 +391,7 @@ typedef enum RelOptKind
 	RELOPT_DEADREL
 } RelOptKind;
 
+typedef struct MultiJoinInfo MultiJoinInfo;
 typedef struct RelOptInfo
 {
 	NodeTag		type;
@@ -439,6 +440,8 @@ typedef struct RelOptInfo
 	List	   *joininfo;		/* RestrictInfo structures for join clauses
 								 * involving this rel */
 	bool		has_eclass_joins;		/* T means joininfo is incomplete */
+	MultiJoinInfo * multijoin_info;
+
 } RelOptInfo;
 
 /*
@@ -702,6 +705,8 @@ typedef struct Path
 	List	   *pathkeys;		/* sort ordering of path's output */
 	/* pathkeys is a List of PathKey nodes; see above */
 	List	   *restrict_list;
+	/*Alex Multi Join field*/
+	struct MultiJoinInfo * multijoin_info;
 } Path;
 
 /* Macro for extracting a path's parameterization relids; beware double eval */
@@ -1690,5 +1695,19 @@ typedef struct JoinCostWorkspace
 	int			numbuckets;
 	int			numbatches;
 } JoinCostWorkspace;
+
+/*ALex*/
+struct MultiJoinInfo
+{
+	NodeTag		type;
+
+	struct MultiJoinInfo * nextJoin;
+	RelOptInfo 	*innerRel;
+	RelOptInfo 	*outerRel;
+	List 		*join_quals;
+	List 		*all_quals;
+
+
+};
 
 #endif   /* RELATION_H */

@@ -228,6 +228,8 @@ typedef enum NodeTag
 	T_ParamPathInfo,
 	T_Path,
 	T_IndexPath,
+	/*Alex*/
+	T_MultiJoinInfo,
 
 	T_IndexSmoothPath,
 	T_SmoothHeapPath,

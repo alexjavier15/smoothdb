@@ -145,6 +145,20 @@ typedef struct ExprContext
 	ExprContext_CB *ecxt_callbacks;
 } ExprContext;
 
+/*Alex : Intrumentation for  Expr Statistics collection*/
+typedef struct ExprInstrumentation
+{ ExprContext  *ecxt;
+  Selectivity   sel;
+  double		tuplecount;		/* Tuples emitted so far this cycle */
+  /* Accumulated statistics across all completed cycles: */
+  double		startup;		/* Total startup time (in seconds) */
+  double		total;			/* Total total time (in seconds) */
+  double		ntuples;		/* Total tuples produced */
+  double		nloops;			/* # of run cycles for this expr */
+
+}ExprInstrumentation;
+
+
 /*
  * Set-result status returned by ExecEvalExpr()
  */
@@ -1009,6 +1023,8 @@ typedef struct PlanState
 								 * functions in targetlist */
 } PlanState;
 
+
+
 /* ----------------
  *	these are defined to avoid confusion problems with "left"
  *	and "right" and "inner" and "outer".  The convention is that
@@ -1679,6 +1695,10 @@ typedef struct MergeJoinState
 /* these structs are defined in executor/hashjoin.h: */
 typedef struct HashJoinTupleData *HashJoinTuple;
 typedef struct HashJoinTableData *HashJoinTable;
+
+typedef struct JoinTupleData *JoinTuple;
+typedef struct SimpleHashTableData *SimpleHashTable;
+
 typedef struct MJoinTableData *MJoinTable;
 typedef struct HashJoinState
 {
@@ -1703,6 +1723,42 @@ typedef struct HashJoinState
 
 } HashJoinState;
 
+
+
+
+typedef struct MultiJoinState
+{
+	JoinState	js;				/* its first field is NodeTag */
+	List	   *hashclauses;	/* list of ExprState nodes */
+	List	   *mhj_OuterHashKeys;		/* list of ExprState nodes */
+	List	   *mhj_InnerHashKeys;		/* list of ExprState nodes */
+	List	   *mhj_HashOperators;		/* list of operator OIDs */
+	SimpleHashTable *mtj_HashTables;
+	SimpleHashTable mtj_InnerHashTable;
+	SimpleHashTable mtj_OuterHashTable;
+	uint32		mhj_CurHashValue;
+	int			mhj_CurBucketNo;
+	HashJoinTuple mhj_CurTuple;
+	TupleTableSlot *mhj_OuterTupleSlot;
+	TupleTableSlot *mhj_InnerTupleSlot;
+	int			mhj_JoinState;
+	int			mhj_LastState;
+	bool		mhj_MatchedOuter;
+	bool		mhj_OuterNotEmpty;
+	bool		  	mhj_MatchedInner;
+	bool		  	mhj_InnerNotEmpty;
+	MJoinTable	mhj_ScanHashTable;
+	TupleTableSlot  **mhj_ScanEcxt_slot;
+	bool			mhj_HasMoreOuter;
+	bool			mhj_HasMoreInner;
+	/*Fields for hybrid MJoin */
+	MJoinTable	mhj_NextHashTable;
+	int			mhj_NextBucketNo;
+	TupleTableSlot  **mhj_NextEcxt_slot;
+	HashJoinTuple mhj_NextInnerTuple;
+	HashJoinTuple mhj_NextOuterTuple;
+	HashJoinTuple mhj_NextTuple;
+} MultiJoinState;
 
 typedef struct MJoinState
 {

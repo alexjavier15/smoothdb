@@ -117,6 +117,7 @@ bool		enable_material = true;
 bool		enable_mergejoin = true;
 bool		enable_hashjoin = true;
 bool		enable_mhashjoin = false;
+bool		enable_multi_join = false;
 
 /* renata
  * Should we enable Smooth Scan Operator

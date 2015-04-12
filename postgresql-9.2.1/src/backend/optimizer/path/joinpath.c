@@ -340,7 +340,7 @@ try_mergejoin_path(PlannerInfo *root,
 
 	if (add_path_precheck(joinrel,
 						  workspace.startup_cost, workspace.total_cost,
-						  pathkeys, required_outer))
+						  pathkeys, required_outer) )
 	{
 		add_path(joinrel, (Path *)
 				 create_mergejoin_path(root,
@@ -436,7 +436,7 @@ try_hashjoin_path(PlannerInfo *root,
 		bms_free(required_outer);
 	}
 
-	if(enable_mhashjoin){
+	if(enable_multi_join){
 
 
 

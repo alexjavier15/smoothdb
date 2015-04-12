@@ -37,6 +37,7 @@
 #include "parser/parsetree.h"
 #include "rewrite/rewriteManip.h"
 #include "utils/lsyscache.h"
+#include "nodes/print.h"
 
 
 /* These parameters are set by GUC */
@@ -1527,9 +1528,22 @@ standard_join_search(PlannerInfo *root, int levels_needed, List *initial_rels)
 		/*
 		 * Do cleanup work on each just-processed rel.
 		 */
+		int counter = 0;
 		foreach(lc, root->join_rel_level[lev])
 		{
 			rel = (RelOptInfo *) lfirst(lc);
+			if (lev == levels_needed) {
+				MultiJoinInfo *mjinfo = rel->multijoin_info;
+				printf(" %d joinrel \n", counter);
+
+				while (mjinfo != NULL) {
+
+					pprint(mjinfo->join_quals);
+					mjinfo = mjinfo->nextJoin;
+
+				}
+				counter ++;
+			}
 
 			/* Find and save the cheapest paths for this rel */
 			set_cheapest(rel);
@@ -1538,7 +1552,11 @@ standard_join_search(PlannerInfo *root, int levels_needed, List *initial_rels)
 			debug_print_rel(root, rel);
 #endif
 		}
+
+
 	}
+
+
 
 	/*
 	 * We should have a single rel at the final level.
