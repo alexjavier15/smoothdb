@@ -1487,10 +1487,10 @@ make_rel_from_joinlist(PlannerInfo *root, List *joinlist)
  * than one join-order search, you'll probably need to save and restore the
  * original states of those data structures.  See geqo_eval() for an example.
  */
+
 RelOptInfo *
-standard_join_search(PlannerInfo *root, int levels_needed, List *initial_rels)
-{
-	int			lev;
+standard_join_search(PlannerInfo *root, int levels_needed, List *initial_rels) {
+	int lev;
 	RelOptInfo *rel;
 
 	/*
@@ -1514,9 +1514,8 @@ standard_join_search(PlannerInfo *root, int levels_needed, List *initial_rels)
 
 	root->join_rel_level[1] = initial_rels;
 
-	for (lev = 2; lev <= levels_needed; lev++)
-	{
-		ListCell   *lc;
+	for (lev = 2; lev <= levels_needed; lev++) {
+		ListCell *lc;
 
 		/*
 		 * Determine all possible pairs of relations to be joined at this
@@ -1528,22 +1527,9 @@ standard_join_search(PlannerInfo *root, int levels_needed, List *initial_rels)
 		/*
 		 * Do cleanup work on each just-processed rel.
 		 */
-		int counter = 0;
-		foreach(lc, root->join_rel_level[lev])
-		{
+
+		foreach(lc, root->join_rel_level[lev]) {
 			rel = (RelOptInfo *) lfirst(lc);
-			if (lev == levels_needed) {
-				MultiJoinInfo *mjinfo = rel->multijoin_info;
-				printf(" %d joinrel \n", counter);
-
-				while (mjinfo != NULL) {
-
-					pprint(mjinfo->join_quals);
-					mjinfo = mjinfo->nextJoin;
-
-				}
-				counter ++;
-			}
 
 			/* Find and save the cheapest paths for this rel */
 			set_cheapest(rel);
@@ -1553,19 +1539,22 @@ standard_join_search(PlannerInfo *root, int levels_needed, List *initial_rels)
 #endif
 		}
 
-
 	}
-
-
-
-	/*
-	 * We should have a single rel at the final level.
-	 */
 	if (root->join_rel_level[levels_needed] == NIL)
 		elog(ERROR, "failed to build any %d-way joins", levels_needed);
 	Assert(list_length(root->join_rel_level[levels_needed]) == 1);
 
+	/*
+	 * We should have a single rel at the final level.
+	 */
+
 	rel = (RelOptInfo *) linitial(root->join_rel_level[levels_needed]);
+
+	printf(" Best Paths: %d  \n", list_length(rel->pathlist));
+
+	rel->cheapest_total_path->is_best = true;
+	printf(" Saved Paths: %d  \n", list_length(rel->pathlist));
+	fflush(stdout);
 
 	root->join_rel_level = NULL;
 

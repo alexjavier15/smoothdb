@@ -445,6 +445,9 @@ ExecInitHashJoin(HashJoin *node, EState *estate, int eflags)
 	/* check for unsupported flags */
 	Assert(!(eflags & (EXEC_FLAG_BACKWARD | EXEC_FLAG_MARK)));
 
+
+	if(node->ps != NULL)
+		return (HashJoinState *)node->ps;
 	/*
 	 * create state structure
 	 */
@@ -591,7 +594,7 @@ ExecInitHashJoin(HashJoin *node, EState *estate, int eflags)
 	hjstate->hj_MatchedOuter = false;
 	hjstate->hj_OuterNotEmpty = false;
 
-
+	node->ps = hjstate;
 	return hjstate;
 }
 

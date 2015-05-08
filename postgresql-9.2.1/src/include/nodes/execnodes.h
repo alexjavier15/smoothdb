@@ -412,6 +412,10 @@ typedef struct EState
 	HeapTuple  *es_epqTuple;	/* array of EPQ substitute tuples */
 	bool	   *es_epqTupleSet; /* true if EPQ tuple is provided */
 	bool	   *es_epqScanDone; /* true if EPQ tuple has been fetched */
+	int			join_depth;
+	Instrumentation *unique_instr;
+	bool 		replan;
+	bool		started;
 } EState;
 
 
@@ -1721,6 +1725,7 @@ typedef struct HashJoinState
 	bool		hj_MatchedOuter;
 	bool		hj_OuterNotEmpty;
 
+
 } HashJoinState;
 
 
@@ -1733,9 +1738,6 @@ typedef struct MultiJoinState
 	List	   *mhj_OuterHashKeys;		/* list of ExprState nodes */
 	List	   *mhj_InnerHashKeys;		/* list of ExprState nodes */
 	List	   *mhj_HashOperators;		/* list of operator OIDs */
-	SimpleHashTable *mtj_HashTables;
-	SimpleHashTable mtj_InnerHashTable;
-	SimpleHashTable mtj_OuterHashTable;
 	uint32		mhj_CurHashValue;
 	int			mhj_CurBucketNo;
 	HashJoinTuple mhj_CurTuple;
@@ -1758,9 +1760,12 @@ typedef struct MultiJoinState
 	HashJoinTuple mhj_NextInnerTuple;
 	HashJoinTuple mhj_NextOuterTuple;
 	HashJoinTuple mhj_NextTuple;
+	List *		  planlist;
+	List          ** plans;
+	PlanState		*current_ps;
 } MultiJoinState;
 
-typedef struct MJoinState
+typedef struct SymHashJoinState
 {
 	JoinState	js;				/* its first field is NodeTag */
 	List	   *hashclauses;	/* list of ExprState nodes */
@@ -1791,13 +1796,32 @@ typedef struct MJoinState
 	HashJoinTuple mhj_NextInnerTuple;
 	HashJoinTuple mhj_NextOuterTuple;
 	HashJoinTuple mhj_NextTuple;
-} MJoinState;
 
-/*Alex:
- *  ----------------------------------------------------------------
- *				 Materialization State Information
- * ----------------------------------------------------------------
- */
+} SymHashJoinState;
+
+/*Alex:*/
+ typedef struct CHashJoinState
+{
+	JoinState	js;				/* its first field is NodeTag */
+	List	   *hashclauses;	/* list of ExprState nodes */
+	List	   *chj_OuterHashKeys;		/* list of ExprState nodes */
+	List	   *chj_InnerHashKeys;		/* list of ExprState nodes */
+	List	   *chj_HashOperators;		/* list of operator OIDs */
+	SimpleHashTable chj_HashTable;
+	uint32		chj_CurHashValue;
+	int			chj_CurBucketNo;
+	JoinTuple chj_CurTuple;
+	TupleTableSlot *chj_OuterTupleSlot;
+	TupleTableSlot *chj_HashTupleSlot;
+	TupleTableSlot *chj_NullOuterTupleSlot;
+	TupleTableSlot *chj_NullInnerTupleSlot;
+	TupleTableSlot *chj_FirstOuterTupleSlot;
+	int			chj_JoinState;
+	bool		chj_MatchedOuter;
+	bool		chj_OuterNotEmpty;
+	Index		seq_num;
+
+} CHashJoinState;
 
 /* ----------------
  *	 MHashJoinState information
@@ -1805,27 +1829,24 @@ typedef struct MJoinState
  *		see: HashJoinState
  * ----------------
  */
-typedef struct MHashJoinState
+typedef struct MultiHashSeqState
 {
 	JoinState	js;				/* its first field is NodeTag */
 	List	   *hashclauses;	/* list of ExprState nodes */
 	List	   *hj_OuterHashKeys;		/* list of ExprState nodes */
 	List	   *hj_InnerHashKeys;		/* list of ExprState nodes */
 	List	   *hj_HashOperators;		/* list of operator OIDs */
-	HashJoinTable hj_HashTable;
+	SimpleHashTable hj_HashTable;
+	JoinTuple	hj_CurTuple;
 	uint32		hj_CurHashValue;
 	int			hj_CurBucketNo;
-	int			hj_CurSkewBucketNo;
-	HashJoinTuple hj_CurTuple;
 	TupleTableSlot *hj_OuterTupleSlot;
-	TupleTableSlot *hj_HashTupleSlot;
-	TupleTableSlot *hj_NullOuterTupleSlot;
-	TupleTableSlot *hj_NullInnerTupleSlot;
-	TupleTableSlot *hj_FirstOuterTupleSlot;
+	TupleTableSlot *hj_InnerTupleSlot;
 	int			hj_JoinState;
 	bool		hj_MatchedOuter;
 	bool		hj_OuterNotEmpty;
-} MHashJoinState;
+} MultiHashSeqState;
+
 
 
 /* ----------------------------------------------------------------
@@ -2001,6 +2022,8 @@ typedef struct UniqueState
  *	 HashState information
  * ----------------
  */
+
+
 typedef struct HashState
 {
 	PlanState	ps;				/* its first field is NodeTag */
@@ -2014,6 +2037,20 @@ typedef struct HashState
 
 
 } HashState;
+
+typedef struct MultiHashState{
+
+	HashState		hstate;
+	List			*all_hashkeys;
+	int				nun_hashtables; /*number of hash tables */
+	SimpleHashTable	*hashable_array;
+	List*			tuple_list;
+	MemoryContext   tupCxt;
+
+
+}MultiHashState;
+
+
 
 /* ----------------
  *	 SetOpState information

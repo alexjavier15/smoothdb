@@ -391,6 +391,12 @@ typedef enum RelOptKind
 	RELOPT_DEADREL
 } RelOptKind;
 
+typedef struct JoinClause {
+	List *expr;
+	Relids lh_relids;
+	Relids rh_relids;
+
+}JoinClause;
 typedef struct MultiJoinInfo MultiJoinInfo;
 typedef struct RelOptInfo
 {
@@ -440,7 +446,14 @@ typedef struct RelOptInfo
 	List	   *joininfo;		/* RestrictInfo structures for join clauses
 								 * involving this rel */
 	bool		has_eclass_joins;		/* T means joininfo is incomplete */
-	MultiJoinInfo * multijoin_info;
+	List	   *multijoin_info;
+
+	/*Alex : join clauses involded this relation used for
+	 * pre-building hash tables in mjoin*/
+	MultiJoinInfo *best_mjinfo;
+
+	List       *joinclauses;
+	struct MultiHash *hash_plan;
 
 } RelOptInfo;
 
@@ -706,7 +719,8 @@ typedef struct Path
 	/* pathkeys is a List of PathKey nodes; see above */
 	List	   *restrict_list;
 	/*Alex Multi Join field*/
-	struct MultiJoinInfo * multijoin_info;
+	struct Plan * plan;
+	bool is_best;
 } Path;
 
 /* Macro for extracting a path's parameterization relids; beware double eval */
@@ -1058,8 +1072,10 @@ typedef struct JoinPath
 	/*
 	 * See the notes for RelOptInfo and ParamPathInfo to understand why
 	 * joinrestrictinfo is needed in JoinPath, and can't be merged into the
+	 *
 	 * parent RelOptInfo.
 	 */
+	bool		has_alljoins;
 } JoinPath;
 
 /*
@@ -1696,7 +1712,8 @@ typedef struct JoinCostWorkspace
 	int			numbatches;
 } JoinCostWorkspace;
 
-/*ALex*/
+/*
+ALex
 struct MultiJoinInfo
 {
 	NodeTag		type;
@@ -1706,8 +1723,12 @@ struct MultiJoinInfo
 	RelOptInfo 	*outerRel;
 	List 		*join_quals;
 	List 		*all_quals;
+	List        *tlist;
+	List		*sequence;
+	int length;
 
 
 };
+*/
 
 #endif   /* RELATION_H */

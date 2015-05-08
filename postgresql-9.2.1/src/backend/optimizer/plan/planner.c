@@ -39,6 +39,7 @@
 #include "parser/parsetree.h"
 #include "rewrite/rewriteManip.h"
 #include "utils/rel.h"
+#include "utils/memutils.h"
 
 
 /* GUC parameter */
@@ -201,6 +202,8 @@ standard_planner(Query *parse, int cursorOptions, ParamListInfo boundParams)
 	 * If creating a plan for a scrollable cursor, make sure it can run
 	 * backwards on demand.  Add a Material node at the top at need.
 	 */
+
+
 	if (cursorOptions & CURSOR_OPT_SCROLL)
 	{
 		if (!ExecSupportsBackwardScan(top_plan))
@@ -212,6 +215,8 @@ standard_planner(Query *parse, int cursorOptions, ParamListInfo boundParams)
 	Assert(glob->finalrowmarks == NIL);
 	Assert(glob->resultRelations == NIL);
 	top_plan = set_plan_references(root, top_plan);
+	printf("GOT PLAN \n");
+	fflush(stdout);
 	/* ... and the subplans (both regular subplans and initplans) */
 	Assert(list_length(glob->subplans) == list_length(glob->subroots));
 	forboth(lp, glob->subplans, lr, glob->subroots)
@@ -1317,8 +1322,52 @@ grouping_planner(PlannerInfo *root, double tuple_fraction)
 			 * results.
 			 */
 			bool		need_sort_for_grouping = false;
+			ListCell *lc;
+			List *plan_list = NIL;
+			Index		rti;
+			List *hash_list = NIL;
+			MemoryContext mctx = AllocSetContextCreate(CurrentMemoryContext, "Plan CTX", ALLOCSET_DEFAULT_MINSIZE,
+					   ALLOCSET_DEFAULT_INITSIZE,
+					   ALLOCSET_DEFAULT_MAXSIZE);
+			MemoryContext oldctx = MemoryContextSwitchTo(mctx);
 
 			result_plan = create_plan(root, best_path);
+
+			if (enable_multi_join &&  (nodeTag(result_plan) == T_HashJoin)) {
+
+				((Node *)result_plan)->type = T_MultiJoin;
+
+				foreach(lc,best_path->parent->pathlist) {
+					Path * path = (Path *) lfirst(lc);
+					if (!path->is_best) {
+
+						plan_list = lappend(plan_list, create_plan(root, path));
+
+					}
+
+				}
+
+				MemoryContextSwitchTo(oldctx);
+				((MultiJoin *) result_plan)->plan_list = plan_list;
+
+				for (rti = 1; rti < root->simple_rel_array_size; rti++) {
+					RelOptInfo *rel = root->simple_rel_array[rti];
+
+					/* there may be empty slots corresponding to non-baserel RTEs */
+					if (rel == NULL)
+						continue;
+
+					/* ignore RTEs that are "other rels" */
+					if (rel->reloptkind != RELOPT_BASEREL)
+						continue;
+
+					if (rel->hash_plan != NULL)
+						hash_list = lappend(hash_list, rel->hash_plan);
+
+				}
+				((MultiJoin *) result_plan)->hash_plans =hash_list;
+
+			}
 			/*renata : print resulting plan
 			 *
 			 * */

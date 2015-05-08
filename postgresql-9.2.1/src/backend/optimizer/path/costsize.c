@@ -99,6 +99,8 @@ double		cpu_index_tuple_cost = DEFAULT_CPU_INDEX_TUPLE_COST;
 double		cpu_operator_cost = DEFAULT_CPU_OPERATOR_COST;
 
 int			effective_cache_size = DEFAULT_EFFECTIVE_CACHE_SIZE;
+int			multi_join_cache_size = 1024;
+int			multi_join_chunk_size = 1024;
 /* renata - increased the value */
 Cost		disable_cost = 1.0e20;
 

@@ -878,6 +878,7 @@ static struct config_bool ConfigureNamesBool[] =
 		false,
 		NULL, NULL, NULL
 	},
+
 	{
 		{"enable_multi_join", PGC_USERSET, QUERY_TUNING_METHOD,
 			gettext_noop("Enables the planner's use of Mhash join plans."),
@@ -1839,6 +1840,32 @@ static struct config_int ConfigureNamesInt[] =
 		},
 		&work_mem,
 		1024, 64, MAX_KILOBYTES,
+		NULL, NULL, NULL
+	},
+	{
+
+		{"multi_join_cache_size", PGC_USERSET, RESOURCES_MEM,
+			gettext_noop("Sets the maximum  memory to be used for multijoin cache."),
+			gettext_noop("This much memory can be used by each smooth  internal "
+										 " hash table before switching to "
+										 "temporary disk files."),
+			GUC_UNIT_KB
+		},
+		&multi_join_cache_size,
+		1024, 64, INT_MAX / 2,
+		NULL, NULL, NULL
+	},
+	{
+
+		{"multi_join_chunk_size", PGC_USERSET, RESOURCES_MEM,
+			gettext_noop("Sets the maximum  memory to be used for multijoin cache."),
+			gettext_noop("This much memory can be used by each smooth  internal "
+											 " hash table before switching to "
+											 "temporary disk files."),
+			GUC_UNIT_KB
+		},
+		&multi_join_chunk_size,
+		1024, 64, INT_MAX / 2,
 		NULL, NULL, NULL
 	},
 	{

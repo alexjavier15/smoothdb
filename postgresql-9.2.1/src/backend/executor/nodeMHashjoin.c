@@ -42,15 +42,15 @@
 #define InnerIsExhausted(node) ( node->mhj_InnerHashTable->status == MHJ_EXAHUSTED)
 
 static TupleTableSlot *ExecMJoinGetTuple(PlanState *hashNode, MJoinTable hashtable,
-		MJoinState *hjstate, uint32 *hashvalue, bool outer_tuple, bool *isNotEmpty);
+		SymHashJoinState *hjstate, uint32 *hashvalue, bool outer_tuple, bool *isNotEmpty);
 
 static bool
-ExecMJoinNewBatch(MJoinState *hjstate);
+ExecMJoinNewBatch(SymHashJoinState *hjstate);
 
 static bool
-ExecMJoinScanHashBucket(MJoinState *hjstate, ExprContext *econtext);
+ExecMJoinScanHashBucket(SymHashJoinState *hjstate, ExprContext *econtext);
 
-static int nextState(MJoinState *node);
+static int nextState(SymHashJoinState *node);
 /* ----------------------------------------------------------------
  *		ExecHashJoin
  *
@@ -60,7 +60,7 @@ static int nextState(MJoinState *node);
  *			  the other one is "outer".
  * ----------------------------------------------------------------
  */
-static int nextState(MJoinState *node) {
+static int nextState(SymHashJoinState *node) {
 
 	switch (node->mhj_LastState) {
 
@@ -105,7 +105,7 @@ static int nextState(MJoinState *node) {
 
 }
 TupleTableSlot * /* return: a tuple or NULL */
-ExecMJoin(MJoinState *node) {
+ExecMJoin(SymHashJoinState *node) {
 	HashState *innerHashNode;
 	HashState *outerHashNode;
 	List *joinqual;
@@ -496,9 +496,9 @@ ExecMJoin(MJoinState *node) {
  *		Init routine for HashJoin node.
  * ----------------------------------------------------------------
  */
-MJoinState *
+SymHashJoinState *
 ExecInitMJoin(HashJoin *node, EState *estate, int eflags) {
-	MJoinState *hjstate;
+	SymHashJoinState *hjstate;
 	Hash *outerHashNode;
 	Hash *innerHashNode;
 	List *lclauses;
@@ -512,7 +512,7 @@ ExecInitMJoin(HashJoin *node, EState *estate, int eflags) {
 	/*
 	 * create state structure
 	 */
-	hjstate = makeNode(MJoinState);
+	hjstate = makeNode(SymHashJoinState);
 	hjstate->js.ps.plan = (Plan *) node;
 	hjstate->js.ps.state = estate;
 
@@ -665,7 +665,7 @@ ExecInitMJoin(HashJoin *node, EState *estate, int eflags) {
  *		clean up routine for HashJoin node
  * ----------------------------------------------------------------
  */
-void ExecEndMJoin(MJoinState *node) {
+void ExecEndMJoin(SymHashJoinState *node) {
 	int bno = 0;
 	/*
 	 * Free hash table
@@ -723,7 +723,7 @@ void ExecEndMJoin(MJoinState *node) {
  * either originally computed, or re-read from the temp file.
  */
 static TupleTableSlot *
-ExecMJoinGetTuple(PlanState *hashNode, MJoinTable hashtable, MJoinState *hjstate, uint32 *hashvalue,
+ExecMJoinGetTuple(PlanState *hashNode, MJoinTable hashtable, SymHashJoinState *hjstate, uint32 *hashvalue,
 		bool outer_tuple, bool *isNotEmpty) {
 
 	TupleTableSlot *slot = NULL;
@@ -777,7 +777,7 @@ ExecMJoinGetTuple(PlanState *hashNode, MJoinTable hashtable, MJoinState *hjstate
  *
  * Returns true if successful, false if there are no more batches.
  */
-static bool ExecMJoinNewBatch(MJoinState *hjstate) {
+static bool ExecMJoinNewBatch(SymHashJoinState *hjstate) {
 	MJoinTable innerhashtable = hjstate->mhj_InnerHashTable;
 	MJoinTable outerhashtable = hjstate->mhj_OuterHashTable;
 	int nbatch;
@@ -1085,7 +1085,7 @@ void ExecMHashJoinResetBatch(MJoinBatchDesc batch) {
 	batch->spaceAllowed = 0;
 	batch->spaceUsed = 0;
 }
-void ExecReScanMHashJoin(MJoinState *node) {
+void ExecReScanMHashJoin(SymHashJoinState *node) {
 //	/*
 //	 * In a multi-batch join, we currently have to do rescans the hard way,
 //	 * primarily because batch temp files may have already been released. But
@@ -1155,7 +1155,7 @@ void ExecReScanMHashJoin(MJoinState *node) {
 //		ExecReScan(node->js.ps.lefttree);
 }
 
-static bool ExecMJoinScanHashBucket(MJoinState *hjstate, ExprContext *econtext) {
+static bool ExecMJoinScanHashBucket(SymHashJoinState *hjstate, ExprContext *econtext) {
 	List *hjclauses = hjstate->hashclauses;
 	MJoinTable hashtable = hjstate->mhj_ScanHashTable;
 	bool test = false;

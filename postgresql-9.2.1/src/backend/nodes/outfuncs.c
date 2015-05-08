@@ -25,6 +25,7 @@
 
 #include "lib/stringinfo.h"
 #include "nodes/plannodes.h"
+#include "nodes/execnodes.h"
 #include "nodes/relation.h"
 #include "utils/datum.h"
 /*renata*/
@@ -358,6 +359,18 @@ _outModifyTable(StringInfo str, const ModifyTable *node)
 	WRITE_INT_FIELD(epqParam);
 }
 
+static void _outExprState(StringInfo str, const ExprState *node)
+{
+	WRITE_NODE_FIELD(expr);
+
+}
+
+static void _outHashInfo(StringInfo str, const HashInfo *node)
+{
+	WRITE_NODE_FIELD(hashkeys);
+
+
+}
 static void
 _outAppend(StringInfo str, const Append *node)
 {
@@ -3246,6 +3259,12 @@ _outNode(StringInfo str, const void *obj)
 			case T_ViewStmt:
 				_outViewStmt(str, obj);
 				break;
+			case T_ExprState:
+				_outExprState(str,obj);
+				break;
+			case T_HashInfo:
+				_outHashInfo(str,obj);
+			break;
 
 			default:
 

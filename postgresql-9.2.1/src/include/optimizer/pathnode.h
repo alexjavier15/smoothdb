@@ -15,6 +15,8 @@
 #define PATHNODE_H
 
 #include "nodes/relation.h"
+#include "lib/stringinfo.h"
+
 
 
 /*
@@ -164,5 +166,23 @@ extern ParamPathInfo *get_joinrel_parampathinfo(PlannerInfo *root,
 						  List **restrict_clauses);
 extern ParamPathInfo *get_appendrel_parampathinfo(RelOptInfo *appendrel,
 							Relids required_outer);
+
+extern void	set_MultiJoinInfo(PlannerInfo *root,
+			RelOptInfo *joinrel,
+		   Relids joinrelids,
+		   RelOptInfo *outer_rel,
+		   RelOptInfo *inner_rel,
+		   SpecialJoinInfo *sjinfo,
+		   List *restrictlist);
+
+extern List *select_mergejoin_clauses(PlannerInfo *root,
+						 RelOptInfo *joinrel,
+						 RelOptInfo *outerrel,
+						 RelOptInfo *innerrel,
+						 List *restrictlist,
+						 JoinType jointype,
+						 bool *mergejoin_allowed);
+
+extern void _outBitmapset(StringInfo str, const Bitmapset *bms);
 
 #endif   /* PATHNODE_H */

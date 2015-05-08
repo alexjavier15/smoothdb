@@ -1270,4 +1270,13 @@ typedef struct FromExpr
 	Node	   *quals;			/* qualifiers on join, if any */
 } FromExpr;
 
+typedef struct HashInfo{
+	Node node;
+	List *hashkeys;
+	List *outer_hashkeys;
+	List *hoperators;
+	Index id;
+
+}HashInfo;
+
 #endif   /* PRIMNODES_H */

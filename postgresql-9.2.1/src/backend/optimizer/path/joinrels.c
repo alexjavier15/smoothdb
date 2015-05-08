@@ -18,6 +18,7 @@
 #include "optimizer/pathnode.h"
 #include "optimizer/paths.h"
 #include "utils/memutils.h"
+#include "optimizer/cost.h"
 
 
 static void make_rels_by_clause_joins(PlannerInfo *root,
@@ -115,6 +116,18 @@ join_search_one_level(PlannerInfo *root, int level)
 										  old_rel,
 										  list_head(joinrels[1]));
 		}
+	}
+
+	// if we are interesting in a multi join check that we get a least one
+	// otherwise disable multijoin.
+	if(enable_multi_join){
+
+		if (joinrels[level] == NIL && root->join_info_list == NIL){
+			elog(ERROR, "failed to build any %d-way joins", level);
+			enable_multi_join = false;}
+		else
+			return;
+
 	}
 
 	/*
@@ -588,6 +601,7 @@ make_join_rel(PlannerInfo *root, RelOptInfo *rel1, RelOptInfo *rel2)
 	joinrel = build_join_rel(root, joinrelids, rel1, rel2, sjinfo,
 							 &restrictlist);
 
+
 	/*
 	 * If we've already proven this join is empty, we needn't consider any
 	 * more paths for it.
@@ -625,12 +639,25 @@ make_join_rel(PlannerInfo *root, RelOptInfo *rel1, RelOptInfo *rel2)
 				mark_dummy_rel(joinrel);
 				break;
 			}
+			if(enable_multi_join && (bms_num_members(joinrel->relids ) == 2 )){
+
 			add_paths_to_joinrel(root, joinrel, rel1, rel2,
 								 JOIN_INNER, sjinfo,
 								 restrictlist);
 			add_paths_to_joinrel(root, joinrel, rel2, rel1,
 								 JOIN_INNER, sjinfo,
 								 restrictlist);
+			}else {
+			if((bms_num_members(rel1->relids ) == 1 ))
+				add_paths_to_joinrel(root, joinrel, rel2, rel1,
+												 JOIN_INNER, sjinfo,
+												 restrictlist);
+
+			if((bms_num_members(rel2->relids ) == 1 ))
+				add_paths_to_joinrel(root, joinrel, rel1, rel2,
+															 JOIN_INNER, sjinfo,
+															 restrictlist);
+			}
 			break;
 		case JOIN_LEFT:
 			if (is_dummy_rel(rel1) ||
@@ -642,12 +669,13 @@ make_join_rel(PlannerInfo *root, RelOptInfo *rel1, RelOptInfo *rel2)
 			if (restriction_is_constant_false(restrictlist, false) &&
 				bms_is_subset(rel2->relids, sjinfo->syn_righthand))
 				mark_dummy_rel(rel2);
+			if(enable_multi_join && (bms_num_members(joinrel->relids ) == 2 )){
 			add_paths_to_joinrel(root, joinrel, rel1, rel2,
 								 JOIN_LEFT, sjinfo,
 								 restrictlist);
 			add_paths_to_joinrel(root, joinrel, rel2, rel1,
 								 JOIN_RIGHT, sjinfo,
-								 restrictlist);
+								 restrictlist);}
 			break;
 		case JOIN_FULL:
 			if ((is_dummy_rel(rel1) && is_dummy_rel(rel2)) ||
@@ -656,12 +684,14 @@ make_join_rel(PlannerInfo *root, RelOptInfo *rel1, RelOptInfo *rel2)
 				mark_dummy_rel(joinrel);
 				break;
 			}
+			if(enable_multi_join && (bms_num_members(joinrel->relids ) == 2 )){
 			add_paths_to_joinrel(root, joinrel, rel1, rel2,
 								 JOIN_FULL, sjinfo,
 								 restrictlist);
 			add_paths_to_joinrel(root, joinrel, rel2, rel1,
 								 JOIN_FULL, sjinfo,
 								 restrictlist);
+			}
 
 			/*
 			 * If there are join quals that aren't mergeable or hashable, we
@@ -715,12 +745,27 @@ make_join_rel(PlannerInfo *root, RelOptInfo *rel1, RelOptInfo *rel2)
 					mark_dummy_rel(joinrel);
 					break;
 				}
+
+				if(enable_multi_join && (bms_num_members(joinrel->relids ) == 2 )){
 				add_paths_to_joinrel(root, joinrel, rel1, rel2,
 									 JOIN_UNIQUE_INNER, sjinfo,
 									 restrictlist);
 				add_paths_to_joinrel(root, joinrel, rel2, rel1,
 									 JOIN_UNIQUE_OUTER, sjinfo,
-									 restrictlist);
+									 restrictlist);}
+				else{
+
+					if((bms_num_members(rel1->relids ) == 1 ))
+						add_paths_to_joinrel(root, joinrel, rel1, rel2,
+															 JOIN_UNIQUE_INNER, sjinfo,
+															 restrictlist);
+					if((bms_num_members(rel2->relids ) == 1 ))
+						add_paths_to_joinrel(root, joinrel, rel2, rel1,
+															 JOIN_UNIQUE_OUTER, sjinfo,
+															 restrictlist);
+				}
+
+
 			}
 			break;
 		case JOIN_ANTI:

@@ -39,13 +39,7 @@ static void hash_inner_and_outer(PlannerInfo *root, RelOptInfo *joinrel,
 					 JoinType jointype, SpecialJoinInfo *sjinfo,
 					 SemiAntiJoinFactors *semifactors,
 					 Relids param_source_rels);
-static List *select_mergejoin_clauses(PlannerInfo *root,
-						 RelOptInfo *joinrel,
-						 RelOptInfo *outerrel,
-						 RelOptInfo *innerrel,
-						 List *restrictlist,
-						 JoinType jointype,
-						 bool *mergejoin_allowed);
+
 
 
 /*
@@ -253,7 +247,7 @@ try_nestloop_path(PlannerInfo *root,
 						  outer_path, inner_path,
 						  sjinfo, semifactors);
 
-	if (add_path_precheck(joinrel,
+	if (!enable_multi_join && add_path_precheck(joinrel,
 						  workspace.startup_cost, workspace.total_cost,
 						  pathkeys, required_outer))
 	{
@@ -338,7 +332,7 @@ try_mergejoin_path(PlannerInfo *root,
 						   outersortkeys, innersortkeys,
 						   sjinfo);
 
-	if (add_path_precheck(joinrel,
+	if (!enable_multi_join && add_path_precheck(joinrel,
 						  workspace.startup_cost, workspace.total_cost,
 						  pathkeys, required_outer) )
 	{
@@ -1110,7 +1104,96 @@ hash_inner_and_outer(PlannerInfo *root,
 	/* If we found any usable hashclauses, make paths */
 	if (hashclauses)
 	{
-		/*
+
+
+		if (enable_multi_join) {
+			Path	   *cheapest_startup_outer = outerrel->cheapest_startup_path;
+			Path *cheapest_total_inner = innerrel->cheapest_total_path;
+			List *all_outer_paths = outerrel->pathlist;
+			Path *cheapest_total_outer = NULL;
+			ListCell *lc;
+
+			if( bms_num_members(joinrel->relids) == 2){
+				try_hashjoin_path(root,
+										  joinrel,
+										  jointype,
+										  sjinfo,
+										  semifactors,
+										  param_source_rels,
+										  cheapest_startup_outer,
+										  cheapest_total_inner,
+										  restrictlist,
+										  hashclauses);
+
+			}
+
+			else{
+			foreach(lc,all_outer_paths) {
+				cheapest_total_outer = (Path *) lfirst(lc);
+				/* Unique-ify if need be; we ignore parameterized possibilities */
+				if (jointype == JOIN_UNIQUE_OUTER) {
+					cheapest_total_outer = (Path *) create_unique_path(root,
+							outerrel,
+							cheapest_total_outer,
+							sjinfo);
+					Assert(cheapest_total_outer);
+					jointype = JOIN_INNER;
+					try_hashjoin_path(root,
+							joinrel,
+							jointype,
+							sjinfo,
+							semifactors,
+							param_source_rels,
+							cheapest_total_outer,
+							cheapest_total_inner,
+							restrictlist,
+							hashclauses);
+					/* no possibility of cheap startup here */
+				} else if (jointype == JOIN_UNIQUE_INNER) {
+					cheapest_total_inner = (Path *) create_unique_path(root,
+							innerrel,
+							cheapest_total_inner,
+							sjinfo);
+					Assert(cheapest_total_inner);
+					jointype = JOIN_INNER;
+					try_hashjoin_path(root,
+							joinrel,
+							jointype,
+							sjinfo,
+							semifactors,
+							param_source_rels,
+							cheapest_total_outer,
+							cheapest_total_inner,
+							restrictlist,
+							hashclauses);
+				} else {
+					/*
+					 * For other jointypes, we consider the cheapest startup outer
+					 * together with the cheapest total inner, and then consider
+					 * pairings of cheapest-total paths including parameterized ones.
+					 * There is no use in generating parameterized paths on the basis
+					 * of possibly cheap startup cost, so this is sufficient.
+					 */
+					ListCell *lc1;
+					ListCell *lc2;
+
+					try_hashjoin_path(root,
+							joinrel,
+							jointype,
+							sjinfo,
+							semifactors,
+							param_source_rels,
+							cheapest_total_outer,
+							cheapest_total_inner,
+							restrictlist,
+							hashclauses);
+
+				}
+			}
+			}
+
+		} else {
+			/*
 		 * We consider both the cheapest-total-cost and cheapest-startup-cost
 		 * outer paths.  There's no need to consider any but the
 		 * cheapest-total-cost inner path, however.
@@ -1227,7 +1310,8 @@ hash_inner_and_outer(PlannerInfo *root,
 									  outerpath,
 									  innerpath,
 									  restrictlist,
-									  hashclauses);
+								hashclauses);
+					}
 				}
 			}
 		}
@@ -1256,7 +1340,7 @@ hash_inner_and_outer(PlannerInfo *root,
  * if it is mergejoinable and involves vars from the two sub-relations
  * currently of interest.
  */
-static List *
+List *
 select_mergejoin_clauses(PlannerInfo *root,
 						 RelOptInfo *joinrel,
 						 RelOptInfo *outerrel,

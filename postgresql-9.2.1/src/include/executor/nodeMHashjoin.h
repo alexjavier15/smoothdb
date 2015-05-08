@@ -77,14 +77,14 @@ typedef struct MJoinTableData
 	FmgrInfo   *hashfunctions;	/* lookup data for hash functions */
 	MJoinBatchDesc   *batches; /* buffered virtual temp file per batch */
 	int     nInserted;
-	MJoinState *parent;
+	SymHashJoinState *parent;
 	HashTableStatus status;
 }	MJoinTableData;
 
-extern MJoinState *ExecInitMJoin(HashJoin *node, EState *estate, int eflags);
-extern TupleTableSlot *ExecMJoin(MJoinState *node);
-extern void ExecEndMJoin(MJoinState *node);
-extern void ExecReScanMHashJoin(MJoinState *node);
+extern SymHashJoinState *ExecInitMJoin(HashJoin *node, EState *estate, int eflags);
+extern TupleTableSlot *ExecMJoin(SymHashJoinState *node);
+extern void ExecEndMJoin(SymHashJoinState *node);
+extern void ExecReScanMHashJoin(SymHashJoinState *node);
 extern void ExecMHashJoinResetBatch(MJoinBatchDesc batch);
 TupleTableSlot *ExecMJoinGetSavedTuple( BufFile *file,
 						  uint32 *hashvalue,

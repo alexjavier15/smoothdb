@@ -203,8 +203,12 @@ ExecInitSeqScan(SeqScan *node, EState *estate, int eflags)
 	/*
 	 * Initialize result tuple type and projection info.
 	 */
+
+//	printf("\nScan targer list for rel %d\n", node->scanrelid);
+//	pprint(node->plan.targetlist);
 	ExecAssignResultTypeFromTL(&scanstate->ps);
 	ExecAssignScanProjectionInfo(scanstate);
+	//printf("\n Attributes for  rel %d -> %d\n", node->scanrelid, scanstate->ps.ps_ResultTupleSlot->tts_tupleDescriptor->natts);
 
 	return scanstate;
 }

@@ -290,11 +290,18 @@ set_plan_refs(PlannerInfo *root, Plan *plan, int rtoffset)
 	if (plan == NULL)
 		return NULL;
 
+	if(plan->fixed_ref)
+		return plan;
+
 	/*
 	 * Plan-type-specific fixes
 	 */
+
 	switch (nodeTag(plan))
 	{
+
+
+
 		case T_SeqScan:
 			{
 				SeqScan    *splan = (SeqScan *) plan;
@@ -487,6 +494,31 @@ set_plan_refs(PlannerInfo *root, Plan *plan, int rtoffset)
 					fix_scan_list(root, splan->fdw_exprs, rtoffset);
 			}
 			break;
+		case T_MultiJoin:{
+
+			ListCell *lc;
+			MultiJoin * mjoin = (MultiJoin *)plan;
+			int origtroffset = rtoffset;
+			((Node *)plan)->type = T_HashJoin;
+		//	pprint(plan);
+
+			printf("Seting References  for   MultiJoin\n");
+
+			foreach(lc, mjoin->plan_list){
+
+				set_plan_refs(root, (Plan *) lfirst(lc), origtroffset);
+
+				origtroffset = rtoffset;
+
+			}
+
+			set_join_references(root, (Join *) plan, rtoffset);
+			((Node *)plan)->type = T_MultiJoin;
+
+
+			}
+
+		break;
 
 		case T_NestLoop:
 		case T_MergeJoin:
@@ -513,6 +545,7 @@ set_plan_refs(PlannerInfo *root, Plan *plan, int rtoffset)
 			 * Since these plan types don't check quals either, we should not
 			 * find any qual expression attached to them.
 			 */
+
 			Assert(plan->qual == NIL);
 			break;
 		case T_LockRows:
@@ -748,7 +781,7 @@ set_plan_refs(PlannerInfo *root, Plan *plan, int rtoffset)
 			}
 			break;
 		default:
-			elog(ERROR, "unrecognized node type: %d",
+			elog(ERROR, "unrecognized node type in set references : %d",
 				 (int) nodeTag(plan));
 			break;
 	}
@@ -761,6 +794,7 @@ set_plan_refs(PlannerInfo *root, Plan *plan, int rtoffset)
 	 * reference-adjustments bottom-up, then we would fail to match this
 	 * plan's var nodes against the already-modified nodes of the children.
 	 */
+	plan->fixed_ref = true;
 	plan->lefttree = set_plan_refs(root, plan->lefttree, rtoffset);
 	plan->righttree = set_plan_refs(root, plan->righttree, rtoffset);
 
@@ -783,9 +817,14 @@ set_indexonlyscan_references(PlannerInfo *root,
 {
 	indexed_tlist *index_itlist;
 
+	if(plan->scan.plan.fixed_ref)
+		return (Plan *) plan;
 	index_itlist = build_tlist_index(plan->indextlist);
 
+
+
 	plan->scan.scanrelid += rtoffset;
+
 	plan->scan.plan.targetlist = (List *)
 		fix_upper_expr(root,
 					   (Node *) plan->scan.plan.targetlist,
@@ -806,6 +845,7 @@ set_indexonlyscan_references(PlannerInfo *root,
 	plan->indextlist = fix_scan_list(root, plan->indextlist, rtoffset);
 
 	pfree(index_itlist);
+
 
 	return (Plan *) plan;
 }
@@ -1137,10 +1177,15 @@ set_join_references(PlannerInfo *root, Join *join, int rtoffset)
 	indexed_tlist *outer_itlist;
 	indexed_tlist *inner_itlist;
 
+
+
+
 	outer_itlist = build_tlist_index(outer_plan->targetlist);
 	inner_itlist = build_tlist_index(inner_plan->targetlist);
 
+
 	/* All join plans have tlist, qual, and joinqual */
+
 	join->plan.targetlist = fix_join_expr(root,
 										  join->plan.targetlist,
 										  outer_itlist,
@@ -1159,6 +1204,8 @@ set_join_references(PlannerInfo *root, Join *join, int rtoffset)
 								   inner_itlist,
 								   (Index) 0,
 								   rtoffset);
+
+
 
 	/* Now do join-type-specific stuff */
 	if (IsA(join, NestLoop))
@@ -1192,7 +1239,7 @@ set_join_references(PlannerInfo *root, Join *join, int rtoffset)
 										 (Index) 0,
 										 rtoffset);
 	}
-	else if (IsA(join, HashJoin))
+	else if (IsA(join, HashJoin) || IsA(join, MultiJoin))
 	{
 		HashJoin   *hj = (HashJoin *) join;
 
@@ -1202,6 +1249,7 @@ set_join_references(PlannerInfo *root, Join *join, int rtoffset)
 										inner_itlist,
 										(Index) 0,
 										rtoffset);
+
 	}
 
 	pfree(outer_itlist);
@@ -1371,8 +1419,8 @@ build_tlist_index(List *tlist)
 		{
 			Var		   *var = (Var *) tle->expr;
 
-			vinfo->varno = var->varno;
-			vinfo->varattno = var->varattno;
+			vinfo->varno = var->varnoold;
+			vinfo->varattno = var->varoattno;
 			vinfo->resno = tle->resno;
 			vinfo++;
 		}
@@ -1459,6 +1507,7 @@ search_indexed_tlist_for_var(Var *var, indexed_tlist *itlist,
 	i = itlist->num_vars;
 	while (i-- > 0)
 	{
+
 		if (vinfo->varno == varno && vinfo->varattno == varattno)
 		{
 			/* Found a match */
@@ -1594,7 +1643,7 @@ fix_join_expr(PlannerInfo *root,
 static Node *
 fix_join_expr_mutator(Node *node, fix_join_expr_context *context)
 {
-	Var		   *newvar;
+	Var		   *newvar = NULL;
 
 	if (node == NULL)
 		return NULL;
@@ -1628,9 +1677,9 @@ fix_join_expr_mutator(Node *node, fix_join_expr_context *context)
 				var->varnoold += context->rtoffset;
 			return (Node *) var;
 		}
-
+		Assert(newvar != NULL);
 		/* No referent found for Var */
-		elog(ERROR, "variable not found in subplan target lists");
+		elog(ERROR, "variable 1 not found in subplan target lists");
 	}
 	if (IsA(node, PlaceHolderVar))
 	{
@@ -1734,7 +1783,7 @@ fix_upper_expr_mutator(Node *node, fix_upper_expr_context *context)
 	if (IsA(node, Var))
 	{
 		Var		   *var = (Var *) node;
-
+		pprint(var);
 		newvar = search_indexed_tlist_for_var(var,
 											  context->subplan_itlist,
 											  context->newvarno,

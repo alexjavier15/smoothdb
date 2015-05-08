@@ -210,6 +210,8 @@ extern void *list_nth(const List *list, int n);
 extern int	list_nth_int(const List *list, int n);
 extern Oid	list_nth_oid(const List *list, int n);
 
+extern void *
+list_member_return(const List *list, const void *datum);
 extern bool list_member(const List *list, const void *datum);
 extern bool list_member_ptr(const List *list, const void *datum);
 extern bool list_member_int(const List *list, int datum);

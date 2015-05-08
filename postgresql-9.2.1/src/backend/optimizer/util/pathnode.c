@@ -27,6 +27,8 @@
 #include "parser/parsetree.h"
 #include "utils/lsyscache.h"
 #include "utils/selfuncs.h"
+#include "lib/stringinfo.h"
+
 
 
 typedef enum
@@ -41,8 +43,6 @@ static void add_parameterized_path(RelOptInfo *parent_rel, Path *new_path);
 static List *translate_sub_tlist(List *tlist, int relid);
 static bool query_is_distinct_for(Query *query, List *colnos, List *opids);
 static Oid	distinct_col_search(int colno, List *colnos, List *opids);
-static void	set_MultiJoinInfo(PlannerInfo *root ,JoinPath  *joinpath, Path*inner_path, Path*outer_path,
-		List * restrict_clauses, List *join_clauses);
 
 
 /*****************************************************************************
@@ -463,6 +463,7 @@ add_path(RelOptInfo *parent_rel, Path *new_path)
 	 * we can still discard
 	 */
 
+	new_path->plan = NULL;
 
 	/*
 	 * This is a convenient place to check for query cancel --- no part of the
@@ -529,7 +530,7 @@ add_path(RelOptInfo *parent_rel, Path *new_path)
 							if ((outercmp == BMS_EQUAL ||
 								 outercmp == BMS_SUBSET1) &&
 								new_path->rows <= old_path->rows)
-								remove_old = true;		/* new dominates old */
+								remove_old = enable_multi_join ? false : true ;		/* new dominates old */
 						}
 						else if (keyscmp == PATHKEYS_BETTER2)
 						{
@@ -558,19 +559,19 @@ add_path(RelOptInfo *parent_rel, Path *new_path)
 								 * costs compare differently.
 								 */
 								if (new_path->rows < old_path->rows)
-									remove_old = true;	/* new dominates old */
+									remove_old = enable_multi_join ? false : true;	/* new dominates old */
 								else if (new_path->rows > old_path->rows)
 									accept_new = false; /* old dominates new */
 								else if (compare_path_costs_fuzzily(new_path, old_path,
 											  1.0000000001) == COSTS_BETTER1)
-									remove_old = true;	/* new dominates old */
+									remove_old = enable_multi_join ? false : true;	/* new dominates old */
 								else
 									accept_new = false; /* old equals or
 														 * dominates new */
 							}
 							else if (outercmp == BMS_SUBSET1 &&
 									 new_path->rows <= old_path->rows)
-								remove_old = true;		/* new dominates old */
+								remove_old = enable_multi_join ? false : true;		/* new dominates old */
 							else if (outercmp == BMS_SUBSET2 &&
 									 new_path->rows >= old_path->rows)
 								accept_new = false;		/* old dominates new */
@@ -585,7 +586,7 @@ add_path(RelOptInfo *parent_rel, Path *new_path)
 							if ((outercmp == BMS_EQUAL ||
 								 outercmp == BMS_SUBSET1) &&
 								new_path->rows <= old_path->rows)
-								remove_old = true;		/* new dominates old */
+								remove_old = enable_multi_join ? false : true;		/* new dominates old */
 						}
 						break;
 					case COSTS_BETTER2:
@@ -643,6 +644,7 @@ add_path(RelOptInfo *parent_rel, Path *new_path)
 			break;
 	}
 
+	accept_new = true;
 	if (accept_new)
 	{
 		/* Accept the new path: insert it at proper place in pathlist */
@@ -686,7 +688,8 @@ add_path_precheck(RelOptInfo *parent_rel,
 
 	/* Pretend parameterized paths have no pathkeys, per add_path comment */
 	new_path_pathkeys = required_outer ? NIL : pathkeys;
-
+	if(enable_multi_join)
+		return true;
 	foreach(p1, parent_rel->pathlist)
 	{
 		Path	   *old_path = (Path *) lfirst(p1);
@@ -876,6 +879,7 @@ create_seqscan_path(PlannerInfo *root, RelOptInfo *rel, Relids required_outer)
 
 	cost_seqscan(pathnode, root, rel, pathnode->param_info);
 
+
 	return pathnode;
 }
 
@@ -930,8 +934,7 @@ create_index_path(PlannerInfo *root,
 	/* Convert clauses to indexquals the executor can handle */
 	expand_indexqual_conditions(index, indexclauses, indexclausecols,
 								&indexquals, &indexqualcols);
-
-	/* Fill in the pathnode */
+		/* Fill in the pathnode */
 	pathnode->indexinfo = index;
 	pathnode->indexclauses = indexclauses;
 	pathnode->indexquals = indexquals;
@@ -939,6 +942,7 @@ create_index_path(PlannerInfo *root,
 	pathnode->indexorderbys = indexorderbys;
 	pathnode->indexorderbycols = indexorderbycols;
 	pathnode->indexscandir = indexscandir;
+
 
 	cost_index(pathnode, root, loop_count);
 
@@ -1049,6 +1053,7 @@ create_smooth_heap_path(PlannerInfo *root,
 						  pathnode->path.param_info,
 						  bitmapqual, loop_count);
 
+
 	return pathnode;
 }
 
@@ -1086,6 +1091,7 @@ create_bitmap_heap_path(PlannerInfo *root,
 						  pathnode->path.param_info,
 						  bitmapqual, loop_count);
 
+
 	return pathnode;
 }
 
@@ -1109,6 +1115,7 @@ create_bitmap_and_path(PlannerInfo *root,
 
 	/* this sets bitmapselectivity as well as the regular cost fields: */
 	cost_bitmap_and_node(pathnode, root);
+
 
 	return pathnode;
 }
@@ -1154,6 +1161,8 @@ create_tidscan_path(PlannerInfo *root, RelOptInfo *rel, List *tidquals)
 	pathnode->tidquals = tidquals;
 
 	cost_tidscan(&pathnode->path, root, rel, tidquals);
+
+
 
 	return pathnode;
 }
@@ -1931,6 +1940,7 @@ create_valuesscan_path(PlannerInfo *root, RelOptInfo *rel)
 
 	cost_valuesscan(pathnode, root, rel);
 
+
 	return pathnode;
 }
 
@@ -2213,8 +2223,8 @@ create_mergejoin_path(PlannerInfo *root,
 	pathnode->innersortkeys = innersortkeys;
 	/* pathnode->materialize_inner will be set by final_cost_mergejoin */
 
-	pathnode->jpath.path.multijoin_info = NULL;
-	set_MultiJoinInfo(root, (JoinPath *) &pathnode->jpath,inner_path, outer_path,restrict_clauses,mergeclauses);
+
+
 
 	final_cost_mergejoin(root, pathnode, workspace, sjinfo);
 
@@ -2253,7 +2263,6 @@ create_hashjoin_path(PlannerInfo *root,
 	HashPath   *pathnode = makeNode(HashPath);
 
 	pathnode->jpath.path.pathtype = T_HashJoin;
-
 	pathnode->jpath.path.parent = joinrel;
 	pathnode->jpath.path.param_info =
 		get_joinrel_parampathinfo(root,
@@ -2276,6 +2285,7 @@ create_hashjoin_path(PlannerInfo *root,
 	 * outer rel than it does now.)
 	 */
 	pathnode->jpath.path.pathkeys = NIL;
+	pathnode->jpath.has_alljoins = false;
 	pathnode->jpath.jointype = jointype;
 	pathnode->jpath.outerjoinpath = outer_path;
 	pathnode->jpath.innerjoinpath = inner_path;
@@ -2283,12 +2293,6 @@ create_hashjoin_path(PlannerInfo *root,
 	pathnode->path_hashclauses = hashclauses;
 	/* final_cost_hashjoin will fill in pathnode->num_batches */
 //
-	pathnode->jpath.path.multijoin_info = NULL;
-	set_MultiJoinInfo(root, (JoinPath*) &pathnode->jpath,inner_path, outer_path,restrict_clauses,hashclauses);
-
-
-
-
 
 
 	final_cost_hashjoin(root, pathnode, workspace, sjinfo, semifactors);
@@ -2393,83 +2397,16 @@ reparameterize_path(PlannerInfo *root, Path *path,
 	}
 	return NULL;
 }
-static void	set_MultiJoinInfo(PlannerInfo *root, JoinPath * joinpath, Path*inner_path, Path*outer_path,
-		List * restrict_clauses, List *join_clauses){
+void _outBitmapset(StringInfo str, const Bitmapset *bms) {
+	Bitmapset *tmpset;
+	int x;
 
-	//Check if we can generate a multijoin info.
-
-	if (enable_multi_join
-			&& (inner_path->parent->rtekind == RTE_RELATION || outer_path->parent->rtekind== RTE_RELATION)) {
-
-		MultiJoinInfo * mJoinInfo = makeNode(MultiJoinInfo);
-
-		RelOptInfo *relation = NULL;
-		//List *tlist = build_relation_tlist(joinpath.path.parent);
-		List *allclauses;
-		List *otherclauses;
-		List *joinclauses;
-		mJoinInfo->nextJoin = NULL;
-		relation = joinpath->path.parent;
-		/* Sort join qual clauses into best execution order */
-		allclauses = order_qual_clauses(root, join_clauses);
-		/* There's no point in sorting the hash clauses ... */
-
-		/* Get the join qual clauses (in plain expression form) */
-		/* Any pseudoconstant clauses are ignored here */
-		if (IS_OUTER_JOIN(joinpath->jointype)) {
-			extract_actual_join_clauses(allclauses, &allclauses, &otherclauses);
-		} else {
-			/* We can treat all clauses alike for an inner join */
-			allclauses = extract_actual_clauses(allclauses, false);
-			otherclauses = NIL;
-		}
-
-		/*
-		 * Remove the join_clauses from the list of join qual clauses, leaving the
-		 * list of quals that must be checked as qpquals.
-		 */
-		joinclauses = get_actual_clauses(join_clauses);
-		allclauses = list_difference(allclauses, joinclauses);
-
-		/*
-		 * Rearrange join_clauses, if needed, so that the outer variable is always
-		 * on the left.
-		 */
-		joinclauses = get_switched_clauses(join_clauses, outer_path->parent->relids);
-
-		mJoinInfo->innerRel = inner_path->parent;
-		mJoinInfo->outerRel = outer_path->parent;
-		mJoinInfo->all_quals = lappend(mJoinInfo->all_quals, list_copy(restrict_clauses));
-		mJoinInfo->join_quals = lappend(mJoinInfo->join_quals, list_copy(join_clauses));
-
-		if (inner_path->parent->rtekind == RTE_JOIN) {
-
-			relation->multijoin_info = inner_path->parent->multijoin_info;
-		//	joinpath->path.multijoin_info = inner_path->multijoin_info;
-
-		}
-
-		if (outer_path->parent->rtekind == RTE_JOIN) {
-
-			relation->multijoin_info = outer_path->parent->multijoin_info;
-			//joinpath->path.multijoin_info = outer_path->multijoin_info;
-
-		}
-		if (relation->multijoin_info == NULL) {
-			relation->multijoin_info = mJoinInfo;
-			//joinpath->path.multijoin_info = mJoinInfo;
-		} else {
-			relation->multijoin_info->nextJoin = mJoinInfo;
-			//joinpath->path.multijoin_info->nextJoin = mJoinInfo;
-		}
-
-	}
-	else{
-
-		printf ("Failing for : ");
-		pprint(joinpath->path.parent->relids);
-	}
-
-
-
+	appendStringInfoChar(str, '(');
+	appendStringInfoChar(str, 'b');
+	tmpset = bms_copy(bms);
+	while ((x = bms_first_member(tmpset)) >= 0)
+		appendStringInfo(str, " %d", x);
+	bms_free(tmpset);
+	appendStringInfoChar(str, ')');
 }
+

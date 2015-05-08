@@ -108,6 +108,7 @@ get_relation_info(PlannerInfo *root, Oid relationObjectId, bool inhparent,
 	rel->attr_widths = (int32 *)
 		palloc0((rel->max_attr - rel->min_attr + 1) * sizeof(int32));
 
+	printf(" relation %d : %s \n", rel->relid, NameStr((relation)->rd_rel->relname));
 	/*
 	 * Estimate relation size --- unless it's an inheritance parent, in which
 	 * case the size will be computed later in set_append_rel_pathlist, and we

@@ -99,6 +99,7 @@
 #include "executor/nodeMergeAppend.h"
 #include "executor/nodeMergejoin.h"
 #include "executor/nodeMHashjoin.h"
+#include "executor/nodeMultiJoin.h"
 #include "executor/nodeModifyTable.h"
 #include "executor/nodeNestloop.h"
 #include "executor/nodeRecursiveunion.h"
@@ -281,15 +282,25 @@ ExecInitNode(Plan *node, EState *estate, int eflags)
 			break;
 
 		case T_HashJoin:
-			if(!enable_mhashjoin)
-			result = (PlanState *) ExecInitHashJoin((HashJoin *) node,
-													estate, eflags);
-			else
-			result = (PlanState *) ExecInitMJoin((HashJoin *) node,
-													estate, eflags);
+		{
+			if (!enable_mhashjoin) {
+
+				if (enable_multi_join)
+					result = (PlanState *) ExecInitCHashJoin((HashJoin *) node, estate, eflags);
+				else
+
+					result = (PlanState *) ExecInitHashJoin((HashJoin *) node, estate, eflags);
+
+			} else
+
+				result = (PlanState *) ExecInitMJoin((HashJoin *) node, estate, eflags);
 
 			break;
+		}
 
+		case T_MultiJoin:
+			result = (PlanState *) ExecInitMultiJoin((MultiJoin *) node, estate, eflags);
+			break;
 			/*
 			 * materialization nodes
 			 */
@@ -324,6 +335,10 @@ ExecInitNode(Plan *node, EState *estate, int eflags)
 			break;
 
 		case T_Hash:
+			if(enable_multi_join)
+			result = (PlanState *) ExecInitMultiHash((MultiHash *) node,
+																estate, eflags);
+			else
 			result = (PlanState *) ExecInitHash((Hash *) node,
 												estate, eflags);
 			break;
@@ -344,7 +359,7 @@ ExecInitNode(Plan *node, EState *estate, int eflags)
 			break;
 
 		default:
-			elog(ERROR, "unrecognized node type: %d", (int) nodeTag(node));
+			elog(ERROR, "unrecognized node type in inti: %d", (int) nodeTag(node));
 			result = NULL;		/* keep compiler quiet */
 			break;
 	}
@@ -366,6 +381,7 @@ ExecInitNode(Plan *node, EState *estate, int eflags)
 	result->initPlan = subps;
 
 	/* Set up instrumentation for this node if requested */
+
 	if (estate->es_instrument)
 		result->instrument = InstrAlloc(1, estate->es_instrument);
 
@@ -389,7 +405,7 @@ ExecProcNode(PlanState *node)
 	if (node->chgParam != NULL) /* something changed */
 		ExecReScan(node);		/* let ReScan handle this */
 
-	if (node->instrument)
+	if (node->instrument && !enable_multi_join)
 		InstrStartNode(node->instrument);
 
 	switch (nodeTag(node))
@@ -487,8 +503,13 @@ ExecProcNode(PlanState *node)
 		case T_MergeJoinState:
 			result = ExecMergeJoin((MergeJoinState *) node);
 			break;
-		case T_MJoinState:
-			result = ExecMJoin((MJoinState *) node);
+		case T_SymHashJoinState:
+			result = ExecMJoin((SymHashJoinState *) node);
+			break;
+
+		case T_MultiJoinState:
+			result = ExecMultiJoin((MultiJoinState *) node);
+
 			break;
 
 		case T_HashJoinState:
@@ -499,6 +520,11 @@ ExecProcNode(PlanState *node)
 			/*
 			 * materialization nodes
 			 */
+		case T_CHashJoinState:
+			result = ExecCHashJoin((CHashJoinState *) node);
+			//InstrStopNode(node->instrument[((CHashJoinState *) node)->seq_num + 1], TupIsNull(result) ? 0.0 : 1.0);
+			break;
+
 		case T_MaterialState:
 			result = ExecMaterial((MaterialState *) node);
 			break;
@@ -526,6 +552,9 @@ ExecProcNode(PlanState *node)
 		case T_HashState:
 			result = ExecHash((HashState *) node);
 			break;
+		case T_MultiHashState:
+			result =ExecMultiHash((MultiHashState *)node);
+			break;
 
 		case T_SetOpState:
 			result = ExecSetOp((SetOpState *) node);
@@ -540,12 +569,13 @@ ExecProcNode(PlanState *node)
 			break;
 
 		default:
-			elog(ERROR, "unrecognized node type: %d", (int) nodeTag(node));
+			elog(ERROR, "unrecognized node type in exec: %d", (int) nodeTag(node));
 			result = NULL;
 			break;
 	}
 
-	if (node->instrument)
+
+	if (node->instrument && !enable_multi_join)
 		InstrStopNode(node->instrument, TupIsNull(result) ? 0.0 : 1.0);
 
 	return result;
@@ -600,9 +630,12 @@ MultiExecProcNode(PlanState *node)
 		case T_BitmapOrState:
 			result = MultiExecBitmapOr((BitmapOrState *) node);
 			break;
+		case T_MultiHashState:
+			result = MultiExecMultiHash((MultiHashState *) node);
 
+			break;
 		default:
-			elog(ERROR, "unrecognized node type: %d", (int) nodeTag(node));
+			elog(ERROR, "unrecognized node type in multi: %d", (int) nodeTag(node));
 			result = NULL;
 			break;
 	}
@@ -743,15 +776,23 @@ ExecEndNode(PlanState *node)
 		case T_MergeJoinState:
 			ExecEndMergeJoin((MergeJoinState *) node);
 			break;
-		case T_MJoinState:
-			ExecEndMJoin((MJoinState *) node);
+		case T_SymHashJoinState:
+			ExecEndMJoin((SymHashJoinState *) node);
 			break;
 		case T_HashJoinState:
 
 			ExecEndHashJoin((HashJoinState *) node);
 
 			break;
+		case T_CHashJoinState:
+			ExecEndCHashJoin((CHashJoinState *) node);
 
+				break;
+
+		case T_MultiJoinState:
+		 ExecEndMultiJoin((MultiJoinState *) node);
+
+		break;
 			/*
 			 * materialization nodes
 			 */
@@ -782,6 +823,9 @@ ExecEndNode(PlanState *node)
 		case T_HashState:
 			ExecEndHash((HashState *) node);
 			break;
+		case T_MultiHashState:
+			ExecEndHash((HashState *) node);
+			break;
 
 		case T_SetOpState:
 			ExecEndSetOp((SetOpState *) node);
@@ -796,7 +840,7 @@ ExecEndNode(PlanState *node)
 			break;
 
 		default:
-			elog(ERROR, "unrecognized node type: %d", (int) nodeTag(node));
+			elog(ERROR, "unrecognized node type in end: %d", (int) nodeTag(node));
 			break;
 	}
 }

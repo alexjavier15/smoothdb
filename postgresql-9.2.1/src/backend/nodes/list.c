@@ -440,6 +440,28 @@ list_nth_oid(const List *list, int n)
  * determined via equal(), so callers should ensure that they pass a
  * Node as 'datum'.
  */
+void *
+list_member_return(const List *list, const void *datum)
+{
+	const ListCell *cell;
+
+	Assert(IsPointerList(list));
+	check_list_invariants(list);
+
+	foreach(cell, list)
+	{
+		if (equal(lfirst(cell), datum))
+			return lfirst(cell);
+	}
+
+	return NULL;
+}
+
+/*
+ * Return true iff 'datum' is a member of the list. Equality is
+ * determined via equal(), so callers should ensure that they pass a
+ * Node as 'datum'.
+ */
 bool
 list_member(const List *list, const void *datum)
 {

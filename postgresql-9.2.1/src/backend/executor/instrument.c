@@ -128,6 +128,34 @@ InstrEndLoop(Instrumentation *instr)
 	instr->firsttuple = 0;
 	instr->tuplecount = 0;
 }
+/* Finish a run cycle for a plan node */
+void
+InstrEndMultiJoinLoop(Instrumentation *instr,Instrumentation *instr2 )
+{
+	double		totaltime;
+
+	/* Skip if nothing has happened, or already shut down */
+	if (!instr->running)
+		return;
+
+	if (!INSTR_TIME_IS_ZERO(instr->starttime))
+		elog(DEBUG2, "InstrEndLoop called on running node");
+
+	/* Accumulate per-cycle statistics into totals */
+	totaltime = INSTR_TIME_GET_DOUBLE(instr->counter);
+
+	instr->startup += instr->firsttuple;
+	instr->total += totaltime;
+	instr->ntuples += instr2->tuplecount;
+	instr->nloops += 1;
+
+	/* Reset for next cycle (if any) */
+	instr->running = false;
+	INSTR_TIME_SET_ZERO(instr->starttime);
+	INSTR_TIME_SET_ZERO(instr->counter);
+	instr->firsttuple = 0;
+	instr->tuplecount -= instr2->tuplecount;
+}
 
 /* dst += add - sub */
 static void

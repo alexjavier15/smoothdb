@@ -31,6 +31,7 @@
 
 #include "nodes/relation.h"
 #include "utils/datum.h"
+#include "nodes/execnodes.h"
 
 
 /*
@@ -764,6 +765,27 @@ _equalJoinExpr(const JoinExpr *a, const JoinExpr *b)
 	COMPARE_NODE_FIELD(quals);
 	COMPARE_NODE_FIELD(alias);
 	COMPARE_SCALAR_FIELD(rtindex);
+
+	return true;
+}
+static bool
+_equalHashInfo(const HashInfo *a, const HashInfo *b)
+{
+//	printf("Equals  a: \n");
+//	pprint(a->hashkeys);
+//	printf("Equals  b: \n");
+//	pprint(b->hashkeys);
+	COMPARE_NODE_FIELD(hashkeys);
+	COMPARE_NODE_FIELD(hoperators);
+
+	return true;
+}
+
+static bool
+_equalExprState(const ExprState *a, const ExprState *b)
+{
+	COMPARE_NODE_FIELD(expr);
+
 
 	return true;
 }
@@ -2607,7 +2629,12 @@ equal(const void *a, const void *b)
 		case T_JoinExpr:
 			retval = _equalJoinExpr(a, b);
 			break;
-
+		case T_HashInfo:
+			retval = _equalHashInfo(a, b);
+			break;
+		case T_ExprState:
+			retval = _equalExprState(a, b);
+			break;
 			/*
 			 * RELATION NODES
 			 */

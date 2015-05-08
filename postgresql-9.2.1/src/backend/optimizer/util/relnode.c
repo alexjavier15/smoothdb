@@ -122,6 +122,8 @@ build_simple_rel(PlannerInfo *root, int relid, RelOptKind reloptkind)
 	rel->baserestrictcost.per_tuple = 0;
 	rel->joininfo = NIL;
 	rel->has_eclass_joins = false;
+	rel->joinclauses = NIL;
+	rel->hash_plan = NULL;
 
 	/* Check type of rtable entry */
 	switch (rte->rtekind)
@@ -399,11 +401,7 @@ build_join_rel(PlannerInfo *root,
 	 */
 	restrictlist = build_joinrel_restrictlist(root, joinrel,
 											  outer_rel, inner_rel);
-	if(bms_num_members(joinrel->relids) == 2){
-		pprint(restrictlist);
 
-
-	}
 
 	if (restrictlist_ptr)
 		*restrictlist_ptr = restrictlist;

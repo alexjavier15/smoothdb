@@ -5095,6 +5095,8 @@ ExecQual(List *qual, ExprContext *econtext, bool resultForNull)
 	EV_nodeDisplay(qual);
 	EV_printf("\n");
 
+
+
 	/*
 	 * Run in short-lived per-tuple context while computing expressions.
 	 */
@@ -5119,7 +5121,6 @@ ExecQual(List *qual, ExprContext *econtext, bool resultForNull)
 		ExprState  *clause = (ExprState *) lfirst(l);
 		Datum		expr_value;
 		bool		isNull;
-
 		expr_value = ExecEvalExpr(clause, econtext, &isNull, NULL);
 
 		if (isNull)
