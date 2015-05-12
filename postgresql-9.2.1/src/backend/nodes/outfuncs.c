@@ -2663,6 +2663,15 @@ _outRangeFunction(StringInfo str, const RangeFunction *node)
 }
 
 static void
+_outRelChunk(StringInfo str, const RelChunk *node)
+{
+	WRITE_NODE_TYPE("RELCHUNK");
+
+	WRITE_INT_FIELD(chunkID);
+
+}
+
+static void
 _outConstraint(StringInfo str, const Constraint *node)
 {
 	WRITE_NODE_TYPE("CONSTRAINT");
@@ -3264,7 +3273,10 @@ _outNode(StringInfo str, const void *obj)
 				break;
 			case T_HashInfo:
 				_outHashInfo(str,obj);
-			break;
+				break;
+			case T_RelChunk:
+				_outRelChunk(str,obj);
+				break;
 
 			default:
 

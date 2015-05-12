@@ -448,7 +448,11 @@ typedef enum NodeTag
 	T_ResultCache,				/* in nodeIndexsmoothscan.h*/
 	T_TupleIDCache,				/* in nodeIndexsmoothscan.h*/
 	T_InlineCodeBlock,			/* in nodes/parsenodes.h */
-	T_FdwRoutine				/* in foreign/fdwapi.h */
+	T_FdwRoutine,				/* in foreign/fdwapi.h */
+
+	T_RelChunk,
+	T_ChunkedSubPlan
+
 } NodeTag;
 
 /*

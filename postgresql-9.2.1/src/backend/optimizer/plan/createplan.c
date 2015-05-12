@@ -39,6 +39,8 @@
 #include "optimizer/var.h"
 #include "parser/parse_clause.h"
 #include "parser/parsetree.h"
+#include "smooth/joincache.h"
+
 #include "utils/lsyscache.h"
 #include "utils/memutils.h"
 
@@ -181,8 +183,7 @@ create_plan(PlannerInfo *root, Path *best_path) {
 	root->curOuterParams = NIL;
 
 	/* Recursively process the path tree */
-	MemoryContextStats(root->planner_cxt);
-	fflush(stdout);
+
 	plan = create_plan_recurse(root, best_path);
 
 	/* Check we successfully assigned all NestLoopParams to plan nodes */
@@ -196,8 +197,8 @@ create_plan(PlannerInfo *root, Path *best_path) {
 	root->plan_params = NIL;
 
 	//pprint(plan);
-	printf("Done  planning \n");
-	fflush(stdout);
+	//printf("Done  planning \n");
+	//fflush(stdout);
 	return plan;
 }
 
@@ -209,7 +210,7 @@ static Plan *
 create_plan_recurse(PlannerInfo *root, Path *best_path) {
 	Plan *plan;
 	if (best_path->plan != NULL) {
-		printf("Plan already created ! \n");
+		//printf("Plan already created ! \n");
 		return best_path->plan;
 	}
 
@@ -275,8 +276,20 @@ create_scan_plan(PlannerInfo *root, Path *best_path) {
 		printf("creating plan for acces path for relation  %d \n", best_path->parent->relid);
 	}
 	if(enable_multi_join){
+		ListCell *lc;
 
 		best_path->rows = best_path->parent->tuples;
+
+		foreach(lc, best_path->parent->chunks) {
+			RelChunk *chunk = (RelChunk *) lfirst(lc);
+			List * subplans = JC_GetChunkedSubPlans(chunk);
+			Assert(subplans != NIL);
+			printf(" Got %d sub plans for chunk %d.[%d] \n",list_length(subplans), ChunkGetRelid(chunk),ChunkGetID(chunk));
+
+
+		}
+		printf("************************ \n");
+		fflush(stdout);
 	}
 	/*
 	 * For table scans, rather than using the relation targetlist (which is

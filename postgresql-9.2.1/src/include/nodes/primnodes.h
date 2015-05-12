@@ -1279,4 +1279,35 @@ typedef struct HashInfo{
 
 }HashInfo;
 
+typedef struct ChunkID{
+	uint16 relid;
+    uint16 ch_id;
+
+}ChunkID;
+typedef enum
+{
+	CH_DROPPED,
+	CH_RECEIVED,
+} CHUNKSTATE;
+
+#define ChunkGetRelid(chunk)  ( (uint32)(chunk->chunkID) & 0xFF00)
+
+#define ChunkGetID(chunk)  ( (uint32)(chunk->chunkID) & 0x00FF)
+
+typedef struct RelChunk{
+	Node node;
+	uint32 chunkID;
+	CHUNKSTATE state;
+
+}RelChunk;
+
+
+typedef struct ChunkedSubPlan{
+	Node node;
+	List *chunks;
+	bool done;
+
+
+}ChunkedSubPlan;
+
 #endif   /* PRIMNODES_H */

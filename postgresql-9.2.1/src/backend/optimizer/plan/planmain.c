@@ -29,10 +29,13 @@
 #include "optimizer/tlist.h"
 #include "utils/selfuncs.h"
 #include "nodes/print.h"
+#include "smooth/joincache.h"
 
 
 /* Local functions */
 static void canonicalize_all_pathkeys(PlannerInfo *root);
+static List * make_chunk_subplans(List *chunks);
+static List * make_subplan_permutations(List *a , List *b);
 
 
 /*
@@ -164,6 +167,49 @@ query_planner(PlannerInfo *root, List *tlist,
 	 * for example views.  We don't want to make RelOptInfos for them.
 	 */
 	add_base_rels_to_query(root, (Node *) parse->jointree);
+	if (enable_multi_join) {
+		Index rti;
+		List * subplan_a = NIL;
+		List * result = NIL;
+		List * subplan_b = NIL;
+		ListCell *lc;
+		ListCell *lc1;
+		for (rti = 1; rti < root->simple_rel_array_size; rti++) {
+			RelOptInfo *rel = root->simple_rel_array[rti];
+			if (rel == NULL)
+				continue;
+			/* there may be empty slots corresponding to non-baserel RTEs */
+
+			Assert(rel->relid == rti);
+			/* sanity check on array */
+
+			/* ignore RTEs that are "other rels" */
+			if (rel->reloptkind != RELOPT_BASEREL)
+				continue;
+			subplan_b = rel->chunks;
+			if (subplan_a == NIL) {
+				subplan_a =subplan_b;
+				continue;
+			} else {
+
+				result = make_subplan_permutations(subplan_a, subplan_b);
+				subplan_a = result;
+
+			}
+		}
+		JC_InitCache();
+		foreach(lc, result) {
+			ChunkedSubPlan *subplan = lfirst(lc);
+			JC_AddChunkedSubPlan(subplan);
+
+
+		}
+
+
+
+
+
+	}
 
 	/*
 	 * Examine the targetlist and join tree, adding entries to baserel
@@ -445,4 +491,52 @@ canonicalize_all_pathkeys(PlannerInfo *root)
 	root->window_pathkeys = canonicalize_pathkeys(root, root->window_pathkeys);
 	root->distinct_pathkeys = canonicalize_pathkeys(root, root->distinct_pathkeys);
 	root->sort_pathkeys = canonicalize_pathkeys(root, root->sort_pathkeys);
+}
+static List * make_chunk_subplans(List *chunks){
+
+	ListCell *lc;
+	List * result = NIL;
+	foreach(lc, chunks){
+		List * a = NIL;
+		 a  = lappend(a, lfirst(lc));
+		result =  lappend(result, a);
+
+	}
+	return result;
+}
+static List * make_subplan_permutations(List *a, List *b) {
+	ListCell *lc1;
+	ListCell *lc2;
+	List * result = NIL;
+	bool  freed =false;
+	foreach(lc1, a) {
+
+		foreach(lc2, b) {
+			ChunkedSubPlan *sp = makeNode(ChunkedSubPlan);
+			Node *node = lfirst(lc1);
+			sp->chunks = NIL;
+			switch (nodeTag(node)) {
+				case T_RelChunk:
+					sp->chunks = lappend(sp->chunks,node);
+					break;
+				case T_List:
+					sp->chunks = list_concat(sp->chunks, (List *)node);
+					break;
+				case T_ChunkedSubPlan:
+					sp->chunks = list_concat(sp->chunks, ((ChunkedSubPlan *) node)->chunks);
+					freed=true;
+					break;
+				default: break;
+			}
+			sp->chunks = lappend(sp->chunks, lfirst(lc2));
+			result = lappend(result, sp);
+
+		}
+
+	}
+	if(freed){
+		list_free_deep(a);
+	}
+
+	return result;
 }

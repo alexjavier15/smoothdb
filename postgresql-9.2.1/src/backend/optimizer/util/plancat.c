@@ -84,6 +84,8 @@ get_relation_info(PlannerInfo *root, Oid relationObjectId, bool inhparent,
 	Relation	relation;
 	bool		hasindex;
 	List	   *indexinfos = NIL;
+	double			num_chunks;
+	int i = 0;
 
 	/*
 	 * We need not lock the relation since it was already locked, either by
@@ -108,7 +110,6 @@ get_relation_info(PlannerInfo *root, Oid relationObjectId, bool inhparent,
 	rel->attr_widths = (int32 *)
 		palloc0((rel->max_attr - rel->min_attr + 1) * sizeof(int32));
 
-	printf(" relation %d : %s \n", rel->relid, NameStr((relation)->rd_rel->relname));
 	/*
 	 * Estimate relation size --- unless it's an inheritance parent, in which
 	 * case the size will be computed later in set_append_rel_pathlist, and we
@@ -118,6 +119,18 @@ get_relation_info(PlannerInfo *root, Oid relationObjectId, bool inhparent,
 	if (!inhparent)
 		estimate_rel_size(relation, rel->attr_widths - rel->min_attr,
 						  &rel->pages, &rel->tuples, &rel->allvisfrac);
+
+
+	num_chunks = ceil ((double)rel->pages  *BLCKSZ / (multi_join_chunk_size*1024L) ) ;
+	rel->chunks = NIL;
+	for ( i  = 0; i<num_chunks; i++){
+		RelChunk *relchunk = makeNode(RelChunk);
+		relchunk->chunkID.ch_id = i;
+		relchunk->chunkID.relid  =  rel->relid;
+		rel->chunks = lappend(rel->chunks, relchunk);
+	}
+	printf(" relation %d : %s , pages: %d\n", rel->relid, NameStr((relation)->rd_rel->relname), rel->pages);
+
 
 	/*
 	 * Make list of indexes.  Ignore indexes on system catalogs if told to.

@@ -454,6 +454,7 @@ typedef struct RelOptInfo
 
 	List       *joinclauses;
 	struct MultiHash *hash_plan;
+	List *chunks;
 
 } RelOptInfo;
 

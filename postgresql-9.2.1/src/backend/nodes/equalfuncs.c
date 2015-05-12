@@ -781,6 +781,19 @@ _equalHashInfo(const HashInfo *a, const HashInfo *b)
 	return true;
 }
 
+static bool _equalChunkedSubPlan(ChunkedSubPlan *a, ChunkedSubPlan *b){
+
+	COMPARE_NODE_FIELD(chunks);
+	return true;
+}
+
+static bool _equalRelChunk(RelChunk *a, RelChunk *b) {
+
+
+	COMPARE_SCALAR_FIELD(chunkID);
+	return true;
+}
+
 static bool
 _equalExprState(const ExprState *a, const ExprState *b)
 {
@@ -3052,6 +3065,12 @@ equal(const void *a, const void *b)
 			break;
 		case T_XmlSerialize:
 			retval = _equalXmlSerialize(a, b);
+			break;
+		case T_ChunkedSubPlan:
+			retval = _equalChunkedSubPlan(a,b);
+			break;
+		case T_RelChunk:
+			retval = _equalRelChunk(a,b);
 			break;
 
 		default:

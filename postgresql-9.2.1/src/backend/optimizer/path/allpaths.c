@@ -52,6 +52,7 @@ static void set_base_rel_sizes(PlannerInfo *root);
 static void set_base_rel_pathlists(PlannerInfo *root);
 static void set_rel_size(PlannerInfo *root, RelOptInfo *rel,
 			 Index rti, RangeTblEntry *rte);
+
 static void set_rel_pathlist(PlannerInfo *root, RelOptInfo *rel,
 				 Index rti, RangeTblEntry *rte);
 static void set_plain_rel_size(PlannerInfo *root, RelOptInfo *rel,
@@ -205,6 +206,7 @@ set_base_rel_pathlists(PlannerInfo *root)
 		set_rel_pathlist(root, rel, rti, root->simple_rte_array[rti]);
 	}
 }
+
 
 /*
  * set_rel_size

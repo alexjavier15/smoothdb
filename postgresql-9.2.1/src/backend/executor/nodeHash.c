@@ -489,7 +489,7 @@ ExecInitMultiHash(MultiHash *node, EState *estate, int eflags)
 	 */
 	outerPlanState(hashstate) = ExecInitNode(outerPlan(node), estate, eflags);
 	printf("\nINIT MULTI HASH REL %d  \n", ((Scan *)hashstate->ps.lefttree->plan)->scanrelid);
-	pprint(node->hash.plan.targetlist);
+//	pprint(node->hash.plan.targetlist);
 	/*
 	 * initialize tuple type. no need to initialize projection info because
 	 * this node doesn't do projections
