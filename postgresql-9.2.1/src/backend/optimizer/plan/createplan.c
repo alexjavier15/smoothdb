@@ -2764,6 +2764,7 @@ create_hashjoin_plan(PlannerInfo *root, HashPath *best_path, Plan *outer_plan, P
 		 if(hash_outer != NULL){
 			 outer_plan = hash_outer;
 			 outer_path->parent->hash_plan = outer_plan;
+			 ((MultiHash *)outer_plan)->num_chunks = list_length(outer_path->parent->chunks);
 		 }
 
 
@@ -2780,6 +2781,8 @@ create_hashjoin_plan(PlannerInfo *root, HashPath *best_path, Plan *outer_plan, P
 		add_hash_planList( join_plan,
 				(MultiHash *) hash_plan,
 				best_path->jpath.innerjoinpath->parent);
+		 ((MultiHash *)hash_plan)->num_chunks = list_length(inner_path->parent->chunks);
+
 
 	//	(MultiJoin )
 //		add_hash_planList((Plan *) join_plan,

@@ -508,6 +508,7 @@ ExecInitMultiHash(MultiHash *node, EState *estate, int eflags)
 													   ALLOCSET_DEFAULT_INITSIZE,
 													   ALLOCSET_DEFAULT_MAXSIZE);
 	mhashstate->nun_hashtables = 0;
+	mhashstate->num_chunks = node->num_chunks;
 	mhashstate->hashable_array = NULL;
 
 	/*
@@ -637,20 +638,28 @@ void ExecMultiHashCreateHashTables(MultiHashState * mhstate){
 		List * hkeysList = mhstate->all_hashkeys;
 		int num_htables= list_length(hkeysList);
 		int htidx = 0;
+		int i;
 		mhstate->nun_hashtables = num_htables;
-		mhstate->hashable_array =
-				(SimpleHashTable *) palloc (num_htables * sizeof(SimpleHashTable) );
+
+		mhstate->chunk_hashables = (SimpleHashTable **) palloc (mhstate->num_chunks * sizeof(SimpleHashTable*) );
+
+		for(i = 0 ; i<mhstate->num_chunks ; i++ ){
+		//mhstate->hashable_array =
+			SimpleHashTable * hashable_array =(SimpleHashTable *) palloc (num_htables * sizeof(SimpleHashTable) );
 
 
 			foreach(lc, hkeysList) {
 				HashInfo * hinfo = (HashInfo *) lfirst(lc);
-				mhstate->hashable_array[htidx] = ExecMultiHashTableCreate(mhstate,
+				hashable_array[htidx] = ExecMultiHashTableCreate(mhstate,
 						hinfo->hoperators,
 						false);
 				hinfo->id = htidx;
 				htidx++;
 			}
 
+		mhstate->chunk_hashables[i] = hashable_array;
+		}
+		mhstate->hashable_array = NULL;
 
 		printf("Created %d hash tables for relation %d \n",
 				num_htables, ((Scan *)mhstate->hstate.ps.lefttree->plan)->scanrelid),

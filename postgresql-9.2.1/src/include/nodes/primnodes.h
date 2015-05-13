@@ -1290,13 +1290,12 @@ typedef enum
 	CH_RECEIVED,
 } CHUNKSTATE;
 
-#define ChunkGetRelid(chunk)  ( (uint32)(chunk->chunkID) & 0xFF00)
 
-#define ChunkGetID(chunk)  ( (uint32)(chunk->chunkID) & 0x00FF)
 
 typedef struct RelChunk{
 	Node node;
 	uint32 chunkID;
+	MemoryContext mcxt;
 	CHUNKSTATE state;
 
 }RelChunk;

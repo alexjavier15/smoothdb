@@ -2043,7 +2043,9 @@ typedef struct MultiHashState{
 	HashState		hstate;
 	List			*all_hashkeys;
 	int				nun_hashtables; /*number of hash tables */
+	int				num_chunks;
 	SimpleHashTable	*hashable_array;
+	SimpleHashTable	**chunk_hashables;
 	List*			tuple_list;
 	MemoryContext   tupCxt;
 

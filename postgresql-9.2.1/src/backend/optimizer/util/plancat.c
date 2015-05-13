@@ -125,8 +125,10 @@ get_relation_info(PlannerInfo *root, Oid relationObjectId, bool inhparent,
 	rel->chunks = NIL;
 	for ( i  = 0; i<num_chunks; i++){
 		RelChunk *relchunk = makeNode(RelChunk);
-		relchunk->chunkID.ch_id = i;
-		relchunk->chunkID.relid  =  rel->relid;
+		uint32  hi= rel->relid;
+		uint16  lo= i;
+		relchunk->chunkID = (uint32) (hi << 16) | lo;
+
 		rel->chunks = lappend(rel->chunks, relchunk);
 	}
 	printf(" relation %d : %s , pages: %d\n", rel->relid, NameStr((relation)->rd_rel->relname), rel->pages);
