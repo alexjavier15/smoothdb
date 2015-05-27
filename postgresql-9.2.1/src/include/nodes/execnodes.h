@@ -416,6 +416,7 @@ typedef struct EState
 	Instrumentation *unique_instr;
 	bool 		replan;
 	bool		started;
+	bool		*scanReady;
 } EState;
 
 
@@ -1025,6 +1026,7 @@ typedef struct PlanState
 	ProjectionInfo *ps_ProjInfo;	/* info for doing tuple projection */
 	bool		ps_TupFromTlist;/* state flag for processing set-valued
 								 * functions in targetlist */
+
 } PlanState;
 
 
@@ -1213,6 +1215,8 @@ typedef struct ScanState
 	Relation	ss_currentRelation;
 	HeapScanDesc ss_currentScanDesc;
 	TupleTableSlot *ss_ScanTupleSlot;
+	int	   		es_scanBytes;
+	int			len;
 } ScanState;
 
 /*
@@ -1728,7 +1732,7 @@ typedef struct HashJoinState
 
 } HashJoinState;
 
-
+typedef struct MultiHashState MultiHashState;
 
 
 typedef struct MultiJoinState
@@ -1760,9 +1764,13 @@ typedef struct MultiJoinState
 	HashJoinTuple mhj_NextInnerTuple;
 	HashJoinTuple mhj_NextOuterTuple;
 	HashJoinTuple mhj_NextTuple;
-	List *		  planlist;
-	List          ** plans;
+	List			* planlist;
+	List			** plans;
+	MultiHashState	**mhashnodes;
+	int				hashnodes_array_size;
 	PlanState		*current_ps;
+	List			*chunkedSubplans;
+	List			*pendingSubplans;
 } MultiJoinState;
 
 typedef struct SymHashJoinState
@@ -2038,7 +2046,7 @@ typedef struct HashState
 
 } HashState;
 
-typedef struct MultiHashState{
+struct MultiHashState{
 
 	HashState		hstate;
 	List			*all_hashkeys;
@@ -2046,11 +2054,15 @@ typedef struct MultiHashState{
 	int				num_chunks;
 	SimpleHashTable	*hashable_array;
 	SimpleHashTable	**chunk_hashables;
-	List*			tuple_list;
+	RelChunk *	   currChunk;
+	List			*lchunks;
+	ListCell 		*currTuple;
 	MemoryContext   tupCxt;
+	bool 			started;
+	bool			hasDropped;
 
 
-}MultiHashState;
+};
 
 
 

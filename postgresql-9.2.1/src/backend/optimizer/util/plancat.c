@@ -121,7 +121,11 @@ get_relation_info(PlannerInfo *root, Oid relationObjectId, bool inhparent,
 						  &rel->pages, &rel->tuples, &rel->allvisfrac);
 
 
-	num_chunks = ceil ((double)rel->pages  *BLCKSZ / (multi_join_chunk_size*1024L) ) ;
+	if (multi_join_tuple_count)
+		num_chunks = rel->tuples / multi_join_chunk_tup;
+	else
+		num_chunks = ceil((double) rel->pages * BLCKSZ / (multi_join_chunk_size * 1024L));
+
 	rel->chunks = NIL;
 	for ( i  = 0; i<num_chunks; i++){
 		RelChunk *relchunk = makeNode(RelChunk);

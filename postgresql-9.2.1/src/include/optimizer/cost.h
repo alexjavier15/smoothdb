@@ -50,6 +50,7 @@ extern PGDLLIMPORT double cpu_index_tuple_cost;
 extern PGDLLIMPORT double cpu_operator_cost;
 extern PGDLLIMPORT int effective_cache_size;
 extern int multi_join_chunk_size;
+extern int multi_join_chunk_tup;
 extern int multi_join_cache_size;
 extern Cost disable_cost;
 extern bool enable_seqscan;
@@ -65,6 +66,8 @@ extern bool enable_mergejoin;
 extern bool enable_hashjoin;
 extern bool enable_mhashjoin;
 extern bool enable_multi_join;
+extern bool	multi_join_tuple_count;
+
 extern int	constraint_exclusion;
 /*renata */
 extern bool enable_smoothscan;
@@ -81,6 +84,7 @@ extern bool start_prefetch;
 extern int num_tuples_switch;
 extern int num_tuples_prefetch;
 extern int prefetch_counter;
+extern int chunks_per_cycle;
 
 extern double clamp_row_est(double nrows);
 extern double index_pages_fetched(double tuples_fetched, BlockNumber pages,

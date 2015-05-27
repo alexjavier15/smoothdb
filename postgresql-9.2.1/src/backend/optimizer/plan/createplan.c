@@ -282,7 +282,7 @@ create_scan_plan(PlannerInfo *root, Path *best_path) {
 
 		foreach(lc, best_path->parent->chunks) {
 			RelChunk *chunk = (RelChunk *) lfirst(lc);
-			List * subplans = JC_GetChunkedSubPlans(chunk);
+			List * subplans = chunk->subplans;
 			Assert(subplans != NIL);
 			printf(" Got %d sub plans for chunk %d.[%d] \n",list_length(subplans), ChunkGetRelid(chunk),ChunkGetID(chunk));
 

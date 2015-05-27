@@ -888,6 +888,15 @@ static struct config_bool ConfigureNamesBool[] =
 		false,
 		NULL, NULL, NULL
 	},
+	{
+		{"multi_join_tuple_count", PGC_USERSET, QUERY_TUNING_METHOD,
+			gettext_noop("Enables the planner's use of Mhash join plans."),
+			NULL
+		},
+		&multi_join_tuple_count,
+		false,
+		NULL, NULL, NULL
+	},
 
 	{
 		{"geqo", PGC_USERSET, QUERY_TUNING_GEQO,
@@ -1618,7 +1627,16 @@ static struct config_int ConfigureNamesInt[] =
 			&smooth_prefetch_target,
 			0, 0, INT_MAX,
 			NULL, NULL, NULL
-},
+	},
+	{ /*alex: Number of chunks arriviing per cycle */
+			{"chunks_per_cycle", PGC_SIGHUP, WAL_ARCHIVING,
+				gettext_noop("What is the number of chunks prepared by csa per cycle"),
+				NULL
+			},
+			&chunks_per_cycle,
+			1, 1, INT_MAX,
+			NULL, NULL, NULL
+		},
 	{
 		{"post_auth_delay", PGC_BACKEND, DEVELOPER_OPTIONS,
 			gettext_noop("Waits N seconds on connection startup after authentication."),
@@ -1868,6 +1886,20 @@ static struct config_int ConfigureNamesInt[] =
 		1024, 64, INT_MAX / 2,
 		NULL, NULL, NULL
 	},
+	{
+
+		{"multi_join_chunk_tup", PGC_USERSET, RESOURCES_MEM,
+			gettext_noop("Sets the maximum  memory to be used for multijoin cache."),
+			gettext_noop("This much memory can be used by each smooth  internal "
+											 " hash table before switching to "
+											 "temporary disk files."),
+			GUC_UNIT_KB
+		},
+		&multi_join_chunk_tup,
+		1024, 64, INT_MAX / 2,
+		NULL, NULL, NULL
+	},
+
 	{
 		{"smooth_work_mem", PGC_USERSET, RESOURCES_MEM,
 			gettext_noop("Sets the maximum shared memory to be used for smooth scans."),

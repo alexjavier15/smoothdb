@@ -101,6 +101,7 @@ double		cpu_operator_cost = DEFAULT_CPU_OPERATOR_COST;
 int			effective_cache_size = DEFAULT_EFFECTIVE_CACHE_SIZE;
 int			multi_join_cache_size = 1024;
 int			multi_join_chunk_size = 1024;
+int			multi_join_chunk_tup= 1000;
 /* renata - increased the value */
 Cost		disable_cost = 1.0e20;
 
@@ -120,6 +121,7 @@ bool		enable_mergejoin = true;
 bool		enable_hashjoin = true;
 bool		enable_mhashjoin = false;
 bool		enable_multi_join = false;
+bool		multi_join_tuple_count=false;
 
 /* renata
  * Should we enable Smooth Scan Operator
@@ -135,6 +137,7 @@ bool		enable_smoothsorting 	= false;
 /* what is maximum number of pages to prefetch */
 int         smooth_prefetch_target   = 50;
 int 		num_tuples_switch   = -1;
+int			chunks_per_cycle = 1;
 //when to start prefetching
 //-1: from start
 // 0: when selectivity is above estimated

@@ -244,6 +244,8 @@ typedef struct PlannerInfo
 
 	/* Added post-release, will be in a saner place in 9.3: */
 	List	   *plan_params;	/* list of PlannerParamItems, see below */
+
+	List	   *subplans;
 } PlannerInfo;
 
 

@@ -1288,6 +1288,8 @@ typedef enum
 {
 	CH_DROPPED,
 	CH_RECEIVED,
+	CH_WAITTING,
+	CH_READ
 } CHUNKSTATE;
 
 
@@ -1297,6 +1299,8 @@ typedef struct RelChunk{
 	uint32 chunkID;
 	MemoryContext mcxt;
 	CHUNKSTATE state;
+	List	*subplans;
+	List	*tuple_list;
 
 }RelChunk;
 

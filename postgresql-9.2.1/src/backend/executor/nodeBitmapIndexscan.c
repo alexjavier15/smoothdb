@@ -206,6 +206,7 @@ ExecInitBitmapIndexScan(BitmapIndexScan *node, EState *estate, int eflags)
 	indexstate = makeNode(BitmapIndexScanState);
 	indexstate->ss.ps.plan = (Plan *) node;
 	indexstate->ss.ps.state = estate;
+	indexstate->ss.es_scanBytes = 0;
 
 	/* normally we don't make the result bitmap till runtime */
 	indexstate->biss_result = NULL;

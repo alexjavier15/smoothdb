@@ -204,7 +204,9 @@ query_planner(PlannerInfo *root, List *tlist,
 
 
 		}
+		root->subplans = result;
 
+		make_random_seq(root->simple_rel_array, root->simple_rel_array_size);
 
 
 
@@ -529,6 +531,7 @@ static List * make_subplan_permutations(List *a, List *b) {
 				default: break;
 			}
 			sp->chunks = lappend(sp->chunks, lfirst(lc2));
+			sp->done = false;
 			result = lappend(result, sp);
 
 		}

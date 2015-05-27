@@ -669,6 +669,7 @@ typedef struct MultiJoin
 	List	 	*multi_plans;
 	List	    *plan_list;
 	List		*hash_plans;
+	List 		*subplans;
 
 } MultiJoin;
 /* ----------------

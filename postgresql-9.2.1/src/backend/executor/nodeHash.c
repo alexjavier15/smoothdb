@@ -253,9 +253,20 @@ ExecMultiHash(MultiHashState *node) {
 	outerNode = outerPlanState(node);
 
 	econtext = node->hstate.ps.ps_ExprContext;
-
+	Assert(node->currChunk != NULL);
 	for (;;)
 	{
+		if (node->currTuple) {
+			mtuple = (MinimalTuple *) lfirst(node->currTuple);
+			node->currTuple = node->currTuple->next;
+			slot = econtext->ecxt_innertuple;
+			ExecClearTuple(slot);
+			slot = ExecStoreMinimalTuple(mtuple, slot, false);
+			econtext->ecxt_innertuple = slot;
+			return slot;
+		} else
+			break;
+
 			slot = ExecProcNode(outerNode);
 			if (TupIsNull(slot))
 				break;
@@ -266,7 +277,9 @@ ExecMultiHash(MultiHashState *node) {
 
 
 
-			hashTuple = copyMinmalTuple(node,mtuple);
+			hashTuple = JC_StoreMinmalTuple(node->currChunk,mtuple);
+
+
 
 			foreach(lc,node->all_hashkeys) {
 
@@ -304,19 +317,7 @@ ExecMultiHash(MultiHashState *node) {
 
 	return NULL;
 }
-static MinimalTuple copyMinmalTuple(MultiHashState *mhstate , MinimalTuple mtuple){
-	MemoryContext oldcxt;
-	MinimalTuple copyTuple;
 
-	oldcxt = MemoryContextSwitchTo(mhstate->tupCxt);
-
-	copyTuple = (MinimalTuple ) palloc0(mtuple->t_len);
-	memcpy(copyTuple, mtuple, mtuple->t_len);
-	MemoryContextSwitchTo(oldcxt);
-
-	return copyTuple;
-
-}
 /* ----------------------------------------------------------------
  *		MultiExecHash
  *
@@ -330,11 +331,18 @@ MultiExecMultiHash(MultiHashState *node)
 	PlanState  *outerNode;
 	List	   *hashkeys;
 	SimpleHashTable hashtable;
+	ScanState *scan;
 	TupleTableSlot *slot;
 	ExprContext *econtext;
 	uint32		hashvalue;
 	ListCell *lc;
 		/* must provide our own instrumentation support */
+
+
+	Assert(node->currChunk != NULL);
+
+
+
 	if (node->hstate.ps.instrument)
 		InstrStartNode(node->hstate.ps.instrument);
 
@@ -344,6 +352,7 @@ MultiExecMultiHash(MultiHashState *node)
 	outerNode = outerPlanState(node);
 
 	econtext = node->hstate.ps.ps_ExprContext;
+	scan = (ScanState *)outerNode;
 
 	/*
 	 * get all inner tuples and insert into the hash table (or temp files)
@@ -353,16 +362,49 @@ MultiExecMultiHash(MultiHashState *node)
 		MinimalTuple mtuple = NULL;
 		MinimalTuple  hashTuple = NULL;
 
+
+
 		slot = ExecProcNode(outerNode);
-		if (TupIsNull(slot))
-			break;
+
+
+
+		if (TupIsNull(slot)) {
+
+			if (node->num_chunks == 1 ){
+				break;
+			}
+			if (!node->hasDropped) {
+
+				if (scan->es_scanBytes == 0)
+					node->started = false;
+				else
+					node->started = true;
+
+				break;
+
+			}
+
+
+
+			printf("CALLING RESCAN in %d scanbytes %d\n", outerNode->type, scan->es_scanBytes);
+			fflush(stdout);
+
+			ExecReScan(outerNode);
+
+			continue;
+
+
+		}
+
+		node->started = true;
+
 		/* We have to compute the hash value */
 		econtext->ecxt_innertuple = slot;
 
 		mtuple = ExecFetchSlotMinimalTuple(slot);
+		scan->es_scanBytes++;
 
-
-		hashTuple = copyMinmalTuple(node,mtuple);
+		hashTuple = JC_StoreMinmalTuple(node->currChunk,mtuple);
 
 		foreach(lc,node->all_hashkeys) {
 
@@ -402,7 +444,16 @@ MultiExecMultiHash(MultiHashState *node)
 
 		}
 
+		if (scan->es_scanBytes == multi_join_chunk_tup) {
+			break;
+		}
+
+
 	}
+	node->currChunk->state = CH_READ;
+	node->lchunks = lappend(node->lchunks , node->currChunk);
+	scan->es_scanBytes = 0;
+
 
 	foreach(lc,node->all_hashkeys) {
 
@@ -443,6 +494,7 @@ ExecInitMultiHash(MultiHash *node, EState *estate, int eflags)
 	HashState  *hashstate;
 	ListCell *lc;
 	MultiHashState * mhashstate;
+	ScanState *scanNode;
 
 	List * hashkeys_list= NIL;
 
@@ -488,7 +540,11 @@ ExecInitMultiHash(MultiHash *node, EState *estate, int eflags)
 	 * initialize child nodes
 	 */
 	outerPlanState(hashstate) = ExecInitNode(outerPlan(node), estate, eflags);
-	printf("\nINIT MULTI HASH REL %d  \n", ((Scan *)hashstate->ps.lefttree->plan)->scanrelid);
+	scanNode = (ScanState *)outerPlanState(hashstate);
+
+	printf("\nINIT MULTI HASH REL %d  \n", ((Scan *)scanNode->ps.plan)->scanrelid);
+
+	scanNode->es_scanBytes  = 0;
 //	pprint(node->hash.plan.targetlist);
 	/*
 	 * initialize tuple type. no need to initialize projection info because
@@ -510,6 +566,10 @@ ExecInitMultiHash(MultiHash *node, EState *estate, int eflags)
 	mhashstate->nun_hashtables = 0;
 	mhashstate->num_chunks = node->num_chunks;
 	mhashstate->hashable_array = NULL;
+	mhashstate->chunk_hashables = NULL;
+
+	mhashstate->lchunks = NIL;
+	mhashstate->currChunk = NULL;
 
 	/*
 		 * Create temporary memory contexts in which to keep the hashtable working
@@ -639,25 +699,33 @@ void ExecMultiHashCreateHashTables(MultiHashState * mhstate){
 		int num_htables= list_length(hkeysList);
 		int htidx = 0;
 		int i;
+		MemoryContext oldctx;
 		mhstate->nun_hashtables = num_htables;
 
-		mhstate->chunk_hashables = (SimpleHashTable **) palloc (mhstate->num_chunks * sizeof(SimpleHashTable*) );
+		oldctx = MemoryContextSwitchTo(mhstate->tupCxt);
+
+		mhstate->chunk_hashables = (SimpleHashTable **) palloc0(mhstate->num_chunks *  sizeof(SimpleHashTable) );
+
+		MemoryContextSwitchTo(oldctx);
+		Assert(mhstate->chunk_hashables  != NULL);
 
 		for(i = 0 ; i<mhstate->num_chunks ; i++ ){
 		//mhstate->hashable_array =
-			SimpleHashTable * hashable_array =(SimpleHashTable *) palloc (num_htables * sizeof(SimpleHashTable) );
-
+		mhstate->chunk_hashables[i] =(SimpleHashTable *) palloc0(num_htables * sizeof(SimpleHashTable) );
+		htidx = 0;
 
 			foreach(lc, hkeysList) {
 				HashInfo * hinfo = (HashInfo *) lfirst(lc);
-				hashable_array[htidx] = ExecMultiHashTableCreate(mhstate,
+				 ExecMultiHashTableCreate(mhstate,
 						hinfo->hoperators,
-						false);
+						false, &mhstate->chunk_hashables[i][htidx]);
 				hinfo->id = htidx;
+
+				printf("\n Hash table created for %d entries \n", mhstate->chunk_hashables[i][htidx]->nbuckets);
 				htidx++;
 			}
 
-		mhstate->chunk_hashables[i] = hashable_array;
+
 		}
 		mhstate->hashable_array = NULL;
 
@@ -682,9 +750,16 @@ SimpleHashTable ExecChooseHashTable(MultiHashState * mhstate, List *hoperators, 
 	idx = ((HashInfo *) result)->id;
 	Assert(result != NULL);
 	pfree(dummy_hinfo);
-	printf("\nFOUND HASHTABLE IDX : %d \n", idx);
-	fflush(stdout);
 
+	Assert(mhstate->currChunk != NULL);
+
+	mhstate->hashable_array = mhstate->chunk_hashables[ChunkGetID(mhstate->currChunk)];
+
+
+	printf("\nFOUND HASHTABLE IDX : %d \n", idx);
+	printf("..........hash table with %d tuples \n",list_length(mhstate->currChunk->tuple_list ));
+	fflush(stdout);
+	mhstate->hashable_array[idx]->totalTuples = list_length(mhstate->currChunk->tuple_list );
 	return mhstate->hashable_array[idx];
 
 
@@ -842,8 +917,9 @@ ExecHashTableCreate(Hash *node, List *hashOperators, bool keepNulls)
  *		create an empty hashtable data structure for hashjoin.
  * ----------------------------------------------------------------
  */
-SimpleHashTable
-ExecMultiHashTableCreate(MultiHashState *node, List *hashOperators, bool keepNulls)
+
+void ExecMultiHashTableCreate(MultiHashState *node, List *hashOperators, bool keepNulls,
+		SimpleHashTable * hashtableptr)
 {
 	SimpleHashTable hashtable;
 	Plan	   *outerNode;
@@ -878,7 +954,12 @@ ExecMultiHashTableCreate(MultiHashState *node, List *hashOperators, bool keepNul
 	 * The hashtable control block is just palloc'd from the executor's
 	 * per-query memory context.
 	 */
-	hashtable = (SimpleHashTable) palloc(sizeof(SimpleHashTableData));
+	oldcxt =  MemoryContextSwitchTo(node->tupCxt);
+
+	hashtable = (SimpleHashTable) palloc0(sizeof(SimpleHashTableData));
+
+	MemoryContextSwitchTo(oldcxt);
+
 	hashtable->nbuckets = nbuckets;
 	hashtable->log2_nbuckets = log2_nbuckets;
 	hashtable->buckets = NULL;
@@ -886,7 +967,8 @@ ExecMultiHashTableCreate(MultiHashState *node, List *hashOperators, bool keepNul
 	hashtable->growEnabled = true;
 	hashtable->totalTuples = 0;
 	hashtable->spaceUsed = 0;
-	hashtable->spaceAllowed = work_mem * 1024L;
+	hashtable->spaceAllowed = multi_join_chunk_size * 1024L;
+
 
 	/*
 		 * Get info about the hash functions to be used for each hash key. Also
@@ -918,7 +1000,11 @@ ExecMultiHashTableCreate(MultiHashState *node, List *hashOperators, bool keepNul
 	 * Create temporary memory contexts in which to keep the hashtable working
 	 * storage.  See notes in executor/hashjoin.h.
 	 */
-	hashtable->hashCxt = node->tupCxt;
+	hashtable->hashCxt = AllocSetContextCreate(CurrentMemoryContext,
+												   "HashTableContext",
+												   ALLOCSET_DEFAULT_MINSIZE,
+												   ALLOCSET_DEFAULT_INITSIZE,
+												   ALLOCSET_DEFAULT_MAXSIZE);
 
 
 
@@ -936,9 +1022,9 @@ ExecMultiHashTableCreate(MultiHashState *node, List *hashOperators, bool keepNul
 	 */
 
 	MemoryContextSwitchTo(oldcxt);
-	printf("\n Hash table created for %d entries \n", hashtable->nbuckets);
 
-	return hashtable;
+	*hashtableptr = hashtable;
+
 }
 
 /* ----------------------------------------------------------------
@@ -1108,46 +1194,21 @@ ExecMHash_get_op_hash_functions(Oid hashop,
 static void
 ExecChooseMultiHashTableSize(double ntuples, int tupwidth, int *numbuckets)
 {
-//		int			tupsize;
 
-		long		max_pointers;
+	int nbuckets;
 
-		int			nbuckets;
-		double		dbuckets;
+	printf("tple with = %d \n ", tupwidth);
+	if (multi_join_tuple_count)
+		nbuckets = multi_join_chunk_tup;
+	else
+		nbuckets = (multi_join_chunk_size * 1024L) / tupwidth;
 
-		/* Force a plausible relation size if no info */
-		if (ntuples <= 0.0)
-			ntuples = 1000.0;
+	nbuckets = Min(nbuckets, ntuples);
+	nbuckets = ceil(nbuckets / NTUP_PER_BUCKET);
+	nbuckets = 1 << my_log2(nbuckets);
 
-		/*
-		 * Estimate tupsize based on footprint of tuple in hashtable... note this
-		 * does not allow for any palloc overhead.  The manipulations of spaceUsed
-		 * don't count palloc overhead either.
-		 */
-//		tupsize = JTUPLESIZE +
-//			MAXALIGN(tupwidth);
+	*numbuckets = nbuckets;
 
-
-		/*
-
-
-		/*
-		 * Set nbuckets to achieve an average bucket load of NTUP_PER_BUCKET when
-		 * memory is filled, assuming a single batch.  The Min() step limits the
-		 * results so that the pointer arrays we'll try to allocate do not exceed
-		 * work_mem.
-		 */
-		max_pointers = (work_mem * 1024L) / sizeof(void *);
-		/* also ensure we avoid integer overflow in nbatch and nbuckets */
-		max_pointers = Min(max_pointers, INT_MAX / 2);
-		dbuckets = ceil(ntuples / 4);
-		dbuckets = Min(dbuckets, max_pointers);
-		nbuckets = Max((int) dbuckets, 1024);
-		nbuckets = 1 << my_log2(ntuples);
-
-
-
-		*numbuckets = nbuckets;
 
 }
 
@@ -1737,8 +1798,6 @@ void ExecMultiHashTableInsert(SimpleHashTable hashtable, MinimalTuple tuple, uin
 
 
 	ExecMultiHashGetBucket(hashtable, hashvalue, &bucketno);
-//	printf("I : %d\n", bucketno);
-// fflush(stdout);
 
 	/*
 	 * decide whether to put the tuple in the hash table or a temp file
@@ -2896,10 +2955,49 @@ void add_hashinfo(MultiHashState *mhstate , List * clauses, List *hoperators){
 
 
 	HashInfo * hinfo = makeNode(HashInfo);
-	int num_hk = list_length(mhstate->all_hashkeys);
 	hinfo->hashkeys = clauses;
 	hinfo->hoperators = hoperators;
 	mhstate->all_hashkeys = list_append_unique(mhstate->all_hashkeys, hinfo);
+
+
+}
+
+void ExecResetMultiHashtable(MultiHashState *node, SimpleHashTable  * hashtables){
+
+	ListCell *lc;
+	List *hashkeys;
+	SimpleHashTable hashtable;
+	MemoryContext oldcxt;
+
+
+
+	// Reset the all the buckets:
+
+
+
+	foreach(lc,node->all_hashkeys) {
+
+
+		HashInfo * hinfo = (HashInfo *) lfirst(lc);
+
+		hashtable = hashtables[hinfo->id];
+
+		MemoryContextReset(hashtable->hashCxt);
+
+		oldcxt = MemoryContextSwitchTo(hashtable->hashCxt);
+
+		// Update hashtable info
+		hashtable->totalTuples = 0;
+		hashtable->spaceAllowed += hashtable->spaceUsed;
+
+
+		/* Allocate data that will live for the life of the multihashjoin */
+
+		hashtable->buckets = (JoinTuple *)
+			palloc0(hashtable->nbuckets * sizeof(JoinTuple));
+		MemoryContextSwitchTo(oldcxt);
+
+	}
 
 
 }

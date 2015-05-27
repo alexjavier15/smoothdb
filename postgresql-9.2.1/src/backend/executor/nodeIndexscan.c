@@ -185,6 +185,14 @@ ExecReScanIndexScan(IndexScanState *node)
 	node->iss_RuntimeKeysReady = true;
 
 	/* reset index scan */
+	if(enable_multi_join)
+		index_rescan(node->iss_ScanDesc,
+				NULL,
+				node->iss_NumScanKeys,
+				NULL,
+				node->iss_NumOrderByKeys);
+
+	else
 	index_rescan(node->iss_ScanDesc,
 				 node->iss_ScanKeys, node->iss_NumScanKeys,
 				 node->iss_OrderByKeys, node->iss_NumOrderByKeys);
@@ -475,7 +483,7 @@ ExecInitIndexScan(IndexScan *node, EState *estate, int eflags)
 	indexstate = makeNode(IndexScanState);
 	indexstate->ss.ps.plan = (Plan *) node;
 	indexstate->ss.ps.state = estate;
-
+	indexstate->ss.es_scanBytes = 0;
 	/*
 	 * Miscellaneous initialization
 	 *

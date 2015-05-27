@@ -15,6 +15,7 @@
 #define NODEHASH_H
 
 #include "nodes/execnodes.h"
+#include "smooth/joincache.h"
 
 
 extern HashState *ExecInitHash(Hash *node, EState *estate, int eflags);
@@ -32,8 +33,8 @@ extern HashJoinTable ExecHashTableCreate(Hash *node, List *hashOperators,
 					bool keepNulls);
 extern MJoinTable
 ExecMHashTableCreate(Hash *node, List *hashOperators, bool keepNulls, bool isLeft, int nbuckets, int nbatch);
-extern SimpleHashTable
-ExecMultiHashTableCreate(MultiHashState *node, List *hashOperators, bool keepNulls);
+extern void
+ExecMultiHashTableCreate(MultiHashState *node, List *hashOperators, bool keepNulls,  SimpleHashTable * hashtableptr);
 extern void ExecHashTableDestroy(HashJoinTable hashtable);
 extern void ExecMHashTableDestroy(MJoinTable hashtable);
 extern void ExecHashTableInsert(HashJoinTable hashtable,

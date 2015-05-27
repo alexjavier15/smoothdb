@@ -1366,6 +1366,7 @@ grouping_planner(PlannerInfo *root, double tuple_fraction)
 
 				}
 				((MultiJoin *) result_plan)->hash_plans =hash_list;
+				((MultiJoin *) result_plan)->subplans = root->subplans;
 
 			}
 			/*renata : print resulting plan

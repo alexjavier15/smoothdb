@@ -128,10 +128,14 @@ ExecScan(ScanState *node,
 	 * If we have neither a qual to check nor a projection to do, just skip
 	 * all the overhead and return the raw scan tuple.
 	 */
+
+
 	if (!qual && !projInfo)
 	{
 		ResetExprContext(econtext);
-		return ExecScanFetch(node, accessMtd, recheckMtd);
+		resultSlot = ExecScanFetch(node, accessMtd, recheckMtd);
+
+		return resultSlot;
 	}
 
 	/*
@@ -168,7 +172,6 @@ ExecScan(ScanState *node,
 
 		slot = ExecScanFetch(node, accessMtd, recheckMtd);
 
-
 		/*
 		 * if the slot returned by the accessMtd contains NULL, then it means
 		 * there is nothing more to scan so we just return an empty slot,
@@ -177,10 +180,13 @@ ExecScan(ScanState *node,
 		 */
 		if (TupIsNull(slot))
 		{
+
 			if (projInfo)
 				return ExecClearTuple(projInfo->pi_slot);
-			else
+			else{
+
 				return slot;
+			}
 		}
 
 
@@ -198,6 +204,7 @@ ExecScan(ScanState *node,
 		 * place the current tuple into the expr context
 		 */
 		econtext->ecxt_scantuple = slot;
+		//node->es_scanBytes+=slot->tts_tuple->t_len;
 
 		/*
 		 * check that the current tuple satisfies the qual-clause
@@ -222,6 +229,8 @@ ExecScan(ScanState *node,
 				if (isDone != ExprEndResult)
 				{
 					node->ps.ps_TupFromTlist = (isDone == ExprMultipleResult);
+
+
 					return resultSlot;
 				}
 			}
@@ -230,6 +239,8 @@ ExecScan(ScanState *node,
 				/*
 				 * Here, we aren't projecting, so just return scan tuple.
 				 */
+
+
 				return slot;
 			}
 		}

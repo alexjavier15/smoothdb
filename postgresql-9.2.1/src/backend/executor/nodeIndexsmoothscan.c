@@ -1149,6 +1149,7 @@ void ExecReScanIndexSmoothScan(IndexSmoothScanState *node) {
 	}
 	node->iss_RuntimeKeysReady = true;
 
+
 	//14.02.2014 - clear data structures
 
 	/*delete smooth info*/
