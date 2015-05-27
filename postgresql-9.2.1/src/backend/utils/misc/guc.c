@@ -1637,6 +1637,16 @@ static struct config_int ConfigureNamesInt[] =
 			1, 1, INT_MAX,
 			NULL, NULL, NULL
 		},
+
+	{ /*alex: Number of chunks arriviing per cycle */
+			{"jc_cache_policy", PGC_SIGHUP, WAL_ARCHIVING,
+				gettext_noop("What is the number of chunks prepared by csa per cycle"),
+				NULL
+			},
+			&jc_cache_policy,
+			1, 1, INT_MAX,
+			NULL, NULL, NULL
+		},
 	{
 		{"post_auth_delay", PGC_BACKEND, DEVELOPER_OPTIONS,
 			gettext_noop("Waits N seconds on connection startup after authentication."),

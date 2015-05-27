@@ -56,7 +56,9 @@ static void ExecMultiJoinEndSubPlan(MultiJoinState * mhjoinstate);
 static ChunkedSubPlan * ExecMultiJoinGetNewSubplan(MultiJoinState * mhjoinstate);
 static void  ExecMultiJoinGetNewChunk(MultiJoinState * mhjoinstate);
 static void ExecMultiJoiSetSubplan(MultiJoinState * mhjoinstate, ChunkedSubPlan *subplan);
-
+static RelChunk * ExecMultiJoinChooseDroppedChunk(MultiJoinState  * mhjoinstate, RelChunk *newChunk);
+static RelChunk * ExecMerge(RelChunk ** chunk_array, int size, int m);
+static RelChunk * ExecSortChuks(RelChunk ** chunk_array, int size);
 TupleTableSlot *				/* return: a tuple or NULL */
 ExecCHashJoin(CHashJoinState *node)
 {
@@ -1111,13 +1113,20 @@ static ChunkedSubPlan * ExecMultiJoinGetNewSubplan(MultiJoinState * mhjoinstate)
 static void  ExecMultiJoinGetNewChunk(MultiJoinState * mhjoinstate){
 
 	RelChunk * chunk = JC_processNextChunk();
+	RelChunk * toDrop = NULL;
 	MultiHashState *mhstate = mhjoinstate->mhashnodes[ChunkGetRelid(chunk)];
-	JC_InitChunkMemoryContext(chunk);
-	if(chunk->mcxt == NULL){
-		JC_dropChunk(linitial( mhstate->lchunks));
+	if (list_length(mhstate->lchunks) > 0) {
+		if (jc_cache_policy == 1)
+			toDrop = linitial( mhstate->lchunks);
+		else
+			toDrop = ExecMultiJoinChooseDroppedChunk(mhjoinstate, chunk);
+	}
+	JC_InitChunkMemoryContext(chunk, toDrop);
+	if(toDrop != NULL && toDrop->state  == CH_DROPPED){
+
 		mhstate->lchunks = list_delete_first( mhstate->lchunks);
 		mhstate->hasDropped = true;
-		JC_InitChunkMemoryContext(chunk);
+
 	}
 
 	ExecPrepareChunk(mhstate, chunk);
@@ -1142,6 +1151,11 @@ static void ExecMultiJoinPrepareSubplans(MultiJoinState * mhjoinstate){
 
 		}
 		printf("got %d subplans for rel : %d \n", list_length(subplans), i );
+		if (subplans == NIL) {
+			result = NIL;
+			break;
+
+		}
 		if (result == NIL)
 			result = subplans;
 		else
@@ -1155,3 +1169,120 @@ static void ExecMultiJoinPrepareSubplans(MultiJoinState * mhjoinstate){
 
 
 }
+static RelChunk * ExecMerge(RelChunk ** chunk_array, int size, int m) {
+
+	int i, j, k;
+	RelChunk **tmp = palloc(size * sizeof (RelChunk *));
+
+	for (i = 0, j = m, k = 0; k < size; k++) {
+		tmp[k] =
+				j == size ? chunk_array[i++] :
+				i == m ? chunk_array[j++] :
+				chunk_array[j]->priority < chunk_array[i]->priority ?	chunk_array[j++] :
+						chunk_array[i++];
+	}
+	printf("SORTED \n");
+	for (i = 0; i < size; i++) {
+
+		chunk_array[i] = tmp[i];
+		printf("rel : %d chunk : %d,  prio %d\n", ChunkGetRelid(chunk_array[i]),ChunkGetID(chunk_array[i]), chunk_array[i]->priority);
+		 fflush(stdout);
+	}
+	printf("END\n");
+	pfree(tmp);
+	return chunk_array[0];
+}
+static RelChunk * ExecSortChuks(RelChunk ** chunk_array, int size){
+	int m ;
+	int right;
+	if(size < 2)
+		return chunk_array[0];
+
+	m = size / 2;
+	right = m * sizeof(RelChunk *) ;
+
+	ExecSortChuks(chunk_array, m);
+	ExecSortChuks( &chunk_array[m] , size - m);
+	return ExecMerge(chunk_array, size, m);
+
+
+}
+
+static RelChunk * ExecMultiJoinChooseDroppedChunk(MultiJoinState  * mhjoinstate, RelChunk *newChunk){
+
+	int i;
+	List *result = NIL;
+	RelChunk **chunk_array;
+	RelChunk *toDrop;
+	List  * chunks = JC_GetChunks();
+	ListCell *lc;
+
+
+	for (i = 1; i < mhjoinstate->hashnodes_array_size ; i++){
+
+		List *lchunks = mhjoinstate->mhashnodes[i]->lchunks;
+
+		List *subplans = NIL;
+		ListCell *lc;
+
+		foreach(lc,lchunks) {
+
+
+			subplans = list_union(subplans, ((RelChunk *)lfirst(lc))->subplans);
+
+		}
+		if(i == ChunkGetRelid(newChunk))
+			subplans= list_union(subplans, newChunk->subplans);
+
+		printf("got %d subplans for rel : %d \n", list_length(subplans), i );
+		if(subplans == NIL){
+			result = NIL;
+			break;
+
+		}
+
+		if (result == NIL)
+			result = subplans;
+		else
+			result = list_intersection(result, subplans);
+
+
+	}
+	printf("GOT %d SUBPLANS  with new !\n", list_length(result));
+	chunk_array = (RelChunk **) palloc(list_length(chunks) * sizeof(RelChunk *));
+	i = 0;
+	foreach( lc,chunks) {
+
+		chunk_array[i] = lfirst(lc);
+		i++;
+
+	}
+	foreach(lc,result) {
+
+		ChunkedSubPlan *subplan = lfirst(lc);
+		ListCell *ch;
+		foreach(ch, subplan->chunks) {
+			RelChunk * chunk = lfirst(ch);
+			chunk->priority++;
+
+		}
+
+	}
+
+	toDrop = ExecSortChuks(chunk_array, list_length(chunks));
+	foreach( lc,chunks) {
+
+		RelChunk *chunk = lfirst(lc);
+		printf("rel : %d chunk : %d,  prio %d\n", ChunkGetRelid(chunk),ChunkGetID(chunk), chunk->priority);
+		fflush(stdout);
+		chunk->priority = 0;
+
+	}
+
+	return toDrop;
+
+
+
+
+}
+

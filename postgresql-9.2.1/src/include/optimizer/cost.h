@@ -85,6 +85,7 @@ extern int num_tuples_switch;
 extern int num_tuples_prefetch;
 extern int prefetch_counter;
 extern int chunks_per_cycle;
+extern int jc_cache_policy;
 
 extern double clamp_row_est(double nrows);
 extern double index_pages_fetched(double tuples_fetched, BlockNumber pages,

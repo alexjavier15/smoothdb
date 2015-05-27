@@ -34,6 +34,7 @@ static HTAB * RelationChunksIndex = NULL;
 //static List *JChunkQueue =  NIL;
 int  chunk_size;
 
+
 static List * seq_cycle;
 static ListCell *nextChunk;
 
@@ -59,11 +60,14 @@ void JC_InitCache(void){
 	oldcxt = MemoryContextSwitchTo(parent_mcxt);
 	hctl= (HASHCTL*)palloc0(sizeof(HASHCTL));
 
+	JCacheSegHdr = palloc(sizeof(JCacheMemHeader));
+
+
 	hctl->keysize = sizeof(JoinCacheKey);
 	hctl->entrysize = JCACHE_ENTRY_SIZE;
 	hctl->hash = tag_hash;
 	hctl->hcxt = parent_mcxt;
-
+	JCacheSegHdr->chunks = NIL;
 
 
 	RelationChunksIndex = hash_create("JoinCache Hash",
@@ -71,7 +75,6 @@ void JC_InitCache(void){
 										hctl,hash_tag);
 	chunk_size = multi_join_chunk_size * 1024L;
 
-	JCacheSegHdr = palloc(sizeof(JCacheMemHeader));
 	JCacheSegHdr->mctx = parent_mcxt;
 	JCacheSegHdr->nextID = 0;
 	JCacheSegHdr->freesize = multi_join_cache_size;
@@ -153,6 +156,7 @@ RelChunk * JC_processNextChunk(void){
 	printf("RECEIVING CHUNK: \n");
 	printf("rel : %d chunk : %d\n", ChunkGetRelid(result),ChunkGetID(result));
 	fflush(stdout);
+	JCacheSegHdr->chunks = lappend(JCacheSegHdr->chunks, result);
 	nextChunk = nextChunk->next;
 	return result;
 
@@ -163,6 +167,7 @@ RelChunk * JC_processNextChunk(void){
 
 
 void JC_dropChunk( RelChunk *chunk){
+
 	printf("Dropping chunk : \n");
     printf("rel : %d chunk : %d , state : %d\n", ChunkGetRelid(chunk),ChunkGetID(chunk), chunk->state);
     list_free(chunk->tuple_list);
@@ -170,6 +175,7 @@ void JC_dropChunk( RelChunk *chunk){
 	MemoryContextReset(chunk->mcxt);
 	chunk->tuple_list = NIL;
 	chunk->state = CH_DROPPED;
+	JCacheSegHdr->chunks = list_delete(JCacheSegHdr->chunks, chunk);
 	JC_AddChunkMemoryContext(chunk->mcxt);
 }
 
@@ -187,38 +193,18 @@ MemoryContext JC_GetChunkMemoryContext(void){
 
 }
 
-void JC_InitChunkMemoryContext(RelChunk *chunk) {
+void JC_InitChunkMemoryContext(RelChunk *chunk, RelChunk * toDrop) {
 
 	MemoryContext mcxt = JC_GetChunkMemoryContext();
 
 //	volatile JCacheMemHeader *jcacheSegHdr = JCacheSegHdr;
-//
-//	if(mcxt == NULL){
-//
-//		Size free_mem = jcacheSegHdr->freesize;
-//
-//		if(free_mem >= chunk_size){
-//			StringInfoData str;
-//			initStringInfo(&str);
-//			appendStringInfoString(&str, CHUNK_PREFIX);
-//			appendStringInfo(&str, "%d", jcacheSegHdr->nextID);
-//
-//			mcxt = AllocSetContextCreate(CurrentMemoryContext,
-//					str.data,
-//					ALLOCSET_SMALL_MINSIZE,
-//					ALLOCSET_SMALL_INITSIZE,
-//					ALLOCSET_SMALL_MAXSIZE);
-//
-//
-//			pfree(str.data);
-//			printf("NUM OF CACHE SLOTS : %.0f \n", jcacheSegHdr->nextID);
-//			jcacheSegHdr->nextID++;
-//
-//		}
-//
-//
-//
-//	}
+
+	if(mcxt == NULL){
+
+		JC_dropChunk(toDrop);
+		mcxt = JC_GetChunkMemoryContext();
+	}
+
 	chunk->mcxt = mcxt;
 }
 
@@ -348,5 +334,9 @@ void JC_EndCache(void){
 
 }
 
+List *JC_GetChunks(void){
+	return JCacheSegHdr->chunks;
+
+}
 
 

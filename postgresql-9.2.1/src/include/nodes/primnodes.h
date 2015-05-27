@@ -1299,6 +1299,7 @@ typedef struct RelChunk{
 	uint32 chunkID;
 	MemoryContext mcxt;
 	CHUNKSTATE state;
+	int		priority;
 	List	*subplans;
 	List	*tuple_list;
 

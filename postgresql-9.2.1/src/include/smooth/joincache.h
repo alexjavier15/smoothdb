@@ -91,7 +91,8 @@ typedef struct JCacheMemHeader	/* standard header for all Postgres shmem */
 	MemoryContext mctx;
 	Size		totalsize;		/* total size of segment */
 	Size		freesize;		/* offset to first free space */
-	List *freeList;
+	List   		*chunks;
+	List		*freeList;
 
 } JCacheMemHeader;
 
@@ -99,10 +100,11 @@ typedef struct JCacheMemHeader	/* standard header for all Postgres shmem */
 
 extern void JC_InitCache(void);
 extern void JC_EndCache(void);
+extern List *JC_GetChunks(void);
 extern void JC_AddChunkedSubPlan(ChunkedSubPlan *subplan);
 extern List *JC_GetChunkedSubPlans( RelChunk *chunk);
 extern void JC_dropChunk( RelChunk *chunk);
-extern void  JC_InitChunkMemoryContext(RelChunk *chunk);
+extern void  JC_InitChunkMemoryContext(RelChunk *chunk, RelChunk * toDrop);
 void JC_AddChunkMemoryContext(MemoryContext mcxt);
 extern RelationChunksDesc  JC_InitRelationChunks(uint32 size, Relation relation);
 extern MinimalTuple JC_StoreMinmalTuple(RelChunk *chunk , MinimalTuple mtuple);

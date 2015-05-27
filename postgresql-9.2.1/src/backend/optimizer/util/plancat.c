@@ -132,6 +132,7 @@ get_relation_info(PlannerInfo *root, Oid relationObjectId, bool inhparent,
 		uint32  hi= rel->relid;
 		uint16  lo= i;
 		relchunk->chunkID = (uint32) (hi << 16) | lo;
+		relchunk->priority = 0;
 
 		rel->chunks = lappend(rel->chunks, relchunk);
 	}

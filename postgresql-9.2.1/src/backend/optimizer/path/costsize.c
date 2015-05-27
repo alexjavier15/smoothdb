@@ -138,6 +138,7 @@ bool		enable_smoothsorting 	= false;
 int         smooth_prefetch_target   = 50;
 int 		num_tuples_switch   = -1;
 int			chunks_per_cycle = 1;
+int			jc_cache_policy = 2;
 //when to start prefetching
 //-1: from start
 // 0: when selectivity is above estimated
