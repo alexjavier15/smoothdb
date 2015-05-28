@@ -326,8 +326,7 @@ void make_random_seq(RelOptInfo ** rel_array, int size) {
 
 void JC_EndCache(void){
 
-	MemoryContextStats(JCacheSegHdr->mctx);
-	printf("\nCACHE FREE SIZE : %ld", JCacheSegHdr->freesize);
+
 	MemoryContextDelete(JCacheSegHdr->mctx);
 
 

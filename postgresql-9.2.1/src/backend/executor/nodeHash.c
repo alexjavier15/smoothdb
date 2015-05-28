@@ -721,7 +721,6 @@ void ExecMultiHashCreateHashTables(MultiHashState * mhstate){
 						false, &mhstate->chunk_hashables[i][htidx]);
 				hinfo->id = htidx;
 
-				printf("\n Hash table created for %d entries \n", mhstate->chunk_hashables[i][htidx]->nbuckets);
 				htidx++;
 			}
 
@@ -755,10 +754,6 @@ SimpleHashTable ExecChooseHashTable(MultiHashState * mhstate, List *hoperators, 
 
 	mhstate->hashable_array = mhstate->chunk_hashables[ChunkGetID(mhstate->currChunk)];
 
-
-	printf("\nFOUND HASHTABLE IDX : %d \n", idx);
-	printf("..........hash table with %d tuples \n",list_length(mhstate->currChunk->tuple_list ));
-	fflush(stdout);
 	mhstate->hashable_array[idx]->totalTuples = list_length(mhstate->currChunk->tuple_list );
 	return mhstate->hashable_array[idx];
 
@@ -1160,7 +1155,6 @@ ExecMHashTableCreate(Hash *node, List *hashOperators, bool keepNulls, bool isLef
 	hashtable->buckets = (HashJoinTuple *)
 		palloc0(nbuckets * sizeof(HashJoinTuple));
 
-	printf("nbuckets : %d \n", nbuckets);
 
 	MemoryContextSwitchTo(oldcxt);
 
@@ -1197,7 +1191,6 @@ ExecChooseMultiHashTableSize(double ntuples, int tupwidth, int *numbuckets)
 
 	int nbuckets;
 
-	printf("tple with = %d \n ", tupwidth);
 	if (multi_join_tuple_count)
 		nbuckets = multi_join_chunk_tup;
 	else

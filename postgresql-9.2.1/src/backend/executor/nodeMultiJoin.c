@@ -442,6 +442,7 @@ ExecMultiJoin(MultiJoinState *node) {
 		switch (node->mhj_JoinState) {
 
 			case MHJ_BUILD_SUBPLANS:
+				printf("----------------------------------\n");
 				ExecMultiJoinPrepareSubplans(node);
 				node->mhj_JoinState = MHJ_NEED_NEW_SUBPLAN;
 
@@ -477,6 +478,8 @@ ExecMultiJoin(MultiJoinState *node) {
 					printf("GOT NULL TUPLE :processed tuples %.0f!\n", node->js.ps.state->unique_instr[0].tuplecount);
 
 					node->mhj_JoinState = MHJ_NEED_NEW_SUBPLAN;
+					printf("----------------------------------\n");
+					fflush(stdout);
 					continue;
 
 //					if (node->js.ps.state->replan) {
@@ -749,7 +752,7 @@ ExecInitMultiJoin(MultiJoin *node, EState *estate, int eflags) {
 			deep_outer = deep_outer->lefttree;
 		}
 		driverId = ((Scan *) deep_outer->plan)->scanrelid;
-		printf("Driver id : %d\n", driverId);
+
 
 		estate->join_depth = 0;
 		plans[driverId] = lappend(plans[driverId], hj_state);
@@ -923,7 +926,6 @@ void ExecEndMultiJoin(MultiJoinState *node) {
 //	 * Free hash table
 //	 */
 
-	MemoryContextStats(CurrentMemoryContext);
 	JC_EndCache();
 //	for (; bno < node->mhj_InnerHashTable->nbatch; bno++) {
 //
@@ -1181,14 +1183,12 @@ static RelChunk * ExecMerge(RelChunk ** chunk_array, int size, int m) {
 				chunk_array[j]->priority < chunk_array[i]->priority ?	chunk_array[j++] :
 						chunk_array[i++];
 	}
-	printf("SORTED \n");
 	for (i = 0; i < size; i++) {
 
 		chunk_array[i] = tmp[i];
-		printf("rel : %d chunk : %d,  prio %d\n", ChunkGetRelid(chunk_array[i]),ChunkGetID(chunk_array[i]), chunk_array[i]->priority);
-		 fflush(stdout);
+
 	}
-	printf("END\n");
+
 	pfree(tmp);
 	return chunk_array[0];
 }
