@@ -1047,7 +1047,7 @@ static void ExecMultiJoinCleanUpChunk(MultiJoinState * mhjoinstate, MultiHashSta
 		RelChunk *chunk = (RelChunk *) lfirst(lc);
 
 		if (!bms_is_member(ChunkGetID(chunk), mhstate->chunkIds)) {
-			endSubplans = list_union(endSubplans, chunk->subplans);
+			endSubplans = list_union( chunk->subplans, endSubplans);
 			freelist = lappend(freelist, chunk);
 			mustclean = true;
 
@@ -1055,7 +1055,7 @@ static void ExecMultiJoinCleanUpChunk(MultiJoinState * mhjoinstate, MultiHashSta
 	}
 
 	if (mustclean) {
-
+		printf("Pending subplans before clean up: %d\n", list_length(mhjoinstate->pendingSubplans));
 		foreach(lc, endSubplans) {
 
 			ChunkedSubPlan *subplan = (ChunkedSubPlan *) lfirst(lc);
@@ -1070,6 +1070,8 @@ static void ExecMultiJoinCleanUpChunk(MultiJoinState * mhjoinstate, MultiHashSta
 			JC_DeleteChunk(chunk);
 
 		}
+		printf("Pending subplans after clean up: %d\n", list_length(mhjoinstate->pendingSubplans));
+
 	}
 
 }

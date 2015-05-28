@@ -275,7 +275,7 @@ create_scan_plan(PlannerInfo *root, Path *best_path) {
 
 		printf("creating plan for acces path for relation  %d \n", best_path->parent->relid);
 	}
-	if(enable_multi_join){
+	if(enable_multi_join && bms_num_members(rel->relids) > 1){
 		ListCell *lc;
 
 		best_path->rows = best_path->parent->tuples;
