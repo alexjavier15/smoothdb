@@ -799,6 +799,7 @@ typedef struct MultiHash
 /*Alex: multi join fields*/
    List 	*expr;		// Array of join clause for this hashed scan
    int					num_chunks;
+   List     *chunks;
    struct PlanState *ps;
 }MultiHash;
 

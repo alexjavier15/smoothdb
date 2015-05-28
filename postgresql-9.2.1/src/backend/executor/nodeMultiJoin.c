@@ -52,13 +52,15 @@ static void
 show_instrumentation_count_b( Instrumentation *instrument);
 
 static void ExecMultiJoinPrepareSubplans(MultiJoinState * mhjoinstate);
-static void ExecMultiJoinEndSubPlan(MultiJoinState * mhjoinstate);
+static void ExecMultiJoinEndSubPlan(MultiJoinState * mhjoinstate, ChunkedSubPlan * subplan);
 static ChunkedSubPlan * ExecMultiJoinGetNewSubplan(MultiJoinState * mhjoinstate);
 static void  ExecMultiJoinGetNewChunk(MultiJoinState * mhjoinstate);
 static void ExecMultiJoiSetSubplan(MultiJoinState * mhjoinstate, ChunkedSubPlan *subplan);
 static RelChunk * ExecMultiJoinChooseDroppedChunk(MultiJoinState  * mhjoinstate, RelChunk *newChunk);
 static RelChunk * ExecMerge(RelChunk ** chunk_array, int size, int m);
 static RelChunk * ExecSortChuks(RelChunk ** chunk_array, int size);
+
+
 TupleTableSlot *				/* return: a tuple or NULL */
 ExecCHashJoin(CHashJoinState *node)
 {
@@ -474,7 +476,7 @@ ExecMultiJoin(MultiJoinState *node) {
 
 				node->js.ps.state->started = true;
 				if (TupIsNull(slot)) {
-					ExecMultiJoinEndSubPlan(node);
+					ExecMultiJoinEndSubPlan(node,  linitial(node->chunkedSubplans));
 					printf("GOT NULL TUPLE :processed tuples %.0f!\n", node->js.ps.state->unique_instr[0].tuplecount);
 
 					node->mhj_JoinState = MHJ_NEED_NEW_SUBPLAN;
@@ -1033,9 +1035,47 @@ static void ExecSetSeqNumber(CHashJoinState * chjoinstate, EState *estate ){
 
 }
 
+static void ExecMultiJoinCleanUpChunk(MultiJoinState * mhjoinstate, MultiHashState *mhstate) {
+	Bitmapset *tmpset;
+	ListCell *lc;
+	List *freelist = NIL;
+	List *endSubplans = NIL;
+	bool mustclean = false;
+
+	foreach(lc, mhstate->allChunks) {
+
+		RelChunk *chunk = (RelChunk *) lfirst(lc);
+
+		if (!bms_is_member(ChunkGetID(chunk), mhstate->chunkIds)) {
+			endSubplans = list_union(endSubplans, chunk->subplans);
+			freelist = lappend(freelist, chunk);
+			mustclean = true;
+
+		}
+	}
+
+	if (mustclean) {
+
+		foreach(lc, endSubplans) {
+
+			ChunkedSubPlan *subplan = (ChunkedSubPlan *) lfirst(lc);
+			ExecMultiJoinEndSubPlan(mhjoinstate, subplan);
+
+		}
+		list_free(endSubplans);
+		foreach(lc, freelist) {
+
+			RelChunk *chunk = (RelChunk *) lfirst(lc);
+			mhstate->allChunks = list_delete(mhstate->allChunks , chunk);
+			JC_DeleteChunk(chunk);
+
+		}
+	}
+
+}
 
 
-static void ExecPrepareChunk(MultiHashState *mhstate, RelChunk *chunk) {
+static void ExecPrepareChunk(MultiJoinState * mhjoinstate ,MultiHashState *mhstate, RelChunk *chunk) {
 
 
 	mhstate->hashable_array = mhstate->chunk_hashables[ChunkGetID(chunk)];;
@@ -1053,6 +1093,9 @@ static void ExecPrepareChunk(MultiHashState *mhstate, RelChunk *chunk) {
 
 	if (chunk->state != CH_READ)
 		(void) MultiExecProcNode((PlanState *) mhstate);
+
+	if(mhstate->needUpdate)
+		ExecMultiJoinCleanUpChunk(mhjoinstate, mhstate);
 
 	mhstate->currTuple = list_head(mhstate->currChunk->tuple_list);
 
@@ -1076,19 +1119,19 @@ static void ExecMultiJoiSetSubplan(MultiJoinState * mhjoinstate, ChunkedSubPlan 
 		RelChunk *chunk = (RelChunk *)lfirst(lc);
 		MultiHashState *mhstate = mhjoinstate->mhashnodes[ChunkGetRelid(chunk)];
 
-	    ExecPrepareChunk(mhstate,chunk);
+	    ExecPrepareChunk(mhjoinstate,mhstate,chunk);
 	    if(!mhstate->started)
 	    	mhjoinstate->mhj_JoinState = MHJ_END;
 
 	}
 }
 
-static void ExecMultiJoinEndSubPlan(MultiJoinState * mhjoinstate){
+static void ExecMultiJoinEndSubPlan(MultiJoinState * mhjoinstate, ChunkedSubPlan * subplan){
 
-	ChunkedSubPlan * subplan = linitial(mhjoinstate->chunkedSubplans);
+	//ChunkedSubPlan * subplan = linitial(mhjoinstate->chunkedSubplans);
 	List *lchunks = subplan->chunks;
 	ListCell *lc;
-	mhjoinstate->chunkedSubplans = list_delete_first(mhjoinstate->chunkedSubplans);
+	mhjoinstate->chunkedSubplans = list_delete(mhjoinstate->chunkedSubplans, subplan);
 	mhjoinstate->pendingSubplans = list_delete(mhjoinstate->pendingSubplans, subplan);
 	foreach(lc, lchunks){
 
@@ -1131,7 +1174,7 @@ static void  ExecMultiJoinGetNewChunk(MultiJoinState * mhjoinstate){
 
 	}
 
-	ExecPrepareChunk(mhstate, chunk);
+	ExecPrepareChunk(mhjoinstate,mhstate, chunk);
 
 }
 static void ExecMultiJoinPrepareSubplans(MultiJoinState * mhjoinstate){
@@ -1147,9 +1190,10 @@ static void ExecMultiJoinPrepareSubplans(MultiJoinState * mhjoinstate){
 		ListCell *lc;
 
 		foreach(lc,lchunks) {
+			RelChunk *chunk = (RelChunk *)lfirst(lc);
 
 
-			subplans = list_union(subplans, ((RelChunk *)lfirst(lc))->subplans);
+			subplans = list_union(subplans, chunk->subplans);
 
 		}
 		printf("got %d subplans for rel : %d \n", list_length(subplans), i );

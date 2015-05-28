@@ -2059,7 +2059,10 @@ struct MultiHashState{
 	ListCell 		*currTuple;
 	MemoryContext   tupCxt;
 	bool 			started;
+	bool 			needUpdate;
 	bool			hasDropped;
+	Bitmapset		*chunkIds;
+	List 			*allChunks;
 
 
 };

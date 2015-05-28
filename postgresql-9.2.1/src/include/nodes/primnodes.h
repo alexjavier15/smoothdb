@@ -1302,6 +1302,7 @@ typedef struct RelChunk{
 	int		priority;
 	List	*subplans;
 	List	*tuple_list;
+	int		tuples;
 
 }RelChunk;
 
@@ -1310,6 +1311,7 @@ typedef struct ChunkedSubPlan{
 	Node node;
 	List *chunks;
 	bool done;
+
 
 
 }ChunkedSubPlan;

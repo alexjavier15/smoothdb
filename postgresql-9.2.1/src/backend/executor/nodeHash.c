@@ -370,29 +370,27 @@ MultiExecMultiHash(MultiHashState *node)
 
 		if (TupIsNull(slot)) {
 
-			if (node->num_chunks == 1 ){
-				break;
-			}
-			if (!node->hasDropped) {
-
-				if (scan->es_scanBytes == 0)
-					node->started = false;
-				else
-					node->started = true;
+			// it's our last chunk
+			if(node->currChunk->state == CH_WAITTING && scan->es_scanBytes > 0){
+				node->needUpdate = true;
 
 				break;
-
 			}
 
+			// we are reading an dropped chunk so rescan to refill and update the supblans
+			if(node->currChunk->state == CH_DROPPED){
 
-
+			node->needUpdate = true;
 			printf("CALLING RESCAN in %d scanbytes %d\n", outerNode->type, scan->es_scanBytes);
 			fflush(stdout);
 
 			ExecReScan(outerNode);
 
 			continue;
+			}
 
+
+			return NULL;
 
 		}
 
@@ -444,13 +442,18 @@ MultiExecMultiHash(MultiHashState *node)
 
 		}
 
-		if (scan->es_scanBytes == multi_join_chunk_tup) {
+		if (scan->es_scanBytes == multi_join_chunk_tup || scan->es_scanBytes  == node->currChunk->tuples) {
+			node->chunkIds = bms_add_member(node->chunkIds, (int)ChunkGetID(node->currChunk));
 			break;
 		}
 
 
 	}
 	node->currChunk->state = CH_READ;
+	node->chunkIds = bms_add_member(node->chunkIds,(int) ChunkGetID(node->currChunk));
+	if(node->currChunk->tuples == 0)
+		node->currChunk->tuples = hashtable->totalTuples;
+
 	node->lchunks = lappend(node->lchunks , node->currChunk);
 	scan->es_scanBytes = 0;
 
@@ -570,6 +573,9 @@ ExecInitMultiHash(MultiHash *node, EState *estate, int eflags)
 
 	mhashstate->lchunks = NIL;
 	mhashstate->currChunk = NULL;
+	mhashstate->chunkIds = NULL;
+	mhashstate->needUpdate = false;
+	mhashstate->allChunks = node->chunks;
 
 	/*
 		 * Create temporary memory contexts in which to keep the hashtable working

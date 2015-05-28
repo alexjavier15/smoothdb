@@ -332,6 +332,37 @@ void JC_EndCache(void){
 
 
 }
+void JC_DeleteChunk(RelChunk* chunk){
+
+	ListCell *cell;
+	ListCell *prev;
+	if (equal(lfirst(nextChunk), chunk)) {
+		nextChunk = nextChunk->next;
+
+	}
+
+	prev = NULL;
+	foreach(cell, seq_cycle) {
+		if (equal(lfirst(cell), chunk)) {
+
+
+			if (prev)
+				prev->next = cell->next;
+			else
+				seq_cycle->head = cell->next;
+			pfree(cell);
+			break;
+
+		}
+
+		prev = cell;
+	}
+
+
+	list_free(chunk->subplans);
+	list_free(chunk->tuple_list);
+	pfree(chunk);
+}
 
 List *JC_GetChunks(void){
 	return JCacheSegHdr->chunks;
