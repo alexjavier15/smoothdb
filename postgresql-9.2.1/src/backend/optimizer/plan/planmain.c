@@ -200,7 +200,7 @@ query_planner(PlannerInfo *root, List *tlist,
 		JC_InitCache();
 		foreach(lc, result) {
 			ChunkedSubPlan *subplan = lfirst(lc);
-			pprint(subplan);
+			pprint(subplan->chunks);
 			JC_AddChunkedSubPlan(subplan->chunks);
 
 
