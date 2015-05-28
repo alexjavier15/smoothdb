@@ -200,8 +200,8 @@ query_planner(PlannerInfo *root, List *tlist,
 		JC_InitCache();
 		foreach(lc, result) {
 			ChunkedSubPlan *subplan = lfirst(lc);
-			pprint(subplan->chunks);
-			JC_AddChunkedSubPlan(subplan->chunks);
+		    pprint(subplan->chunks);
+			JC_AddChunkedSubPlan(subplan);
 
 
 		}
@@ -513,25 +513,23 @@ static List * make_subplan_permutations(List *a, List *b) {
 	List * result = NIL;
 	bool  freed =false;
 	foreach(lc1, a) {
-
+		Node *node = lfirst(lc1);
 		foreach(lc2, b) {
 			ChunkedSubPlan *sp = makeNode(ChunkedSubPlan);
-			Node *node = lfirst(lc1);
+			RelChunk * chunk_b = (RelChunk *)lfirst(lc2);
 			sp->chunks = NIL;
 			switch (nodeTag(node)) {
 				case T_RelChunk:
 					sp->chunks = lappend(sp->chunks,node);
 					break;
-				case T_List:
-					sp->chunks = list_concat(sp->chunks, (List *)node);
-					break;
+
 				case T_ChunkedSubPlan:
-					sp->chunks = list_concat(sp->chunks, ((ChunkedSubPlan *) node)->chunks);
+					sp->chunks = list_concat(sp->chunks, list_copy(((ChunkedSubPlan *) node)->chunks));
 					freed=true;
 					break;
 				default: break;
 			}
-			sp->chunks = lappend(sp->chunks, lfirst(lc2));
+			sp->chunks = lappend(sp->chunks, chunk_b);
 			sp->done = false;
 			result = lappend(result, sp);
 
