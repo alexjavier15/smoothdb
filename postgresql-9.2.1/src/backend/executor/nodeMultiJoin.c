@@ -783,9 +783,12 @@ ExecInitMultiJoin(MultiJoin *node, EState *estate, int eflags) {
 	ExecAssignResultTypeFromTL(&mhjstate->js.ps);
 	ExecAssignProjectionInfo(&mhjstate->js.ps, NULL);
 	mhjstate->hashnodes_array_size= ps_index;
-	ExecInitJoinCache(mhjstate);
+
 	mhjstate->pendingSubplans = node->subplans;
+
 	mhjstate->mhj_JoinState = MHJ_BUILD_SUBPLANS;
+	ExecInitJoinCache(mhjstate);
+
 	return mhjstate;
 }
 
