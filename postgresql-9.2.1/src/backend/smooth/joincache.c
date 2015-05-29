@@ -215,7 +215,7 @@ MinimalTuple JC_StoreMinmalTuple(RelChunk *chunk , MinimalTuple mtuple){
 	volatile JCacheMemHeader *jcacheSegHdr = JCacheSegHdr;
 
 	oldcxt = MemoryContextSwitchTo(chunk->mcxt);
-
+	MemoryContextStats(chunk->mcxt);
 	copyTuple = (MinimalTuple ) palloc0(mtuple->t_len);
 	memcpy(copyTuple, mtuple, mtuple->t_len);
 	chunk->tuple_list = lappend(chunk->tuple_list, copyTuple);
