@@ -113,6 +113,7 @@ typedef enum NodeTag
 	T_MultiJoinState,
 	T_MultiHashState,
 	T_CHashJoinState,
+	T_SelectivityState,
 
 	T_IndexOnlyScanState,
 	T_BitmapIndexScanState,

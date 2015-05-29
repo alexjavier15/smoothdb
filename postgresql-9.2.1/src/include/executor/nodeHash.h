@@ -87,7 +87,10 @@ extern void ExecChooseHashTableSize(double ntuples, int tupwidth, bool useskew,
 extern int	ExecHashGetSkewBucket(HashJoinTable hashtable, uint32 hashvalue);
 extern void
 ExecMHashIncreaseNumBatches(SymHashJoinState *mhjstate);
-extern SimpleHashTable ExecChooseHashTable(MultiHashState * mhstate, List *hoperators, List *hashkeys);
+extern SimpleHashTable ExecChooseHashTable(MultiHashState * mhstate, List *hoperators, List *hashkeys, HashInfo **hinfo);
 extern void ExecMultiHashCreateHashTables(MultiHashState * mhstate);
-extern void add_hashinfo(MultiHashState *mhstate , List * clauses, List *hoperators);
+extern HashInfo *  add_hashinfo(MultiHashState *mhstate , List * clauses, List *hoperators, Bitmapset *relids);
+extern HashInfo *GetUniqueHashInfo (MultiHashState *mhstate , List * clauses, List *hoperators, bool *found);
+extern void ExecChooseHashInfo(MultiHashState *node , HashInfo **hinfo, List *hashkeys, List * hoperators);
+
 #endif   /* NODEHASH_H */

@@ -26,6 +26,7 @@
 #include "nodes/plannodes.h"
 #include "nodes/relation.h"
 #include "utils/datum.h"
+#include "nodes/execnodes.h"
 
 
 /*
@@ -3273,7 +3274,14 @@ _copyExplainStmt(const ExplainStmt *from)
 
 	return newnode;
 }
+static ExprState *
+_copyExprState(const ExprState *from) {
 
+	 ExprState *newnode = makeNode(ExprState);
+
+	COPY_NODE_FIELD(expr);
+	return newnode;
+}
 static CreateTableAsStmt *
 _copyCreateTableAsStmt(const CreateTableAsStmt *from)
 {
@@ -4118,6 +4126,9 @@ copyObject(const void *from)
 			break;
 		case T_FromExpr:
 			retval = _copyFromExpr(from);
+			break;
+		case T_ExprState:
+			retval = _copyExprState(from);
 			break;
 
 			/*

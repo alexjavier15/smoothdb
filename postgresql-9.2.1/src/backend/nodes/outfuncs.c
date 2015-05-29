@@ -367,7 +367,9 @@ static void _outExprState(StringInfo str, const ExprState *node)
 
 static void _outHashInfo(StringInfo str, const HashInfo *node)
 {
-	WRITE_NODE_FIELD(hashkeys);
+	WRITE_BITMAPSET_FIELD(relids);
+	WRITE_FLOAT_FIELD(sel, "%.8f");
+	//WRITE_NODE_FIELD(hashkeys);
 
 
 }

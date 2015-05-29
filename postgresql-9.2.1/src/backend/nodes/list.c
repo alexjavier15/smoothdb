@@ -963,6 +963,19 @@ list_append_unique(List *list, void *datum)
 		return lappend(list, datum);
 }
 
+List *
+list_append_unique_replace(List *list, void **datum)
+{
+	void * result = list_member_return(list,*datum);
+	if (result){
+		*datum = result;
+		pfree(*datum);
+		return list;
+	}
+	else
+		return lappend(list, *datum);
+}
+
 /*
  * This variant of list_append_unique() determines list membership via
  * simple pointer equality.

@@ -545,7 +545,7 @@ ExecInitMultiHash(MultiHash *node, EState *estate, int eflags)
 	outerPlanState(hashstate) = ExecInitNode(outerPlan(node), estate, eflags);
 	scanNode = (ScanState *)outerPlanState(hashstate);
 
-	printf("\nINIT MULTI HASH REL %d  \n", ((Scan *)scanNode->ps.plan)->scanrelid);
+
 
 	scanNode->es_scanBytes  = 0;
 //	pprint(node->hash.plan.targetlist);
@@ -576,8 +576,10 @@ ExecInitMultiHash(MultiHash *node, EState *estate, int eflags)
 	mhashstate->chunkIds = NULL;
 	mhashstate->needUpdate = false;
 	mhashstate->allChunks = node->chunks;
+	mhashstate->relid = ((Scan *)scanNode->ps.plan)->scanrelid;
 
-	/*
+	printf("\nINIT MULTI HASH REL %d  \n", mhashstate->relid);
+		/*
 		 * Create temporary memory contexts in which to keep the hashtable working
 		 * storage.  See notes in executor/hashjoin.h.
 		 */
@@ -705,6 +707,7 @@ void ExecMultiHashCreateHashTables(MultiHashState * mhstate){
 		int num_htables= list_length(hkeysList);
 		int htidx = 0;
 		int i;
+		Index relid;
 		MemoryContext oldctx;
 		mhstate->nun_hashtables = num_htables;
 
@@ -714,7 +717,8 @@ void ExecMultiHashCreateHashTables(MultiHashState * mhstate){
 
 		MemoryContextSwitchTo(oldctx);
 		Assert(mhstate->chunk_hashables  != NULL);
-
+		relid = mhstate->relid;
+		pprint(hkeysList);
 		for(i = 0 ; i<mhstate->num_chunks ; i++ ){
 		//mhstate->hashable_array =
 		mhstate->chunk_hashables[i] =(SimpleHashTable *) palloc0(num_htables * sizeof(SimpleHashTable) );
@@ -722,11 +726,11 @@ void ExecMultiHashCreateHashTables(MultiHashState * mhstate){
 
 			foreach(lc, hkeysList) {
 				HashInfo * hinfo = (HashInfo *) lfirst(lc);
+
 				 ExecMultiHashTableCreate(mhstate,
 						hinfo->hoperators,
 						false, &mhstate->chunk_hashables[i][htidx]);
 				hinfo->id = htidx;
-
 				htidx++;
 			}
 
@@ -735,13 +739,17 @@ void ExecMultiHashCreateHashTables(MultiHashState * mhstate){
 		mhstate->hashable_array = NULL;
 
 		printf("Created %d hash tables for relation %d \n",
-				num_htables, ((Scan *)mhstate->hstate.ps.lefttree->plan)->scanrelid),
+				num_htables,relid);
+		foreach(lc, hkeysList) {
+			HashInfo * hinfo = (HashInfo *) lfirst(lc);
+			printf("ptr : %X \n",hinfo );
+		}
 
 		fflush(stdout);
 	}
 
 }
-SimpleHashTable ExecChooseHashTable(MultiHashState * mhstate, List *hoperators, List *hashkeys){
+SimpleHashTable ExecChooseHashTable(MultiHashState * mhstate, List *hoperators, List *hashkeys, HashInfo **hinfo){
 
 	HashInfo * dummy_hinfo = makeNode(HashInfo);
 	HashInfo *result = NULL;
@@ -752,6 +760,7 @@ SimpleHashTable ExecChooseHashTable(MultiHashState * mhstate, List *hoperators, 
 
 
 	result = list_member_return(mhstate->all_hashkeys, dummy_hinfo);
+	*hinfo = result;
 	idx = ((HashInfo *) result)->id;
 	Assert(result != NULL);
 	pfree(dummy_hinfo);
@@ -2950,13 +2959,45 @@ static TupleTableSlot * ExecMJoinGetNextTuple(HashState * node) {
 
 }
 
-void add_hashinfo(MultiHashState *mhstate , List * clauses, List *hoperators){
-
-
+HashInfo *GetUniqueHashInfo (MultiHashState *mhstate , List * clauses, List *hoperators, bool *found){
+	HashInfo *tmp = NULL;
 	HashInfo * hinfo = makeNode(HashInfo);
 	hinfo->hashkeys = clauses;
 	hinfo->hoperators = hoperators;
-	mhstate->all_hashkeys = list_append_unique(mhstate->all_hashkeys, hinfo);
+	*found = false;
+	tmp = list_member_return(mhstate->all_hashkeys, hinfo);
+	if (tmp != NULL) {
+		*found = true;
+		pfree(hinfo);
+		return tmp;
+	}
+
+	return hinfo;
+
+
+
+
+}
+
+HashInfo * add_hashinfo(MultiHashState *mhstate , List * clauses, List *hoperators, Bitmapset *relids){
+
+	HashInfo *tmp  = NULL;
+	bool found;
+
+	tmp = GetUniqueHashInfo(mhstate, clauses, hoperators, &found);
+	if (!found) {
+		mhstate->all_hashkeys = lappend(mhstate->all_hashkeys, tmp);
+		printf("not found ptr : %X \n",tmp );
+	} else {
+		printf("found ptr : %X \n",tmp );
+	}
+
+
+	tmp->relids =  bms_add_members(tmp->relids,relids);
+
+
+	return tmp;
+
 
 
 }
@@ -3000,3 +3041,4 @@ void ExecResetMultiHashtable(MultiHashState *node, SimpleHashTable  * hashtables
 
 
 }
+

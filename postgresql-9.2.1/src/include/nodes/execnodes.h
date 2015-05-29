@@ -1027,6 +1027,7 @@ typedef struct PlanState
 	bool		ps_TupFromTlist;/* state flag for processing set-valued
 								 * functions in targetlist */
 
+
 } PlanState;
 
 
@@ -1733,6 +1734,7 @@ typedef struct HashJoinState
 } HashJoinState;
 
 typedef struct MultiHashState MultiHashState;
+typedef struct CHashJoinState CHashJoinState;
 
 
 typedef struct MultiJoinState
@@ -1768,7 +1770,7 @@ typedef struct MultiJoinState
 	List			** plans;
 	MultiHashState	**mhashnodes;
 	int				hashnodes_array_size;
-	PlanState		*current_ps;
+	CHashJoinState		*current_ps;
 	List			*chunkedSubplans;
 	List			*pendingSubplans;
 } MultiJoinState;
@@ -1807,8 +1809,15 @@ typedef struct SymHashJoinState
 
 } SymHashJoinState;
 
+typedef struct SelectivityState
+{ 	NodeTag		type;
+	List	*hinfo;
+
+
+
+}SelectivityState;
 /*Alex:*/
- typedef struct CHashJoinState
+ struct CHashJoinState
 {
 	JoinState	js;				/* its first field is NodeTag */
 	List	   *hashclauses;	/* list of ExprState nodes */
@@ -1828,8 +1837,13 @@ typedef struct SymHashJoinState
 	bool		chj_MatchedOuter;
 	bool		chj_OuterNotEmpty;
 	Index		seq_num;
+	SelectivityState *selstate;
+	HashInfo 	*outer_hinfo;
+	HashInfo 	*inner_hinfo;
+	List 		*plan_relids;
 
-} CHashJoinState;
+
+};
 
 /* ----------------
  *	 MHashJoinState information
@@ -1837,6 +1851,9 @@ typedef struct SymHashJoinState
  *		see: HashJoinState
  * ----------------
  */
+
+
+
 typedef struct MultiHashSeqState
 {
 	JoinState	js;				/* its first field is NodeTag */
@@ -2049,6 +2066,7 @@ typedef struct HashState
 struct MultiHashState{
 
 	HashState		hstate;
+	Index			relid;
 	List			*all_hashkeys;
 	int				nun_hashtables; /*number of hash tables */
 	int				num_chunks;

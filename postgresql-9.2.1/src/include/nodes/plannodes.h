@@ -965,4 +965,14 @@ typedef struct PlanInvalItem
 	uint32		hashValue;		/* hash value of object's cache lookup key */
 } PlanInvalItem;
 
+typedef struct HashInfo{
+	Node node;
+	Bitmapset *relids;
+	List	*hashkeys;
+	List	*outer_hashkeys;
+	List	*hoperators;
+	Selectivity sel;
+	Index	id;
+
+}HashInfo;
 #endif   /* PLANNODES_H */
