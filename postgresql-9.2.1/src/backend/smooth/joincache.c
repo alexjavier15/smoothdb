@@ -218,7 +218,9 @@ MinimalTuple JC_StoreMinmalTuple(RelChunk *chunk , MinimalTuple mtuple){
 	MemoryContextStats(chunk->mcxt);
 	copyTuple = (MinimalTuple ) palloc0(mtuple->t_len);
 	memcpy(copyTuple, mtuple, mtuple->t_len);
+	MemoryContextStats(chunk->mcxt);
 	chunk->tuple_list = lappend(chunk->tuple_list, copyTuple);
+	MemoryContextStats(chunk->mcxt);
 	uint32 size = mtuple->t_len + sizeof(ListCell);
 	printf("allocated size : %ld \n", size);
 	MemoryContextStats(chunk->mcxt);
