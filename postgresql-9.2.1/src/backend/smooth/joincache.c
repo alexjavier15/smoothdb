@@ -221,7 +221,7 @@ MinimalTuple JC_StoreMinmalTuple(RelChunk *chunk , MinimalTuple mtuple){
 	chunk->tuple_list = lappend(chunk->tuple_list, copyTuple);
 	uint32 size = mtuple->t_len + sizeof(ListCell);
 	printf("allocated size : %ld \n", size);
-
+	MemoryContextStats(chunk->mcxt):
 	MemoryContextSwitchTo(oldcxt);
 	jcacheSegHdr->freesize = jcacheSegHdr->freesize - mtuple->t_len;
 	return copyTuple;
