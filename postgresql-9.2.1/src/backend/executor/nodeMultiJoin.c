@@ -13,6 +13,8 @@
 #include "executor/nodeMultiJoin.h"
 #include "optimizer/cost.h"
 #include "miscadmin.h"
+#include "utils/memutils.h"
+
 
 #define HJ_BUILD_HASHTABLE		1
 #define HJ_NEED_NEW_OUTER		2
@@ -37,7 +39,7 @@ ExecMultiHashJoinOuterGetTuple(PlanState *outerNode, CHashJoinState *chjstate, u
 
 static void ExecInitJoinCache(MultiJoinState * mhjoinstate);
 static void
-show_instrumentation_count(PlanState *planstate);
+show_instrumentation_count(Instrumentation *instrument);
 
 static void ExecSetSeqNumber(CHashJoinState * chjoinstate, EState *estate);
 static void
@@ -448,6 +450,7 @@ ExecMultiJoin(MultiJoinState *node) {
 				node->mhj_JoinState = MHJ_BUILD_SUBPLANS;
 				break;
 			case MHJ_EXEC_JOIN: {
+				InstrStartNode(node->js.ps.state->unique_instr);
 				TupleTableSlot * slot = ExecProcNode(node->current_ps);
 
 				node->js.ps.state->started = true;
@@ -461,10 +464,16 @@ ExecMultiJoin(MultiJoinState *node) {
 //							node->js.ps.state->unique_instr[0].tuplecount);
 
 					node->mhj_JoinState = MHJ_NEED_NEW_SUBPLAN;
-					printf("----------------------------------\n");
-					for (i = 1; i < node->hashnodes_array_size - 1; i++) {
-						show_instrumentation_count_b(&node->js.ps.state->unique_instr[i]);
-					}
+//					printf("----------------------------------\n");
+//
+//					for (i = 1; i < node->hashnodes_array_size - 1; i++) {
+//						show_instrumentation_count_b(&node->js.ps.state->unique_instr[i]);
+//					}
+					InstrEndLoop(node->js.ps.state->unique_instr);
+					printf(":----------------------------------\nTotal Subplan stats\n");
+					show_instrumentation_count(&node->js.ps.state->unique_instr[0]);
+					printf(":----------------------------------\n");
+
 					{
 //						CHashJoinState *best_plan= ExecChoseBestPlan(node);
 //						if (best_plan) {
@@ -473,6 +482,7 @@ ExecMultiJoin(MultiJoinState *node) {
 
 //						}
 					}
+
 					continue;
 
 //					if (node->js.ps.state->replan) {
@@ -496,6 +506,8 @@ ExecMultiJoin(MultiJoinState *node) {
 //
 //					fflush(stdout);
 				}
+				InstrStopNode(&node->js.ps.state->unique_instr[0], 1.0);
+
 
 				return slot;
 			}
@@ -784,7 +796,7 @@ ExecInitMultiJoin(MultiJoin *node, EState *estate, int eflags) {
 
 		ps_index++;
 	}
-	u_instruments = InstrAlloc((ps_index - 1), INSTRUMENT_ROWS);
+	u_instruments = InstrAlloc((ps_index - 1), INSTRUMENT_ROWS);// | INSTRUMENT_TIMER);
 	mhjstate->mhashnodes = hashnodes;
 	estate->unique_instr = u_instruments;
 
@@ -1012,27 +1024,24 @@ void ExecEndMultiJoin(MultiJoinState *node) {
 //	ExecEndNode(innerPlanState(node));
 }
 
-static void show_instrumentation_count(PlanState *planstate) {
-	double nfiltered1;
-	double nfiltered2;
+static void show_instrumentation_count(Instrumentation *instrument) {
+
 	double nloops;
 	double tuple_count;
 	double ntuples;
 
-	if (!planstate->instrument)
+	if (!instrument)
 		return;
 
-	nfiltered1 = planstate->instrument->nfiltered2;
 
-	nfiltered2 = planstate->instrument->nfiltered1;
-	nloops = planstate->instrument->nloops;
-	tuple_count = planstate->instrument->tuplecount;
-	ntuples = planstate->instrument->ntuples;
-	printf("\nnfiltered1 : %.2lf \n", nfiltered1);
-	printf("nfiltered2 : %.2lf \n", nfiltered2);
-	printf("tuple_count : %.2lf \n", tuple_count);
+	nloops = instrument->nloops;
+
+	ntuples = instrument->ntuples;
+
+
 	printf("ntuples : %.2lf \n", ntuples);
 	printf("nloops : %.2lf \n", nloops);
+	printf("time : %.6lf \n", instrument->total);
 	fflush(stdout);
 
 }
@@ -1142,7 +1151,7 @@ static void ExecInitJoinCache(MultiJoinState * mhjoinstate) {
 
 		ExecMultiJoinGetNewChunk(mhjoinstate);
 		chunksLeft--;
-
+		MemoryContextStats(TopMemoryContext);
 	}
 
 }
@@ -1157,6 +1166,7 @@ static void ExecMultiJoiSetSubplan(MultiJoinState * mhjoinstate, ChunkedSubPlan 
 			mhjoinstate->mhj_JoinState = MHJ_END;
 
 	}
+
 }
 
 static void ExecMultiJoinEndSubPlan(MultiJoinState * mhjoinstate, ChunkedSubPlan * subplan) {

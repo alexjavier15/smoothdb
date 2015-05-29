@@ -740,10 +740,7 @@ void ExecMultiHashCreateHashTables(MultiHashState * mhstate){
 
 		printf("Created %d hash tables for relation %d \n",
 				num_htables,relid);
-		foreach(lc, hkeysList) {
-			HashInfo * hinfo = (HashInfo *) lfirst(lc);
-			printf("ptr : %X \n",hinfo );
-		}
+
 
 		fflush(stdout);
 	}
@@ -2987,9 +2984,7 @@ HashInfo * add_hashinfo(MultiHashState *mhstate , List * clauses, List *hoperato
 	tmp = GetUniqueHashInfo(mhstate, clauses, hoperators, &found);
 	if (!found) {
 		mhstate->all_hashkeys = lappend(mhstate->all_hashkeys, tmp);
-		printf("not found ptr : %X \n",tmp );
 	} else {
-		printf("found ptr : %X \n",tmp );
 	}
 
 
