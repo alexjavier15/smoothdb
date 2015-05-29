@@ -454,6 +454,7 @@ ExecMultiJoin(MultiJoinState *node) {
 				if (TupIsNull(slot)) {
 					ListCell *lc;
 					ListCell *pc;
+					int i;
 					ExecMultiJoinEndSubPlan(node, linitial(node->chunkedSubplans));
 					printf("GOT NULL TUPLE :processed tuples ");
 							"//%.0f!\n",
@@ -461,10 +462,9 @@ ExecMultiJoin(MultiJoinState *node) {
 
 					node->mhj_JoinState = MHJ_NEED_NEW_SUBPLAN;
 					printf("----------------------------------\n");
-					show_instrumentation_count_b(&node->js.ps.state->unique_instr[4]);
-					show_instrumentation_count_b(&node->js.ps.state->unique_instr[3]);
-					show_instrumentation_count_b(&node->js.ps.state->unique_instr[2]);
-					show_instrumentation_count_b(&node->js.ps.state->unique_instr[1]);
+					for (i = 1; i < node->hashnodes_array_size - 1; i++) {
+						show_instrumentation_count_b(&node->js.ps.state->unique_instr[i]);
+					}
 					{
 //						CHashJoinState *best_plan= ExecChoseBestPlan(node);
 //						if (best_plan) {
