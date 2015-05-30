@@ -65,6 +65,7 @@ static void ExecHashRemoveNextSkewBucket(HashJoinTable hashtable);
 static void ExecMHashDumpBatch(MJoinTable hashtable);
 static TupleTableSlot *  ExecMJoinGetNextTuple(HashState *hashtable);
 static MinimalTuple copyMinmalTuple(MultiHashState *mhstate , MinimalTuple mtuple);
+static void ExecMultiHashAllocateHashtable(SimpleHashTable hashtable);
 
 /* ----------------------------------------------------------------
  *	Alex: Return and insert one tuple from  the outer node scan
@@ -938,13 +939,10 @@ void ExecMultiHashTableCreate(MultiHashState *node, List *hashOperators, bool ke
 
 	int			log2_nbuckets;
 	int			nkeys;
-	int			i;
+	MemoryContext	oldcxt;
 	ListCell   *ho;
-	MemoryContext oldcxt;
-	Size		elementSize;
-	JoinTuple firstElement;
-	JoinTuple tmpElement;
-	JoinTuple prevElement;
+
+	int i;
 
 
 	/*
@@ -1027,35 +1025,6 @@ void ExecMultiHashTableCreate(MultiHashState *node, List *hashOperators, bool ke
 	/* Allocate data that will live for the life of the hashjoin */
 
 
-	oldcxt = MemoryContextSwitchTo(hashtable->hashCxt);
-	printf(" created hashtable with %d buckets", nbuckets );
-	hashtable->buckets = (JoinTuple *)
-		palloc0(nbuckets * sizeof(JoinTuple));
-
-	elementSize = MAXALIGN(sizeof(JoinTupleData));
-	firstElement = (JoinTuple)palloc0( multi_join_chunk_tup * elementSize);
-	if (!firstElement)
-		elog(ERROR, "out of memory. could no create hashtable jointuples");
-
-	hashtable->firstElement = firstElement;
-
-	prevElement = NULL;
-	tmpElement = firstElement;
-	for (i = 0; i < multi_join_chunk_tup; i++) {
-		tmpElement->next = prevElement;
-		prevElement = tmpElement;
-		tmpElement = (JoinTuple) (((char *) tmpElement) + elementSize);
-	}
-
-	hashtable->freeList = prevElement;
-
-
-	/*
-	 * Set up for skew optimization, if possible and there's a need for more
-	 * than one batch.	(In a one-batch join, there's no point in it.)
-	 */
-
-	MemoryContextSwitchTo(oldcxt);
 
 	*hashtableptr = hashtable;
 
@@ -3050,7 +3019,7 @@ void ExecResetMultiHashtable(MultiHashState *node, SimpleHashTable  * hashtables
 
 		MemoryContextReset(hashtable->hashCxt);
 
-		oldcxt = MemoryContextSwitchTo(hashtable->hashCxt);
+
 
 		// Update hashtable info
 		hashtable->totalTuples = 0;
@@ -3058,13 +3027,50 @@ void ExecResetMultiHashtable(MultiHashState *node, SimpleHashTable  * hashtables
 
 
 		/* Allocate data that will live for the life of the multihashjoin */
+		ExecMultiHashAllocateHashtable(hashtable);
 
-		hashtable->buckets = (JoinTuple *)
-			palloc0(hashtable->nbuckets * sizeof(JoinTuple));
-		MemoryContextSwitchTo(oldcxt);
+
 
 	}
 
 
 }
 
+static void ExecMultiHashAllocateHashtable(SimpleHashTable hashtable) {
+
+	int i;
+	Size elementSize;
+	JoinTuple firstElement;
+	JoinTuple tmpElement;
+	JoinTuple prevElement;
+	MemoryContext oldcxt;
+
+	oldcxt = MemoryContextSwitchTo(hashtable->hashCxt);
+	printf(" created hashtable with %d buckets", hashtable->nbuckets);
+	hashtable->buckets = (JoinTuple *) palloc0(hashtable->nbuckets * sizeof(JoinTuple));
+
+	elementSize = MAXALIGN(sizeof(JoinTupleData));
+	firstElement = (JoinTuple) palloc0( multi_join_chunk_tup * elementSize);
+	if (!firstElement)
+		elog(ERROR, "out of memory. could no create hashtable jointuples");
+
+	hashtable->firstElement = firstElement;
+
+	prevElement = NULL;
+	tmpElement = firstElement;
+	for (i = 0; i < multi_join_chunk_tup; i++) {
+		tmpElement->next = prevElement;
+		prevElement = tmpElement;
+		tmpElement = (JoinTuple) (((char *) tmpElement) + elementSize);
+	}
+
+	hashtable->freeList = prevElement;
+
+	/*
+	 * Set up for skew optimization, if possible and there's a need for more
+	 * than one batch.	(In a one-batch join, there's no point in it.)
+	 */
+
+	MemoryContextSwitchTo(oldcxt);
+
+}
