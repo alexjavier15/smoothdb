@@ -36,6 +36,8 @@ typedef struct  SimpleHashTableData
 	/* buckets[i] is head of list of tuples in i'th in-memory bucket */
 	struct JoinTupleData **buckets;
 	double		totalTuples;	/* # tuples obtained from inner plan */
+	JoinTuple	firstElement;
+	JoinTuple	freeList;
 	Size		spaceUsed;		/* memory space currently used by tuples */
 	Size		spaceAllowed;	/* upper limit for space used */
 	MemoryContext hashCxt;		/* context for whole-hash-join storage */

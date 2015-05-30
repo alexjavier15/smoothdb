@@ -941,6 +941,11 @@ void ExecMultiHashTableCreate(MultiHashState *node, List *hashOperators, bool ke
 	int			i;
 	ListCell   *ho;
 	MemoryContext oldcxt;
+	Size		elementSize;
+	JoinTuple firstElement;
+	JoinTuple tmpElement;
+	JoinTuple prevElement;
+
 
 	/*
 	 * Get information about the size of the relation to be hashed (it's the
@@ -1026,6 +1031,24 @@ void ExecMultiHashTableCreate(MultiHashState *node, List *hashOperators, bool ke
 	printf(" created hashtable with %d buckets", nbuckets );
 	hashtable->buckets = (JoinTuple *)
 		palloc0(nbuckets * sizeof(JoinTuple));
+
+	elementSize = MAXALIGN(sizeof(JoinTupleData));
+	firstElement = (JoinTuple)palloc0( multi_join_chunk_tup * elementSize);
+	if (!firstElement)
+		elog(ERROR, "out of memory. could no create hashtable jointuples");
+
+	hashtable->firstElement = firstElement;
+
+	prevElement = NULL;
+	tmpElement = firstElement;
+	for (i = 0; i < multi_join_chunk_tup; i++) {
+		tmpElement->next = prevElement;
+		prevElement = tmpElement;
+		tmpElement = (JoinTuple) (((char *) tmpElement) + elementSize);
+	}
+
+	hashtable->freeList = prevElement;
+
 
 	/*
 	 * Set up for skew optimization, if possible and there's a need for more
@@ -1817,10 +1840,14 @@ void ExecMultiHashTableInsert(SimpleHashTable hashtable, MinimalTuple tuple, uin
 		 */
 
 		/* Create the HashJoinTuple */
+		if( hashtable->freeList == NULL)
+			elog(ERROR, "out of memory: No more buckets in the hashtable");
 
-		jtuple = (JoinTuple) MemoryContextAlloc(hashtable->hashCxt, JTUPLESIZE);
+		jtuple = hashtable->freeList;
 		jtuple->hashvalue = hashvalue;
 		jtuple->mtuple=tuple;
+		hashtable->freeList =  hashtable->freeList->next;
+
 
 		/*
 		 * We always reset the tuple-matched flag on insertion.  This is okay
