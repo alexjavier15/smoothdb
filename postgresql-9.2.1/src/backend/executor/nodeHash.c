@@ -1024,7 +1024,7 @@ void ExecMultiHashTableCreate(MultiHashState *node, List *hashOperators, bool ke
 
 	/* Allocate data that will live for the life of the hashjoin */
 
-
+	ExecMultiHashAllocateHashtable(hashtable);
 
 	*hashtableptr = hashtable;
 
