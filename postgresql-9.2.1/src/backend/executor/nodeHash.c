@@ -3046,7 +3046,7 @@ static void ExecMultiHashAllocateHashtable(SimpleHashTable hashtable) {
 	MemoryContext oldcxt;
 
 	oldcxt = MemoryContextSwitchTo(hashtable->hashCxt);
-	printf(" created hashtable with %d buckets", hashtable->nbuckets);
+	//printf(" created hashtable with %d buckets", hashtable->nbuckets);
 	hashtable->buckets = (JoinTuple *) palloc0(hashtable->nbuckets * sizeof(JoinTuple));
 
 	elementSize = MAXALIGN(sizeof(JoinTupleData));
