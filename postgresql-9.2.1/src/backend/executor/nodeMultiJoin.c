@@ -1151,8 +1151,9 @@ static void ExecInitJoinCache(MultiJoinState * mhjoinstate) {
 
 		ExecMultiJoinGetNewChunk(mhjoinstate);
 		chunksLeft--;
-		//MemoryContextStats(TopMemoryContext);
+		//
 	}
+	MemoryContextStats(TopMemoryContext);
 
 }
 static void ExecMultiJoiSetSubplan(MultiJoinState * mhjoinstate, ChunkedSubPlan *subplan) {
