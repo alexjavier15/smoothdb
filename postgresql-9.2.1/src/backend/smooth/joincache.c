@@ -26,6 +26,7 @@
 
 List * make_random_list(int max_relid);
 MemoryContext JC_GetChunkMemoryContext(void);
+static  void JC_InitChunkTuples(RelChunk * chunk);
 
  // chunks of cache for a relation */
 static JCacheMemHeader *JCacheSegHdr;
@@ -91,9 +92,9 @@ void JC_InitCache(void){
 		appendStringInfo(&str, "%d", i);
 		mcxt = AllocSetContextCreate(parent_mcxt,
 				str.data,
-				ALLOCSET_SMALL_MINSIZE,
-				ALLOCSET_SMALL_INITSIZE,
-				ALLOCSET_SMALL_MAXSIZE);
+				ALLOCSET_DEFAULT_MINSIZE,
+				ALLOCSET_DEFAULT_INITSIZE,
+				ALLOCSET_DEFAULT_MAXSIZE);
 
 		JC_AddChunkMemoryContext(mcxt);
 		resetStringInfo(&str);
@@ -170,11 +171,15 @@ void JC_dropChunk( RelChunk *chunk){
 
 	printf("Dropping chunk : \n");
     printf("rel : %d chunk : %d , state : %d\n", ChunkGetRelid(chunk),ChunkGetID(chunk), chunk->state);
-    list_free(chunk->tuple_list);
+
 
 	MemoryContextReset(chunk->mcxt);
-	chunk->tuple_list = NIL;
+	chunk->next  = NULL;
+	chunk->head  = NULL;
 	chunk->state = CH_DROPPED;
+	chunk->tupledata = NULL;
+	chunk->priority = 0;
+	chunk->freespace = MAXALIGN(chunk_size);
 	JCacheSegHdr->chunks = list_delete(JCacheSegHdr->chunks, chunk);
 	JC_AddChunkMemoryContext(chunk->mcxt);
 }
@@ -203,29 +208,41 @@ void JC_InitChunkMemoryContext(RelChunk *chunk, RelChunk * toDrop) {
 
 		JC_dropChunk(toDrop);
 		mcxt = JC_GetChunkMemoryContext();
+
 	}
+	Assert(mcxt != NULL);
 
 	chunk->mcxt = mcxt;
+	JC_InitChunkTuples(chunk);
+
+
+
+
 }
 
 MinimalTuple JC_StoreMinmalTuple(RelChunk *chunk , MinimalTuple mtuple){
-	MemoryContext oldcxt;
 	MinimalTuple copyTuple;
-
+	uint32  tupsize = MAXALIGN(mtuple->t_len);
 	volatile JCacheMemHeader *jcacheSegHdr = JCacheSegHdr;
 
-	oldcxt = MemoryContextSwitchTo(chunk->mcxt);
-	MemoryContextStats(chunk->mcxt);
-	copyTuple = (MinimalTuple ) palloc0(mtuple->t_len);
-	memcpy(copyTuple, mtuple, mtuple->t_len);
-	MemoryContextStats(chunk->mcxt);
-	chunk->tuple_list = lappend(chunk->tuple_list, copyTuple);
-	MemoryContextStats(chunk->mcxt);
-	uint32 size = mtuple->t_len + sizeof(ListCell);
-	printf("allocated size : %ld \n", size);
-	MemoryContextStats(chunk->mcxt);
-	MemoryContextSwitchTo(oldcxt);
-	jcacheSegHdr->freesize = jcacheSegHdr->freesize - mtuple->t_len;
+	if(chunk->freespace <  tupsize ){
+		elog(ERROR, "out of memory for chunk  %d in relation %d",
+					 ChunkGetID(chunk), ChunkGetRelid(chunk));
+
+	}
+
+
+	copyTuple = (MinimalTuple )chunk->next;
+	if(!chunk->head)
+		chunk->head = copyTuple;
+
+
+	memcpy(copyTuple, mtuple,mtuple->t_len);
+
+	chunk->next =ChunkGetNextTuple(chunk,copyTuple);
+	Assert(chunk->next != NULL);
+	chunk->freespace-=tupsize;
+	jcacheSegHdr->freesize = jcacheSegHdr->freesize -tupsize;
 	return copyTuple;
 
 }
@@ -364,7 +381,6 @@ void JC_DeleteChunk(RelChunk* chunk){
 
 
 	list_free(chunk->subplans);
-	list_free(chunk->tuple_list);
 	pfree(chunk);
 }
 
@@ -374,3 +390,13 @@ List *JC_GetChunks(void){
 }
 
 
+static  void JC_InitChunkTuples(RelChunk * chunk){
+
+
+	chunk->tupledata = MemoryContextAlloc(chunk->mcxt, MAXALIGN(chunk_size));
+	chunk->head = chunk->tupledata;
+	chunk->next = chunk->head;
+	chunk->freespace =  MAXALIGN(chunk_size);
+
+
+}

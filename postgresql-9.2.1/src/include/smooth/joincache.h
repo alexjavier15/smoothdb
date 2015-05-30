@@ -36,6 +36,11 @@ typedef struct RelationChunks *RelationChunksDesc;
 
 #define ChunkGetID(chunk)  ( (uint16)(chunk->chunkID ))
 
+#define ChunkGetNextTuple(chunk, tup) (chunk->next == ((char *) tup) + \
+								MAXALIGN(tup->t_len ) ? NULL :((char *) tup) + \
+										MAXALIGN(tup->t_len ) )
+
+
 struct JoinCacheKey{
 
 	ChunkID chunkID;  // 32 bit 16bit_hi : relid, 16_bit_lo :chunk id

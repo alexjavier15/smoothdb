@@ -257,8 +257,8 @@ ExecMultiHash(MultiHashState *node) {
 	for (;;)
 	{
 		if (node->currTuple) {
-			mtuple = (MinimalTuple *) lfirst(node->currTuple);
-			node->currTuple = node->currTuple->next;
+			mtuple = node->currTuple;
+			node->currTuple = (MinimalTuple )ChunkGetNextTuple(node->currChunk,node->currTuple);
 			slot = econtext->ecxt_innertuple;
 			ExecClearTuple(slot);
 			slot = ExecStoreMinimalTuple(mtuple, slot, false);
@@ -442,6 +442,7 @@ MultiExecMultiHash(MultiHashState *node)
 
 		}
 
+
 		if (scan->es_scanBytes == multi_join_chunk_tup || scan->es_scanBytes  == node->currChunk->tuples) {
 			node->chunkIds = bms_add_member(node->chunkIds, (int)ChunkGetID(node->currChunk));
 			break;
@@ -449,10 +450,13 @@ MultiExecMultiHash(MultiHashState *node)
 
 
 	}
+
+	if(hashtable && node->currChunk->state == CH_WAITTING)
+		node->currChunk->tuples = hashtable->totalTuples;
+
 	node->currChunk->state = CH_READ;
 	node->chunkIds = bms_add_member(node->chunkIds,(int) ChunkGetID(node->currChunk));
-	if(node->currChunk->tuples == 0)
-		node->currChunk->tuples = hashtable->totalTuples;
+
 
 	node->lchunks = lappend(node->lchunks , node->currChunk);
 	scan->es_scanBytes = 0;
@@ -766,7 +770,7 @@ SimpleHashTable ExecChooseHashTable(MultiHashState * mhstate, List *hoperators, 
 
 	mhstate->hashable_array = mhstate->chunk_hashables[ChunkGetID(mhstate->currChunk)];
 
-	mhstate->hashable_array[idx]->totalTuples = list_length(mhstate->currChunk->tuple_list );
+	mhstate->hashable_array[idx]->totalTuples = mhstate->currChunk->tuples;
 	return mhstate->hashable_array[idx];
 
 

@@ -1294,9 +1294,11 @@ typedef struct RelChunk{
 	CHUNKSTATE state;
 	int		priority;
 	List	*subplans;
-	List	*tuple_list;
+	void	*tupledata;
+	void    *head;
+	void	*next;
 	int		tuples;
-
+	uint32		freespace;
 }RelChunk;
 
 

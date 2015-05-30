@@ -2074,7 +2074,7 @@ struct MultiHashState{
 	SimpleHashTable	**chunk_hashables;
 	RelChunk *	   currChunk;
 	List			*lchunks;
-	ListCell 		*currTuple;
+	MinimalTuple 	currTuple;
 	MemoryContext   tupCxt;
 	bool 			started;
 	bool 			needUpdate;

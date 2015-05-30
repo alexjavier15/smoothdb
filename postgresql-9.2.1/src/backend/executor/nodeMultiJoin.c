@@ -1140,7 +1140,7 @@ static void ExecPrepareChunk(MultiJoinState * mhjoinstate, MultiHashState *mhsta
 	if (mhstate->needUpdate)
 		ExecMultiJoinCleanUpChunk(mhjoinstate, mhstate);
 
-	mhstate->currTuple = list_head(mhstate->currChunk->tuple_list);
+	mhstate->currTuple = (MinimalTuple ) mhstate->currChunk->head;
 
 }
 
@@ -1151,7 +1151,7 @@ static void ExecInitJoinCache(MultiJoinState * mhjoinstate) {
 
 		ExecMultiJoinGetNewChunk(mhjoinstate);
 		chunksLeft--;
-		MemoryContextStats(TopMemoryContext);
+		//MemoryContextStats(TopMemoryContext);
 	}
 
 }
