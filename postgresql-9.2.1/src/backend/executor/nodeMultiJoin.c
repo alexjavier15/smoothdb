@@ -1185,7 +1185,7 @@ static void ExecMultiJoinEndSubPlan(MultiJoinState * mhjoinstate, ChunkedSubPlan
 	}
 	list_free(subplan->chunks);
 	pfree(subplan);
-	printf("ENING SUBPLAN !\n");
+
 
 }
 

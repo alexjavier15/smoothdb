@@ -1022,17 +1022,17 @@ void ExecMultiHashTableCreate(MultiHashState *node, List *hashOperators, bool ke
 	/* Allocate data that will live for the life of the hashjoin */
 
 
-	//oldcxt = MemoryContextSwitchTo(hashtable->hashCxt);
-	printf("Join tuple size %ld\n",sizeof(JoinTuple) );
+	oldcxt = MemoryContextSwitchTo(hashtable->hashCxt);
+	printf(" created hashtable with %d buckets", nbuckets );
 	hashtable->buckets = (JoinTuple *)
-		MemoryContextAlloc(hashtable->hashCxt,nbuckets * sizeof(JoinTuple));
+		palloc0(nbuckets * sizeof(JoinTuple));
 
 	/*
 	 * Set up for skew optimization, if possible and there's a need for more
 	 * than one batch.	(In a one-batch join, there's no point in it.)
 	 */
 
-	//MemoryContextSwitchTo(oldcxt);
+	MemoryContextSwitchTo(oldcxt);
 
 	*hashtableptr = hashtable;
 
