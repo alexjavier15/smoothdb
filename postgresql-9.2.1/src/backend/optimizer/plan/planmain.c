@@ -206,7 +206,7 @@ query_planner(PlannerInfo *root, List *tlist,
 
 		}
 		root->subplans = result;
-
+		if(root->simple_rel_array != NULL)
 		make_random_seq(root->simple_rel_array, root->simple_rel_array_size);
 
 

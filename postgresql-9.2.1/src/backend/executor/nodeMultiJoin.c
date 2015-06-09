@@ -45,7 +45,7 @@ static void ExecSetSeqNumber(CHashJoinState * chjoinstate, EState *estate);
 static void
 show_instrumentation_count_b(Instrumentation *instrument);
 
-static void ExecMultiJoinPrepareSubplans(MultiJoinState * mhjoinstate);
+static List * ExecMultiJoinPrepareSubplans(MultiJoinState * mhjoinstate, int skipid, List *startList);
 static void ExecMultiJoinEndSubPlan(MultiJoinState * mhjoinstate, ChunkedSubPlan * subplan);
 static ChunkedSubPlan * ExecMultiJoinGetNewSubplan(MultiJoinState * mhjoinstate);
 static void ExecMultiJoinGetNewChunk(MultiJoinState * mhjoinstate);
@@ -421,9 +421,10 @@ ExecMultiJoin(MultiJoinState *node) {
 				printf("----------------------------------\n");
 				printf("OPTIMAL PLAN IS : \n");
 				pprint(node->current_ps->plan_relids);
+
 				fflush(stdout);
 
-				ExecMultiJoinPrepareSubplans(node);
+
 				node->mhj_JoinState = MHJ_NEED_NEW_SUBPLAN;
 
 			case MHJ_NEED_NEW_SUBPLAN: {
@@ -457,8 +458,10 @@ ExecMultiJoin(MultiJoinState *node) {
 				if (TupIsNull(slot)) {
 					ListCell *lc;
 					ListCell *pc;
+					ChunkedSubPlan *curr_subplan =  linitial(node->chunkedSubplans);
 					int i;
-					ExecMultiJoinEndSubPlan(node, linitial(node->chunkedSubplans));
+					ExecMultiJoinEndSubPlan(node,curr_subplan);
+					pfree( curr_subplan);
 					printf("GOT NULL TUPLE :processed tuples ");
 							"//%.0f!\n",
 //							node->js.ps.state->unique_instr[0].tuplecount);
@@ -796,7 +799,7 @@ ExecInitMultiJoin(MultiJoin *node, EState *estate, int eflags) {
 
 		ps_index++;
 	}
-	u_instruments = InstrAlloc((ps_index - 1), INSTRUMENT_ROWS);// | INSTRUMENT_TIMER);
+	u_instruments = InstrAlloc((ps_index - 1), INSTRUMENT_ROWS | INSTRUMENT_TIMER);
 	mhjstate->mhashnodes = hashnodes;
 	estate->unique_instr = u_instruments;
 
@@ -1149,11 +1152,15 @@ static void ExecInitJoinCache(MultiJoinState * mhjoinstate) {
 
 	while (chunksLeft) {
 
-		ExecMultiJoinGetNewChunk(mhjoinstate);
+		RelChunk * chunk =  JC_processNextChunk();
+		MultiHashState *mhstate = mhjoinstate->mhashnodes[ChunkGetRelid(chunk)];
+		JC_InitChunkMemoryContext(chunk, NULL);
+		ExecPrepareChunk(mhjoinstate, mhstate, chunk);
 		chunksLeft--;
 		//
 	}
 	MemoryContextStats(TopMemoryContext);
+	mhjoinstate->chunkedSubplans = ExecMultiJoinPrepareSubplans(mhjoinstate,0, NIL);
 
 }
 static void ExecMultiJoiSetSubplan(MultiJoinState * mhjoinstate, ChunkedSubPlan *subplan) {
@@ -1184,7 +1191,7 @@ static void ExecMultiJoinEndSubPlan(MultiJoinState * mhjoinstate, ChunkedSubPlan
 
 	}
 	list_free(subplan->chunks);
-	pfree(subplan);
+
 
 
 }
@@ -1196,170 +1203,290 @@ static ChunkedSubPlan * ExecMultiJoinGetNewSubplan(MultiJoinState * mhjoinstate)
 
 	return linitial(mhjoinstate->chunkedSubplans);
 }
-
+/*
+ * Get a new chunk from the simulator dropping a existing chunk if needed and filling the hashtables for
+ * this chunk.
+ */
 static void ExecMultiJoinGetNewChunk(MultiJoinState * mhjoinstate) {
+	RelChunk * chunk = NULL;
+	MultiHashState *mhstate = NULL;
 
-	RelChunk * chunk = JC_processNextChunk();
-	RelChunk * toDrop = NULL;
-	MultiHashState *mhstate = mhjoinstate->mhashnodes[ChunkGetRelid(chunk)];
-	if (list_length(mhstate->lchunks) > 0) {
-		if (jc_cache_policy == 1)
-			toDrop = linitial( mhstate->lchunks);
-		else
+	// loop the simulator until we find a chunk with feasible(s) join(s)
+	for (;;) {
+		RelChunk * toDrop = NULL;
+		chunk = JC_processNextChunk();
+		mhstate = mhjoinstate->mhashnodes[ChunkGetRelid(chunk)];
+
+		if (list_length(mhstate->lchunks) > 0) {
+
 			toDrop = ExecMultiJoinChooseDroppedChunk(mhjoinstate, chunk);
+		}
+
+		if (toDrop == NULL)
+			continue;
+
+		JC_InitChunkMemoryContext(chunk, toDrop);
+		if (toDrop != NULL && toDrop->state == CH_DROPPED) {
+
+			mhstate->lchunks = list_delete_first(mhstate->lchunks);
+			mhstate->hasDropped = true;
+
+		}
+		break;
 	}
-	JC_InitChunkMemoryContext(chunk, toDrop);
-	if (toDrop != NULL && toDrop->state == CH_DROPPED) {
-
-		mhstate->lchunks = list_delete_first(mhstate->lchunks);
-		mhstate->hasDropped = true;
-
-	}
-
 	ExecPrepareChunk(mhjoinstate, mhstate, chunk);
+	if(mhjoinstate->chunkedSubplans == NIL)
+	mhjoinstate->chunkedSubplans = ExecMultiJoinPrepareSubplans(mhjoinstate,0, NIL);
 
 }
-static void ExecMultiJoinPrepareSubplans(MultiJoinState * mhjoinstate) {
 
+/*
+ * Buil the intersection of subplans for every relation in the MJOIN. User can pass an initial list of subplans for a relation
+ * and the realtion id to be skipped.
+ *
+ */
+
+static List * ExecMultiJoinPrepareSubplans(MultiJoinState * mhjoinstate, int skipid, List *startList) {
+
+	List *result = startList;
 	int i;
-	List *result = NIL;
-	printf("Preparing SUBPLAN !\n");
+	int start = skipid == 0 ? 2 :1;
+	printf("skipping %d \n", skipid);
 
-	for (i = 1; i < mhjoinstate->hashnodes_array_size; i++) {
+	if(result == NIL){
 
-		List *lchunks = mhjoinstate->mhashnodes[i]->lchunks;
-		List *subplans = NIL;
+		List *lchunks = mhjoinstate->mhashnodes[1]->lchunks;
 		ListCell *lc;
 
 		foreach(lc,lchunks) {
-			RelChunk *chunk = (RelChunk *) lfirst(lc);
 
-			subplans = list_union(subplans, chunk->subplans);
-
-		}
-		printf("got %d subplans for rel : %d \n", list_length(subplans), i);
-		if (subplans == NIL) {
-			result = NIL;
-			break;
+			result = list_union(result, ((RelChunk *) lfirst(lc))->subplans);
 
 		}
-		if (result == NIL)
-			result = subplans;
-		else
+
+	}
+
+	for (i = start ; i < mhjoinstate->hashnodes_array_size; i++) {
+
+			List *lchunks = mhjoinstate->mhashnodes[i]->lchunks;
+
+			List *subplans = NIL;
+			ListCell *lc;
+
+			// skip if  chunks for the parent relation of the new chunk as we have already counted it at the initialization.
+			if(i == skipid)
+				continue;
+
+
+			foreach(lc,lchunks) {
+				RelChunk *chunk =(RelChunk *) lfirst(lc);
+				if(list_length(chunk->subplans) == 0){
+					//JC_dropChunk(chunk);
+					continue;
+				}
+				subplans = list_union(subplans, chunk->subplans);
+
+
+			}
+
+
+			printf("got %d subplans for rel : %d \n", list_length(subplans), i);
+			// if we don't have more pending subplans for relations !=  to the parent relation of the new chunk
+			//  then we don't have any possible join with this new chunk. report to the caller
+			if (subplans == NIL) {
+				printf("NOT more subplans for relation %d!\n",  i);
+
+				pprint(mhjoinstate->pendingSubplans);
+				fflush(stdout);
+				result = NIL;
+				break;
+
+			}
+
+
 			result = list_intersection(result, subplans);
 
-	}
-	printf("GOT %d SUBPLANS !\n", list_length(result));
+			// if we don't have any faisible subplans with the chunks intersected so far report to the caller
+			if(result == NIL){
 
-	mhjoinstate->chunkedSubplans = result;
+//				printf("NOT JOIN FOUND for chunk [ rel : %d, id : %d ] !\n",  ChunkGetRelid(newChunk), ChunkGetID(newChunk));
+//				fflush(stdout);
+			//	return result;
 
-}
-static RelChunk * ExecMerge(RelChunk ** chunk_array, int size, int m) {
 
-	int i, j, k;
-	RelChunk **tmp = palloc(size * sizeof (RelChunk *));
+			}
 
-	for (i = 0, j = m, k = 0; k < size; k++) {
-		tmp[k] =
-				j == size ? chunk_array[i++] :
-				i == m ? chunk_array[j++] :
-				chunk_array[j]->priority < chunk_array[i]->priority ?
-						chunk_array[j++] : chunk_array[i++];
-	}
-	for (i = 0; i < size; i++) {
+		}
+		printf("GOT %d SUBPLANS  with new !\n", list_length(result));
+		pprint(result);
 
-		chunk_array[i] = tmp[i];
-
-	}
-
-	pfree(tmp);
-	return chunk_array[0];
-}
-static RelChunk * ExecSortChuks(RelChunk ** chunk_array, int size) {
-	int m;
-	int right;
-	if (size < 2)
-		return chunk_array[0];
-
-	m = size / 2;
-	right = m * sizeof(RelChunk *);
-
-	ExecSortChuks(chunk_array, m);
-	ExecSortChuks(&chunk_array[m], size - m);
-	return ExecMerge(chunk_array, size, m);
+		return result;
 
 }
+
+
+
+
+
+
+/*
+ * Choose the optimal chunk to be dropped given a new comming chunk. We decide which chunk must be dropped
+ * base in the algorith set by the user . We set the feasible joins in the succeful case
+ *
+ * 1 =  FIFO dropping strategy
+ * 2 =  Lower priority strategy.
+ *
+ * This function return NULL if there's not any feasible join involving  the new comming chunk and the already
+ * stored chunks otherwise chunkedSubplans is set as the result of the intersection of subplans for every relation
+ */
 
 static RelChunk * ExecMultiJoinChooseDroppedChunk(MultiJoinState * mhjoinstate, RelChunk *newChunk) {
 
 	int i;
 	List *result = NIL;
 	RelChunk **chunk_array;
-	RelChunk *toDrop;
+	RelChunk *toDrop = NULL;
 	List * chunks = JC_GetChunks();
 	ListCell *lc;
+	int newChunk_relid =ChunkGetRelid(newChunk);
+	List *lchunks = mhjoinstate->mhashnodes[newChunk_relid]->lchunks;
 
-	for (i = 1; i < mhjoinstate->hashnodes_array_size; i++) {
+	// Initialize the result with the pending subplans from the new chunk and all the pending subplans
+	// of the stored chunks for the parent relation of this new chunk
 
-		List *lchunks = mhjoinstate->mhashnodes[i]->lchunks;
 
-		List *subplans = NIL;
-		ListCell *lc;
 
-		foreach(lc,lchunks) {
 
-			subplans = list_union(subplans, ((RelChunk *) lfirst(lc))->subplans);
+	foreach(lc,lchunks) {
 
+		result = list_union(result, ((RelChunk *) lfirst(lc))->subplans);
+
+	}
+	if(list_length(result) == 0){
+		mhjoinstate->chunkedSubplans = NIL;
+		return linitial(lchunks);
+	}
+	result = list_union(result, newChunk->subplans);
+
+
+	// Paranoia : if we dont have any pending subplans with the old and new chunks for the new chunk relation return NULL.
+	// it should never happens because the simulator is in charge of cleaning the useless chunks from the circular list.
+	Assert (result != NIL);
+	if (result == NIL){
+
+		return NULL;
+
+	}
+	result = ExecMultiJoinPrepareSubplans(mhjoinstate,newChunk_relid, result);
+	mhjoinstate->chunkedSubplans = result;
+//	for (i = 1; i < mhjoinstate->hashnodes_array_size; i++) {
+//
+//		List *lchunks = mhjoinstate->mhashnodes[i]->lchunks;
+//
+//		List *subplans = NIL;
+//		ListCell *lc;
+//
+//		// skip if  chunks for the parent relation of the new chunk as we have already counted it at the initialization.
+//		if(i == newChunk_relid)
+//			continue;
+//
+//
+//		foreach(lc,lchunks) {
+//
+//			subplans = list_union(subplans, ((RelChunk *) lfirst(lc))->subplans);
+//
+//		}
+//
+//
+//		printf("got %d subplans for rel : %d \n", list_length(subplans), i);
+//		// if we don't have more pending subplans for relations !=  to the parent relation of the new chunk
+//		//  then we don't have any possible join with this new chunk. report to the caller
+//		if (subplans == NIL) {
+//			printf("NOT more subplans for relation %d!\n",  i);
+//			fflush(stdout);
+//			return NULL;
+//
+//		}
+//
+//
+//		result = list_intersection(result, subplans);
+//
+//		// if we don't have any faisible subplans with the chunks intersected so far report to the caller
+//		if(result == NIL){
+//
+//			printf("NOT JOIN FOUND for chunk [ rel : %d, id : %d ] !\n",  ChunkGetRelid(newChunk), ChunkGetID(newChunk));
+//			fflush(stdout);
+//			return NULL;
+//
+//
+//		}
+//
+//	}
+	if (result == NIL) {
+
+		printf("NOT JOIN FOUND for chunk [ rel : %d, id : %d ] !\n",
+				ChunkGetRelid(newChunk),
+				ChunkGetID(newChunk));
+		fflush(stdout);
+
+
+
+		return NULL;
+
+	}
+
+	printf("GOT %d SUBPLANS  with new !\n", list_length(result));
+
+
+	switch (jc_cache_policy) {
+
+		case FIFO_DROP:
+			toDrop = linitial(lchunks);
+			break;
+		case PRIO_DROP: {
+			chunk_array = (RelChunk **) palloc((list_length(chunks) + 1) * sizeof(RelChunk *));
+			i = 0;
+			foreach( lc,chunks) {
+
+				chunk_array[i] = lfirst(lc);
+				i++;
+
+			}
+			chunk_array[i] = newChunk;
+			foreach(lc,result) {
+
+				ChunkedSubPlan *subplan = lfirst(lc);
+				ListCell *ch;
+				foreach(ch, subplan->chunks) {
+					RelChunk * chunk = lfirst(ch);
+					chunk->priority++;
+
+				}
+
+			}
+
+			toDrop = ExecSortChuks(chunk_array, list_length(chunks));
+			foreach( lc,chunks) {
+
+				RelChunk *chunk = lfirst(lc);
+				printf("rel : %d chunk : %d,  prio %d\n",
+						ChunkGetRelid(chunk),
+						ChunkGetID(chunk),
+						chunk->priority);
+				fflush(stdout);
+				chunk->priority = 0;
+
+			}
+			//pfree(chunk_array);
 		}
-		if (i == ChunkGetRelid(newChunk))
-			subplans = list_union(subplans, newChunk->subplans);
-
-		printf("got %d subplans for rel : %d \n", list_length(subplans), i);
-		if (subplans == NIL) {
-			result = NIL;
+			break;
+		default:
+			elog(ERROR, "unrecognized drop policy : %d", (int)jc_cache_policy);
 			break;
 
-		}
-
-		if (result == NIL)
-			result = subplans;
-		else
-			result = list_intersection(result, subplans);
-
-	}
-	printf("GOT %d SUBPLANS  with new !\n", list_length(result));
-	chunk_array = (RelChunk **) palloc(list_length(chunks) * sizeof(RelChunk *));
-	i = 0;
-	foreach( lc,chunks) {
-
-		chunk_array[i] = lfirst(lc);
-		i++;
-
-	}
-	foreach(lc,result) {
-
-		ChunkedSubPlan *subplan = lfirst(lc);
-		ListCell *ch;
-		foreach(ch, subplan->chunks) {
-			RelChunk * chunk = lfirst(ch);
-			chunk->priority++;
-
-		}
-
 	}
 
-	toDrop = ExecSortChuks(chunk_array, list_length(chunks));
-	foreach( lc,chunks) {
-
-		RelChunk *chunk = lfirst(lc);
-		printf("rel : %d chunk : %d,  prio %d\n",
-				ChunkGetRelid(chunk),
-				ChunkGetID(chunk),
-				chunk->priority);
-		fflush(stdout);
-		chunk->priority = 0;
-
-	}
+	Assert (toDrop != NULL);
 
 	return toDrop;
 
@@ -1446,5 +1573,41 @@ static void * ExecRecostPlan(CHashJoinState *node) {
 //
 //	}
 //
+
+}
+/* ----------- Helping methods for sorting and prioritizing chunks -------------*/
+static RelChunk * ExecMerge(RelChunk ** chunk_array, int size, int m) {
+
+	int i, j, k;
+	RelChunk **tmp = palloc(size * sizeof (RelChunk *));
+
+	for (i = 0, j = m, k = 0; k < size; k++) {
+		tmp[k] =
+				j == size ? chunk_array[i++] :
+				i == m ? chunk_array[j++] :
+				chunk_array[j]->priority < chunk_array[i]->priority ?
+						chunk_array[j++] : chunk_array[i++];
+	}
+	for (i = 0; i < size; i++) {
+
+		chunk_array[i] = tmp[i];
+
+	}
+
+	pfree(tmp);
+	return chunk_array[0];
+}
+static RelChunk * ExecSortChuks(RelChunk ** chunk_array, int size) {
+	int m;
+	int right;
+	if (size < 2)
+		return chunk_array[0];
+
+	m = size / 2;
+	right = m * sizeof(RelChunk *);
+
+	ExecSortChuks(chunk_array, m);
+	ExecSortChuks(&chunk_array[m], size - m);
+	return ExecMerge(chunk_array, size, m);
 
 }

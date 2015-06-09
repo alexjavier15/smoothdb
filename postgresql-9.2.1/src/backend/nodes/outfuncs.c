@@ -2669,8 +2669,13 @@ _outRelChunk(StringInfo str, const RelChunk *node)
 {
 	WRITE_NODE_TYPE("RELCHUNK");
 
-	WRITE_INT_FIELD(chunkID);
+	appendStringInfo(str, " :" "relid" " %d", node->chunkID  >> 16 );
+	appendStringInfo(str, " :" "id" " %d",( node->chunkID & 0x0000FFFF));
 
+}
+static void _outChunkedSubPlan(StringInfo str, const ChunkedSubPlan *node){
+
+	WRITE_NODE_FIELD(chunks);
 }
 
 static void
@@ -3278,6 +3283,9 @@ _outNode(StringInfo str, const void *obj)
 				break;
 			case T_RelChunk:
 				_outRelChunk(str,obj);
+				break;
+			case T_ChunkedSubPlan:
+				_outChunkedSubPlan(str,obj);
 				break;
 
 			default:

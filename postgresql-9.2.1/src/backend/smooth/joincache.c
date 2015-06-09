@@ -69,7 +69,7 @@ void JC_InitCache(void){
 	hctl->hash = tag_hash;
 	hctl->hcxt = parent_mcxt;
 	JCacheSegHdr->chunks = NIL;
-
+	JCacheSegHdr->isFull = false;
 
 	RelationChunksIndex = hash_create("JoinCache Hash",
 										32,
@@ -169,8 +169,11 @@ RelChunk * JC_processNextChunk(void){
 
 void JC_dropChunk( RelChunk *chunk){
 
+	if(chunk == NULL)
+		elog(ERROR, "Cannot drop a null chunk !");
+
 	printf("Dropping chunk : \n");
-    printf("rel : %d chunk : %d , state : %d\n", ChunkGetRelid(chunk),ChunkGetID(chunk), chunk->state);
+    printf("rel : %d chunk : %d , state : %d , subplans : %d\n", ChunkGetRelid(chunk),ChunkGetID(chunk), chunk->state, list_length(chunk->subplans));
 
 
 	MemoryContextReset(chunk->mcxt);
@@ -182,6 +185,7 @@ void JC_dropChunk( RelChunk *chunk){
 	chunk->freespace = MAXALIGN(chunk_size);
 	JCacheSegHdr->chunks = list_delete(JCacheSegHdr->chunks, chunk);
 	JC_AddChunkMemoryContext(chunk->mcxt);
+
 }
 
 MemoryContext JC_GetChunkMemoryContext(void){
@@ -189,7 +193,9 @@ MemoryContext JC_GetChunkMemoryContext(void){
 	/* use volatile pointer to prevent code rearrangement */
 	volatile JCacheMemHeader *jcacheSegHdr = JCacheSegHdr;
 	MemoryContext result;
+	jcacheSegHdr->isFull = false;
 	if (list_length(jcacheSegHdr->freeList) == 0) {
+		jcacheSegHdr->isFull = true;
 		return NULL;
 	}
 	result = linitial(jcacheSegHdr->freeList);
@@ -286,11 +292,14 @@ void make_random_seq(RelOptInfo ** rel_array, int size) {
 	List *result = NIL;
 	List  *relSeq = NIL;
 	int  total_chunks = 0;
+	int max_rel;
 	int i;
 
 	for (i = 1 ; i < size; i++){
-
+		if(rel_array[i] != NULL){
 		total_chunks +=  list_length(rel_array[i]->chunks);
+
+		}
 
 	}
 
@@ -306,16 +315,18 @@ void make_random_seq(RelOptInfo ** rel_array, int size) {
 			int nextChunk = 0;
 			uint32 chunkid;
 			RelOptInfo * rel = rel_array[relid];
-			nextChunk = rand() % list_length(rel->chunks);
-		//	printf( " chunk for rel %d = %d \n", relid,nextChunk);
-			chunkid = (uint32) (relid << 16) | nextChunk;
-			if ( chunkid != 0 && !bms_is_member(chunkid, allChunks)) {
-				RelChunk *chunk = (RelChunk * )list_nth(rel->chunks, (int)nextChunk);
+			if( rel!= NULL){
+				nextChunk = rand() % list_length(rel->chunks);
+				//	printf( " chunk for rel %d = %d \n", relid,nextChunk);
+				chunkid = (uint32) (relid << 16) | nextChunk;
+				if (chunkid != 0 && !bms_is_member(chunkid, allChunks)) {
+					RelChunk *chunk = (RelChunk *) list_nth(rel->chunks, (int) nextChunk);
 
-				allChunks =	bms_add_member(allChunks, chunkid);
-			//	printf(" rel : %d, id : %d \n", ChunkGetRelid(chunk), ChunkGetID(chunk));
+					allChunks = bms_add_member(allChunks, chunkid);
+					//	printf(" rel : %d, id : %d \n", ChunkGetRelid(chunk), ChunkGetID(chunk));
 
-				result = lappend(result, chunk);
+					result = lappend(result, chunk);
+				}
 			}
 
 		}
@@ -331,6 +342,7 @@ void make_random_seq(RelOptInfo ** rel_array, int size) {
 //
 //	}
 	/* Make a circular list*/
+	chunks_per_cycle = Min(chunks_per_cycle, list_length(result));
 
 	{
 		ListCell * last = list_tail(result);
@@ -386,6 +398,10 @@ void JC_DeleteChunk(RelChunk* chunk){
 
 List *JC_GetChunks(void){
 	return JCacheSegHdr->chunks;
+
+}
+List *JC_isFull(void){
+	return JCacheSegHdr->isFull;
 
 }
 

@@ -41,6 +41,12 @@ typedef struct RelationChunks *RelationChunksDesc;
 										MAXALIGN(tup->t_len ) )
 
 
+
+
+#define 	FIFO_DROP 1
+#define 	PRIO_DROP 2
+
+
 struct JoinCacheKey{
 
 	ChunkID chunkID;  // 32 bit 16bit_hi : relid, 16_bit_lo :chunk id
@@ -98,6 +104,7 @@ typedef struct JCacheMemHeader	/* standard header for all Postgres shmem */
 	Size		freesize;		/* offset to first free space */
 	List   		*chunks;
 	List		*freeList;
+	bool		isFull;
 
 } JCacheMemHeader;
 
@@ -106,6 +113,7 @@ typedef struct JCacheMemHeader	/* standard header for all Postgres shmem */
 extern void JC_InitCache(void);
 extern void JC_EndCache(void);
 extern List *JC_GetChunks(void);
+extern List *JC_isFull(void);
 extern void JC_AddChunkedSubPlan(ChunkedSubPlan *subplan);
 extern List *JC_GetChunkedSubPlans( RelChunk *chunk);
 extern void JC_dropChunk( RelChunk *chunk);
