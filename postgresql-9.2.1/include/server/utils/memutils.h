@@ -37,7 +37,7 @@
  * XXX Also, various places in aset.c assume they can compute twice an
  * allocation's size without overflow, so beware of raising this.
  */
-#define MaxAllocSize	((Size) 0x3fffffff)		/* 1 gigabyte - 1 */
+#define MaxAllocSize	((Size) 0x7fffffff)		/* 1 gigabyte - 1 */
 
 #define AllocSizeIsValid(size)	((Size) (size) <= MaxAllocSize)
 

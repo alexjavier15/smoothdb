@@ -15,6 +15,8 @@
 #define PATHNODE_H
 
 #include "nodes/relation.h"
+#include "lib/stringinfo.h"
+
 
 
 /*
@@ -27,6 +29,10 @@ extern int compare_fractional_path_costs(Path *path1, Path *path2,
 extern void set_cheapest(RelOptInfo *parent_rel);
 extern void add_path(RelOptInfo *parent_rel, Path *new_path);
 extern bool add_path_precheck(RelOptInfo *parent_rel,
+				  Cost startup_cost, Cost total_cost,
+				  List *pathkeys, Relids required_outer);
+
+extern bool add_multijoin_precheck(RelOptInfo *parent_rel,
 				  Cost startup_cost, Cost total_cost,
 				  List *pathkeys, Relids required_outer);
 
@@ -160,5 +166,23 @@ extern ParamPathInfo *get_joinrel_parampathinfo(PlannerInfo *root,
 						  List **restrict_clauses);
 extern ParamPathInfo *get_appendrel_parampathinfo(RelOptInfo *appendrel,
 							Relids required_outer);
+
+extern void	set_MultiJoinInfo(PlannerInfo *root,
+			RelOptInfo *joinrel,
+		   Relids joinrelids,
+		   RelOptInfo *outer_rel,
+		   RelOptInfo *inner_rel,
+		   SpecialJoinInfo *sjinfo,
+		   List *restrictlist);
+
+extern List *select_mergejoin_clauses(PlannerInfo *root,
+						 RelOptInfo *joinrel,
+						 RelOptInfo *outerrel,
+						 RelOptInfo *innerrel,
+						 List *restrictlist,
+						 JoinType jointype,
+						 bool *mergejoin_allowed);
+
+extern void _outBitmapset(StringInfo str, const Bitmapset *bms);
 
 #endif   /* PATHNODE_H */

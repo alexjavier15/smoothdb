@@ -14,7 +14,8 @@
 #include "optimizer/cost.h"
 #include "miscadmin.h"
 #include "utils/memutils.h"
-
+#include "nodes/execnodes.h"
+#include "access/relscan.h"
 
 #define HJ_BUILD_HASHTABLE		1
 #define HJ_NEED_NEW_OUTER		2
@@ -1125,7 +1126,8 @@ static void ExecMultiJoinCleanUpChunk(MultiJoinState * mhjoinstate, MultiHashSta
 }
 
 static void ExecPrepareChunk(MultiJoinState * mhjoinstate, MultiHashState *mhstate, RelChunk *chunk) {
-
+	SeqScanState  *outerNode;
+	HeapScanDescData *scan;
 	mhstate->hashable_array = mhstate->chunk_hashables[ChunkGetID(chunk)];
 	;
 	printf("PREPARING rel : %d chunk : %d\n", ChunkGetRelid(chunk), ChunkGetID(chunk));
@@ -1136,6 +1138,14 @@ static void ExecPrepareChunk(MultiJoinState * mhjoinstate, MultiHashState *mhsta
 
 		ExecResetMultiHashtable(mhstate, mhstate->chunk_hashables[ChunkGetID(chunk)]);
 	}
+	//before we read data we have to set starting point of the block
+	/*
+	 * get state info from node
+	 */
+	outerNode = (SeqScanState *) outerPlanState(mhstate);
+	scan = 	(HeapScanDescData *)outerNode->ss_currentScanDesc;
+	scan->num_total_blocks = chunk->numBlocks;
+	scan->rs_startblock = ChunkGetID(chunk)*  multi_join_chunk_size * 1024L / BLCKSZ;
 
 	if (chunk->state != CH_READ)
 		(void) MultiExecProcNode((PlanState *) mhstate);

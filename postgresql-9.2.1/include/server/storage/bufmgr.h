@@ -222,5 +222,6 @@ extern void AtProcExit_LocalBuffers(void);
 /* in freelist.c */
 extern BufferAccessStrategy GetAccessStrategy(BufferAccessStrategyType btype);
 extern void FreeAccessStrategy(BufferAccessStrategy strategy);
+extern void SmoothPrefetchBuffers(Relation reln, ForkNumber forkNum, BlockNumber blockNum, int numPages);
 
 #endif

@@ -443,8 +443,9 @@ MultiExecMultiHash(MultiHashState *node)
 
 		}
 
-
-		if (scan->es_scanBytes == multi_join_chunk_tup || scan->es_scanBytes  == node->currChunk->tuples) {
+		//todo renata raja - do computattion for num tuples!!!
+		//if (scan->es_scanBytes == multi_join_chunk_tup || scan->es_scanBytes  == node->currChunk->tuples) {
+		if ((multi_join_tuple_count && scan->es_scanBytes == multi_join_chunk_tup )|| scan->es_scanBytes  == node->currChunk->tuples) {
 			node->chunkIds = bms_add_member(node->chunkIds, (int)ChunkGetID(node->currChunk));
 			break;
 		}
@@ -954,9 +955,9 @@ void ExecMultiHashTableCreate(MultiHashState *node, List *hashOperators, bool ke
 
 	ExecChooseMultiHashTableSize(outerNode->plan_rows, outerNode->plan_width,&nbuckets);
 
-#ifdef HJDEBUG
-	printf("nbatch = %d, nbuckets = %d\n", nbatch, nbuckets);
-#endif
+//#ifdef HJDEBUG
+	printf("nbuckets = %d\n", nbuckets);
+//#endif
 
 	/* nbuckets must be a power of 2 */
 	log2_nbuckets = my_log2(nbuckets);
@@ -3044,13 +3045,14 @@ static void ExecMultiHashAllocateHashtable(SimpleHashTable hashtable) {
 	JoinTuple tmpElement;
 	JoinTuple prevElement;
 	MemoryContext oldcxt;
+	int total_buckets = hashtable->nbuckets * NTUP_PER_BUCKET;
 
 	oldcxt = MemoryContextSwitchTo(hashtable->hashCxt);
 	//printf(" created hashtable with %d buckets", hashtable->nbuckets);
 	hashtable->buckets = (JoinTuple *) palloc0(hashtable->nbuckets * sizeof(JoinTuple));
 
 	elementSize = MAXALIGN(sizeof(JoinTupleData));
-	firstElement = (JoinTuple) palloc0( multi_join_chunk_tup * elementSize);
+	firstElement = (JoinTuple) palloc0( total_buckets * elementSize);
 	if (!firstElement)
 		elog(ERROR, "out of memory. could no create hashtable jointuples");
 
@@ -3058,7 +3060,7 @@ static void ExecMultiHashAllocateHashtable(SimpleHashTable hashtable) {
 
 	prevElement = NULL;
 	tmpElement = firstElement;
-	for (i = 0; i < multi_join_chunk_tup; i++) {
+	for (i = 0; i < total_buckets; i++) {
 		tmpElement->next = prevElement;
 		prevElement = tmpElement;
 		tmpElement = (JoinTuple) (((char *) tmpElement) + elementSize);

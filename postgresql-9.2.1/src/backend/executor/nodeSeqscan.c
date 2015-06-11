@@ -142,6 +142,7 @@ InitScanRelation(SeqScanState *node, EState *estate)
 
 	node->ss_currentRelation = currentRelation;
 	node->ss_currentScanDesc = currentScanDesc;
+	node->ss_currentScanDesc->num_total_blocks = 0;
 
 	ExecAssignScanType(node, RelationGetDescr(currentRelation));
 }
@@ -271,6 +272,8 @@ ExecReScanSeqScan(SeqScanState *node)
 	HeapScanDesc scan;
 
 	scan = node->ss_currentScanDesc;
+
+	//scan->num_total_blocks = 0; // ColdStorage
 
 	heap_rescan(scan,			/* scan desc */
 				NULL);			/* new scan keys */
