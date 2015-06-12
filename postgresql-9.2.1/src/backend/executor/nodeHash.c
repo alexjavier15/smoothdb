@@ -967,8 +967,8 @@ void ExecMultiHashTableCreate(MultiHashState *node, List *hashOperators, bool ke
 
 
 ///#ifdef HJDEBUG
-	printf("tupwidth : %d, nbuckets = %d\n",  tupwidth, nbuckets);
-
+	printf("pages: %d, tupwidth : %d, nbuckets = %d\n", pages, tupwidth, nbuckets);
+	fflush(stdout);
 //#endif
 
 	/* nbuckets must be a power of 2 */
@@ -1823,7 +1823,7 @@ void ExecMultiHashTableInsert(SimpleHashTable hashtable, MinimalTuple tuple, uin
 
 		/* Create the HashJoinTuple */
 		if( hashtable->freeList == NULL)
-			elog(ERROR, "out of memory: No more buckets in the hashtable");
+			elog(ERROR, "out of memory: No more buckets in the hashtable, nbuckets :%d, total_tuples: %d",hashtable->nbuckets,hashtable->totalTuples);
 
 		jtuple = hashtable->freeList;
 		jtuple->hashvalue = hashvalue;
