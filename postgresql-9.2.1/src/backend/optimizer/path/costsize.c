@@ -4088,6 +4088,8 @@ set_baserel_size_estimates(PlannerInfo *root, RelOptInfo *rel)
 	cost_qual_eval(&rel->baserestrictcost, rel->baserestrictinfo, root);
 
 	set_rel_width(root, rel);
+
+	printf("rel : %d, tupwidth %d", rel->)
 }
 
 /*
@@ -4581,6 +4583,7 @@ set_rel_width(PlannerInfo *root, RelOptInfo *rel)
 			if (rel->attr_widths[ndx] > 0)
 			{
 				tuple_width += rel->attr_widths[ndx];
+
 				continue;
 			}
 

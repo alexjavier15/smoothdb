@@ -123,17 +123,19 @@ get_relation_info(PlannerInfo *root, Oid relationObjectId, bool inhparent,
 
 	if (multi_join_tuple_count)
 		num_chunks = rel->tuples / multi_join_chunk_tup;
-	else
+	else{
 		num_chunks = ceil((double) rel->pages * BLCKSZ / (multi_join_chunk_size * 1024L));
-
+		num_chunks = num_chunks <= 1.0 ? 1.0 : num_chunks;
+		}
 	rel->chunks = NIL;
+	double num_pages = ceil(rel->pages / num_chunks);
 	for ( i  = 0; i<num_chunks; i++){
 		RelChunk *relchunk = makeNode(RelChunk);
 		uint32  hi= rel->relid;
 		uint16  lo= i;
 		relchunk->chunkID = (uint32) (hi << 16) | lo;
 		relchunk->priority = 0;
-
+		relchunk->pages = num_pages;
 		rel->chunks = lappend(rel->chunks, relchunk);
 	}
 	printf(" relation %d : %s , pages: %d\n", rel->relid, NameStr((relation)->rd_rel->relname), rel->pages);

@@ -65,6 +65,8 @@ SeqNext(SeqScanState *node)
 	 */
 	tuple = heap_getnext(scandesc, direction);
 
+	node->len = tuple->t_len;
+
 	/*
 	 * save the tuple and the buffer returned to us by the access methods in
 	 * our scan tuple slot and return the slot.  Note: we pass 'false' because

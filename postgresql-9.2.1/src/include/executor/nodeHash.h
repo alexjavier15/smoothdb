@@ -34,7 +34,8 @@ extern HashJoinTable ExecHashTableCreate(Hash *node, List *hashOperators,
 extern MJoinTable
 ExecMHashTableCreate(Hash *node, List *hashOperators, bool keepNulls, bool isLeft, int nbuckets, int nbatch);
 extern void
-ExecMultiHashTableCreate(MultiHashState *node, List *hashOperators, bool keepNulls,  SimpleHashTable * hashtableptr);
+ExecMultiHashTableCreate(MultiHashState *node, List *hashOperators, bool keepNulls,  SimpleHashTable * hashtableptr,
+		 int tupwidth, int pages	);
 extern void ExecHashTableDestroy(HashJoinTable hashtable);
 extern void ExecMHashTableDestroy(MJoinTable hashtable);
 extern void ExecHashTableInsert(HashJoinTable hashtable,
