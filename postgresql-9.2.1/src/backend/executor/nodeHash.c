@@ -451,8 +451,9 @@ MultiExecMultiHash(MultiHashState *node)
 
 		}
 
-
-		if (scan->es_scanBytes == multi_join_chunk_tup || scan->es_scanBytes  == node->currChunk->tuples) {
+		//todo renata raja - do computattion for num tuples!!!
+		//if (scan->es_scanBytes == multi_join_chunk_tup || scan->es_scanBytes  == node->currChunk->tuples) {
+		if ((multi_join_tuple_count && scan->es_scanBytes == multi_join_chunk_tup )|| scan->es_scanBytes  == node->currChunk->tuples) {
 			node->chunkIds = bms_add_member(node->chunkIds, (int)ChunkGetID(node->currChunk));
 			break;
 		}
@@ -964,8 +965,10 @@ void ExecMultiHashTableCreate(MultiHashState *node, List *hashOperators, bool ke
 
 	ExecChooseMultiHashTableSize(pages, tupwidth,&nbuckets);
 
+<<<<<<< HEAD
 ///#ifdef HJDEBUG
 	printf("tupwidth : %d, nbuckets = %d\n",  tupwidth, nbuckets);
+
 //#endif
 
 	/* nbuckets must be a power of 2 */
@@ -3054,14 +3057,18 @@ static void ExecMultiHashAllocateHashtable(SimpleHashTable hashtable) {
 	JoinTuple tmpElement;
 	JoinTuple prevElement;
 	MemoryContext oldcxt;
+
 	int num_elements = hashtable->nbuckets *NTUP_PER_BUCKET;
+
 
 	oldcxt = MemoryContextSwitchTo(hashtable->hashCxt);
 	//printf(" created hashtable with %d buckets", hashtable->nbuckets);
 	hashtable->buckets = (JoinTuple *) palloc0(hashtable->nbuckets * sizeof(JoinTuple));
 
 	elementSize = MAXALIGN(sizeof(JoinTupleData));
+
 	firstElement = (JoinTuple) palloc0( num_elements * elementSize);
+
 	if (!firstElement)
 		elog(ERROR, "out of memory. could no create hashtable jointuples");
 
@@ -3069,7 +3076,9 @@ static void ExecMultiHashAllocateHashtable(SimpleHashTable hashtable) {
 
 	prevElement = NULL;
 	tmpElement = firstElement;
+
 	for (i = 0; i < num_elements; i++) {
+
 		tmpElement->next = prevElement;
 		prevElement = tmpElement;
 		tmpElement = (JoinTuple) (((char *) tmpElement) + elementSize);

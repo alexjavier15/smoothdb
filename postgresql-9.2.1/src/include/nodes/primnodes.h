@@ -1298,6 +1298,7 @@ typedef struct RelChunk{
 	void    *head;
 	void	*next;
 	int		tuples;
+	int 	numBlocks;
 	uint32		freespace;
 	int pages;
 }RelChunk;

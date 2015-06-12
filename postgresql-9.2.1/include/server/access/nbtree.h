@@ -20,6 +20,7 @@
 #include "access/xlog.h"
 #include "access/xlogutils.h"
 #include "catalog/pg_index.h"
+#include "storage/buffile.h"
 //#include "nodes/bitmapset64.h"
 
 /* There's room for a 16-bit vacuum cycle ID in BTPageOpaqueData */
@@ -74,6 +75,10 @@ typedef BTPageOpaqueData *BTPageOpaque;
 #define BTP_HALF_DEAD	(1 << 4)	/* empty, but still in tree */
 #define BTP_SPLIT_END	(1 << 5)	/* rightmost page of split group */
 #define BTP_HAS_GARBAGE (1 << 6)	/* page has LP_DEAD tuples */
+
+
+#define	BTP_SMOOTH_PART		0x0100
+#define	BTP_SMOOTH_ALL		0x1000
 
 /*
  * The max allowed value of a cycle ID is a bit less than 64K.	This is
@@ -596,6 +601,13 @@ typedef enum
 } CacheStatus;
 
 
+typedef enum
+{
+	RC_INFILE,			/* no hashtable, nentries == 0 */
+	RC_SWAP,				/* we have has table */
+	RC_INMEM 				/* hash table is full - we cannot add more tuples to it
+	 	 	 	 	 	 	 in that case we are switching to a classical procedure */
+} HashPartitionStatus;
 typedef uint64 TID;
 #define form_tuple_id(tpl, blknum, tid)\
 	TID __temp = (TID) (blknum); \
@@ -633,28 +645,57 @@ typedef TID ResultCacheKey;
 
 typedef struct ResultCacheEntry
 {
-	ResultCacheKey 		tid;			/* Tuple id number (hashtable key) */
-	HeapTupleHeaderData tuple_data;			/* tuple = value*/
+	ResultCacheKey 		tid;			/* Tuple id number (hashtable key) */			/* tuple = value*/
 } ResultCacheEntry;
 
+#define RHASHENTRYSIZE	MAXALIGN(sizeof(ResultCacheEntry))
+typedef struct HashPartitionData
+{
+	Index		batchIdx;;			/* number of batches */
+	HashPartitionStatus status;
+	CacheStatus	cache_status;
+	int			nbucket;
+	int			hits;
+	int			miss;
+	int			nullno;
+	BufFile   	*BatchFile;      /*Array of batch files pointers;*/;
+	IndexTuple	lower_bound;    /*lower bound index tuple*/
+	IndexTuple	upper_bound;    /*upHashPartitionDescper bound index tuple*/
+}HashPartitionData;
 
+typedef struct HashPartitionData *HashPartitionDesc;
 struct ResultCache
 {
 	NodeTag		type;			/* to make it a valid Node */
+	char 	    name[3+NAMEDATALEN];		/* "RC_ appened bythe relation
+											name associated to this cache"*/
 	MemoryContext mcxt;			/* memory context containing me */
 	CacheStatus	status;			/* see codes above */
-	long 		size;
-	int			nentries;		/* number of entries in hastable */
-	int			maxentries;		/* limit on same to meet maxbytes */
+	Size 		size;
+
+	int			nentries;		/* number of entries in hastable. If partitioned the vale will  be equal
+								to the total of tuples stored arou nd the partitions */
+	long		maxentries;		/* limit on same to meet maxbytes. */
+	int			maxtuples;		/* number max of tuples ot be stored.
+	 	 	 	 	 	 	 	 If only one partition it will be equal to maxentries*/
 	uint32     tuple_length;
 
 	HTAB	   *hashtable;		/* hash table of PagetableEntry's */
 	Datum	   *projected_values; /* this space is used for manipulations with projection
 	 	 	 	 	 	 	 	 	 we create it once deleted when we are done*/
 	bool	   *projected_isnull;
-
-
+	bool		isCached;
+	Size 		bs_size;
+	// Alex: for patined mode
+	HeapTuple   HeaptupleSlot;  /* slot for internal managing minimal tuples attributes*/
+	int			curbatch;		/* current batch #; 0 during 1st pass */
+	int			nbatch;			/* number of batches */
+	HashPartitionDesc   partition_array;      /*Array of batch files;*/
+	HashPartitionDesc	curr_partition;		  /*shortcut to the current partition*/
+	IndexTuple *bounds ; //shorcut for easy free;z
 };
+
+
 typedef struct ResultCache ResultCache;
 
 /*TID Cache - for tuples produces in Stage 1 of indes smooth scan*/
@@ -771,9 +812,9 @@ typedef struct SmoothScanOpaqueData
 	int			prefetch_target;	/* my current GOAL is to this many pages prefetched
 	 	 	 	 	 	 	 	 	   This number will increased - for instance 2, 4, 8, 16 etc. */
 	int 		prefetch_cumul; 	/* this is just for testing purpose */
-	BlockNumber nextPageId;			/*next page to process with smooth - this page is supposed to be already PREFETCHED*/
+	BlockNumber			nextPageId;			/*next page to process with smooth - this page is supposed to be already PREFETCHED*/
 
-	BlockNumber rel_nblocks;		/* number of block that relation has*/
+	BlockNumber			rel_nblocks;		/* number of block that relation has*/
 	bool 		orderby;		    /* should the order be respected */
 
 
@@ -794,19 +835,49 @@ typedef struct SmoothScanOpaqueData
 	bool		start_prefetch	;
 	bool		start_smooth	;
 	int 		num_result_cache_hits;
+	int 		num_result_cache_misses;
+
 	int 		num_result_tuples;
 
-	Bitmapset  *bs_vispages;		/* keep track of all visited pages  */
+	Bitmapset     *bs_vispages;		/* keep track of all visited pages  */
+	int		num_vispages;	/* keep track of number of visited pages  */
 	TupleIDCache  *tupleID_cache;		/* keep track of all visited tuples in a hash table (blok id = key, offset = value) */
 	//Bitmapset  *bs_tovispages;		/* keep track of all pages to visit */
 	/* keep these last in struct for efficiency */
 	SmoothScanPosData currPos;		/* current position data */
 	SmoothScanPosData markPos;		/* marked position, if any */
 	ResultCache  *result_cache;		/* when we have order imposed we stored tuples in a hash table*/
+	/*Alex: use save the insert scankeys for look up tuples in the root during partitioning in order to get the partition number*/
+	ScanKey		search_keyData ;
+	int			keyz;
+	int			strat_total;
 
+	/*Alex: Information about boundaries and root used for partitioning */
+	OffsetNumber	root_offbounds[3];  /*Alex: root offset used for tuple count aprox. using root*/
+	IndexTuple		itup_bounds[3];  /*Alex: storage for index tuples (Leaf ) bounds used for partitioning*/
+
+	/*Alex : Max and min offset in root used for tuple count aprox. using root*/
+	OffsetNumber	min_offset;
+	OffsetNumber    max_offset;
+
+	bool moreLeft;
+	bool moreRight;
+	double pagefactor;
+	bool creatingBounds;
+
+	long		work_mem;
 } SmoothScanOpaqueData;
 
 typedef SmoothScanOpaqueData *SmoothScanOpaque;
+
+#define RightBound 0
+#define LeftBound 2
+
+#define SmoothScanPosIsValid(scanpos) BufferIsValid((scanpos).buf)
+
+#define SmoothScanGetLowerBound(scanpos) ((scanpos)->itup_bounds[LeftBound])
+
+#define SmoothScanGetUpperBound(scanpos) ((scanpos)->itup_bounds[RightBound])
 
 #define SmoothScanPosIsValid(scanpos) BufferIsValid((scanpos).buf)
 
@@ -882,6 +953,8 @@ extern int	_bt_pagedel(Relation rel, Buffer buf, BTStack stack);
 extern BTStack _bt_search(Relation rel,
 		   int keysz, ScanKey scankey, bool nextkey,
 		   Buffer *bufP, int access);
+extern int _bt_sel_startkeys(BTScanOpaque so, ScanDirection dir,ScanKey *startKeys, StrategyNumber *strat,
+		StrategyNumber *strat_total);
 extern Buffer _bt_moveright(Relation rel, Buffer buf, int keysz,
 			  ScanKey scankey, bool nextkey, int access);
 extern OffsetNumber _bt_binsrch(Relation rel, Buffer buf, int keysz,
@@ -889,9 +962,12 @@ extern OffsetNumber _bt_binsrch(Relation rel, Buffer buf, int keysz,
 extern int32 _bt_compare(Relation rel, int keysz, ScanKey scankey,
 			Page page, OffsetNumber offnum);
 extern bool _bt_first(IndexScanDesc scan, ScanDirection dir);
+extern bool _bt_build_startkeys(ScanKey *startKeys,ScanKeyData *scankeys, int *keysCount, Relation rel, StrategyNumber *strat_total);
+extern bool _bt_firstwithtuple(IndexScanDesc scan, ScanDirection dir, ScanKeyData *scankeys);
+
 extern bool _bt_next(IndexScanDesc scan, ScanDirection dir);
 extern Buffer _bt_get_endpoint(Relation rel, uint32 level, bool rightmost);
-
+extern BTStack _bt_get_endentry(IndexScanDesc scan, ScanDirection dir );
 /*
  * prototypes for functions in nbtutils.c
  */
@@ -906,6 +982,8 @@ extern void _bt_preprocess_keys(IndexScanDesc scan);
 extern IndexTuple _bt_checkkeys(IndexScanDesc scan,
 			  Page page, OffsetNumber offnum,
 			  ScanDirection dir, bool *continuescan);
+extern IndexTuple _bt_checkkey_tuple(IndexScanDesc scan, ScanDirection dir, bool *continuescan,
+		IndexTuple tuple, bool tuple_alive);
 extern void _bt_killitems(IndexScanDesc scan, bool haveLock);
 extern BTCycleId _bt_vacuum_cycleid(Relation rel);
 extern BTCycleId _bt_start_vacuum(Relation rel);
@@ -932,5 +1010,7 @@ extern void btree_desc(StringInfo buf, uint8 xl_info, char *rec);
 extern void btree_xlog_startup(void);
 extern void btree_xlog_cleanup(void);
 extern bool btree_safe_restartpoint(void);
+extern int32 _bt_compare_tup(IndexTuple itup, TupleDesc	itupdes, int keysz,	ScanKey scankey);
+
 
 #endif   /* NBTREE_H */

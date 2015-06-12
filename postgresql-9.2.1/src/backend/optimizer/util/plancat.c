@@ -125,17 +125,40 @@ get_relation_info(PlannerInfo *root, Oid relationObjectId, bool inhparent,
 		num_chunks = rel->tuples / multi_join_chunk_tup;
 	else{
 		num_chunks = ceil((double) rel->pages * BLCKSZ / (multi_join_chunk_size * 1024L));
+<<<<<<< HEAD
 		num_chunks = num_chunks <= 1.0 ? 1.0 : num_chunks;
 		}
 	rel->chunks = NIL;
 	double num_pages = ceil(rel->pages / num_chunks);
+=======
+		// we want to use real postgres segments
+		//num_chunks = ceil((double) rel->pages  / RELSEG_SIZE);
+		//multi_join_chunk_size = RELSEG_SIZE;
+	}
+
+	rel->chunks = NIL;
+	uint32 blocksPerChunk = multi_join_chunk_size * 1024L / BLCKSZ;
+	uint32 totalBlocks = 0;
+>>>>>>> f22a9f6bf0062d1e3b6d684311460d839c71aa19
 	for ( i  = 0; i<num_chunks; i++){
 		RelChunk *relchunk = makeNode(RelChunk);
 		uint32  hi= rel->relid;
 		uint16  lo= i;
 		relchunk->chunkID = (uint32) (hi << 16) | lo;
 		relchunk->priority = 0;
+<<<<<<< HEAD
 		relchunk->pages = num_pages;
+=======
+		if( i < num_chunks -1){
+			relchunk->numBlocks = blocksPerChunk;
+			totalBlocks+= blocksPerChunk;
+		}else
+		{
+			Assert(totalBlocks < rel->pages);
+
+			relchunk->numBlocks = rel->pages - totalBlocks;
+		}
+>>>>>>> f22a9f6bf0062d1e3b6d684311460d839c71aa19
 		rel->chunks = lappend(rel->chunks, relchunk);
 	}
 	printf(" relation %d : %s , pages: %d\n", rel->relid, NameStr((relation)->rd_rel->relname), rel->pages);

@@ -34,6 +34,8 @@ typedef int32 signedbitmapword; /* must be the matching signed type */
 //typedef uint64 bitmapword;		/* must be an unsigned type */
 //typedef int64 signedbitmapword; /* must be the matching signed type */
 
+#define BITMAPSET_SIZE(nwords)	\
+	(offsetof(Bitmapset, words) + (nwords) * sizeof(bitmapword))
 
 typedef struct Bitmapset
 {

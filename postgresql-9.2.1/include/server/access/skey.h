@@ -92,6 +92,7 @@ typedef struct ScanKeyData
 	FmgrInfo	sk_func;		/* lookup info for function to call */
 	Datum		sk_argument;	/* data to compare */
 	bool 		sk_belongstojoin; //smooth nested loop - we will ignore keys that belong to join during their adding to Hash table (renata todo)
+	AttrNumber	sk_attono;		/* Alex:table column number  mapped to an indexscan key*/
 } ScanKeyData;
 
 typedef ScanKeyData *ScanKey;
