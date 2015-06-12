@@ -965,7 +965,7 @@ void ExecMultiHashTableCreate(MultiHashState *node, List *hashOperators, bool ke
 
 	ExecChooseMultiHashTableSize(pages, tupwidth,&nbuckets);
 
-<<<<<<< HEAD
+
 ///#ifdef HJDEBUG
 	printf("tupwidth : %d, nbuckets = %d\n",  tupwidth, nbuckets);
 

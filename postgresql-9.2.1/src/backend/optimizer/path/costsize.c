@@ -4089,7 +4089,7 @@ set_baserel_size_estimates(PlannerInfo *root, RelOptInfo *rel)
 
 	set_rel_width(root, rel);
 
-	printf("rel : %d, tupwidth %d", rel->)
+	//printf("rel : %d, tupwidth %d", rel->)
 }
 
 /*

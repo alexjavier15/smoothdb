@@ -65,7 +65,7 @@ SeqNext(SeqScanState *node)
 	 */
 	tuple = heap_getnext(scandesc, direction);
 
-	node->len = tuple->t_len;
+
 
 	/*
 	 * save the tuple and the buffer returned to us by the access methods in
@@ -75,12 +75,14 @@ SeqNext(SeqScanState *node)
 	 * that ExecStoreTuple will increment the refcount of the buffer; the
 	 * refcount will not be dropped until the tuple table slot is cleared.
 	 */
-	if (tuple)
+	if (tuple){
 		ExecStoreTuple(tuple,	/* tuple to store */
 					   slot,	/* slot to store in */
 					   scandesc->rs_cbuf,		/* buffer associated with this
 												 * tuple */
 					   false);	/* don't pfree this pointer */
+		node->len = tuple->t_len;
+	}
 	else
 		ExecClearTuple(slot);
 
