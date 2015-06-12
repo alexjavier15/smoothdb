@@ -125,6 +125,11 @@ typedef struct Plan
 	 */
 	Bitmapset  *extParam;
 	Bitmapset  *allParam;
+	/*Alex : Multi join  fields;*/
+	List	   *all_quals;
+	bool		fixed_ref;
+
+
 } Plan;
 
 /* ----------------
@@ -262,6 +267,7 @@ typedef struct Scan
 {
 	Plan		plan;
 	Index		scanrelid;		/* relid is index into the range table */
+
 } Scan;
 
 /* ----------------
@@ -598,6 +604,7 @@ typedef struct Join
 	List	   *joinqual;		/* JOIN quals (in addition to plan.qual) */
 } Join;
 
+
 /* ----------------
  *		nest loop join node
  *
@@ -652,8 +659,19 @@ typedef struct HashJoin
 {
 	Join		join;
 	List	   *hashclauses;
+	struct PlanState  *ps;
 } HashJoin;
 
+
+typedef struct MultiJoin
+{
+	HashJoin	hashjoin;
+	List	 	*multi_plans;
+	List	    *plan_list;
+	List		*hash_plans;
+	List 		*subplans;
+
+} MultiJoin;
 /* ----------------
  *		materialization node
  * ----------------
@@ -771,7 +789,34 @@ typedef struct Hash
 	Oid			skewColType;	/* datatype of the outer key column */
 	int32		skewColTypmod;	/* typmod of the outer key column */
 	/* all other info is in the parent HashJoin node */
+
+
 } Hash;
+
+typedef struct MultiHash
+{  Hash		hash;
+   Index	id;
+/*Alex: multi join fields*/
+   List 	*expr;		// Array of join clause for this hashed scan
+   int					num_chunks;
+   List     *chunks;
+   struct PlanState *ps;
+}MultiHash;
+
+typedef struct MultiHashSeq
+{	HashJoin  hjoin;
+	MultiHash			*hash_src;
+   struct MultiHashSeq	*hash_dest;
+/*Alex: multi join fields*/
+   List					*hashclauses;
+   List					*targetlist;		/* target list to be computed at this node */
+   List					*quals;
+
+
+
+}MultiHashSeq;
+
+
 
 /* ----------------
  *		setop node
@@ -920,4 +965,14 @@ typedef struct PlanInvalItem
 	uint32		hashValue;		/* hash value of object's cache lookup key */
 } PlanInvalItem;
 
+typedef struct HashInfo{
+	Node node;
+	Bitmapset *relids;
+	List	*hashkeys;
+	List	*outer_hashkeys;
+	List	*hoperators;
+	Selectivity sel;
+	Index	id;
+
+}HashInfo;
 #endif   /* PLANNODES_H */

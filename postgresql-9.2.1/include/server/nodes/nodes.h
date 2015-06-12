@@ -72,6 +72,7 @@ typedef enum NodeTag
 	T_NestLoop,
 	T_MergeJoin,
 	T_HashJoin,
+	T_MultiJoin,
 	T_Material,
 	T_Sort,
 	T_Group,
@@ -79,6 +80,7 @@ typedef enum NodeTag
 	T_WindowAgg,
 	T_Unique,
 	T_Hash,
+	T_MultiHash,
 	T_SetOp,
 	T_LockRows,
 	T_Limit,
@@ -107,6 +109,11 @@ typedef enum NodeTag
 	T_IndexSmoothScanState,
 	T_SmoothHeapScanState,
 	T_SmoothIndexScanState,
+	T_SymHashJoinState,
+	T_MultiJoinState,
+	T_MultiHashState,
+	T_CHashJoinState,
+	T_SelectivityState,
 
 	T_IndexOnlyScanState,
 	T_BitmapIndexScanState,
@@ -216,6 +223,7 @@ typedef enum NodeTag
 	T_CoerceToDomainState,
 	T_DomainConstraintState,
 	T_WholeRowVarExprState,		/* will be in a more natural position in 9.3 */
+	T_MultiHashSeqState,
 
 	/*
 	 * TAGS FOR PLANNER NODES (relation.h)
@@ -227,6 +235,8 @@ typedef enum NodeTag
 	T_ParamPathInfo,
 	T_Path,
 	T_IndexPath,
+	/*Alex*/
+	T_MultiJoinInfo,
 
 	T_IndexSmoothPath,
 	T_SmoothHeapPath,
@@ -237,6 +247,9 @@ typedef enum NodeTag
 	T_NestPath,
 	T_MergePath,
 	T_HashPath,
+
+	T_MHashPath,
+
 	T_TidPath,
 	T_ForeignPath,
 	T_AppendPath,
@@ -277,6 +290,7 @@ typedef enum NodeTag
 	T_List,
 	T_IntList,
 	T_OidList,
+	T_HashInfo,
 
 	/*
 	 * TAGS FOR STATEMENT NODES (mostly in parsenodes.h)
@@ -435,7 +449,11 @@ typedef enum NodeTag
 	T_ResultCache,				/* in nodeIndexsmoothscan.h*/
 	T_TupleIDCache,				/* in nodeIndexsmoothscan.h*/
 	T_InlineCodeBlock,			/* in nodes/parsenodes.h */
-	T_FdwRoutine				/* in foreign/fdwapi.h */
+	T_FdwRoutine,				/* in foreign/fdwapi.h */
+
+	T_RelChunk,
+	T_ChunkedSubPlan
+
 } NodeTag;
 
 /*

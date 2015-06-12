@@ -60,6 +60,7 @@ typedef struct Instrumentation
 	double		nloops;			/* # of run cycles for this node */
 	double		nfiltered1;		/* # tuples removed by scanqual or joinqual */
 	double		nfiltered2;		/* # tuples removed by "other" quals */
+	double		card1;		/* # tuples removed by "other" quals */
 	BufferUsage bufusage;		/* Total buffer usage */
 } Instrumentation;
 
@@ -69,5 +70,6 @@ extern Instrumentation *InstrAlloc(int n, int instrument_options);
 extern void InstrStartNode(Instrumentation *instr);
 extern void InstrStopNode(Instrumentation *instr, double nTuples);
 extern void InstrEndLoop(Instrumentation *instr);
+extern void InstrEndMultiJoinLoop(Instrumentation *instr,Instrumentation *instr2 );
 
 #endif   /* INSTRUMENT_H */

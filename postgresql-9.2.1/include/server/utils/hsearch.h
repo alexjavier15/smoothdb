@@ -79,6 +79,13 @@ typedef struct HASHCTL
 	HASHHDR    *hctl;			/* location of header in shared mem */
 } HASHCTL;
 
+typedef struct HASH_ITER
+{
+	uint32 elemindex;
+} HASH_ITER;
+
+
+
 /* Flags to indicate which parameters are supplied */
 #define HASH_PARTITION	0x001	/* Hashtable is used w/partitioned locking */
 #define HASH_SEGMENT	0x002	/* Set segment size */
@@ -134,6 +141,7 @@ extern void hash_seq_init(HASH_SEQ_STATUS *status, HTAB *hashp);
 extern void *hash_seq_search(HASH_SEQ_STATUS *status);
 extern void hash_seq_term(HASH_SEQ_STATUS *status);
 extern void hash_freeze(HTAB *hashp);
+extern Size hash_estimate_num_entries(long size, int entrysize);
 extern Size hash_estimate_size(long num_entries, Size entrysize);
 extern long hash_select_dirsize(long num_entries);
 extern Size hash_get_shared_size(HASHCTL *info, int flags);
@@ -149,4 +157,11 @@ extern uint32 oid_hash(const void *key, Size keysize);
 extern uint32 bitmap_hash(const void *key, Size keysize);
 extern int	bitmap_match(const void *key1, const void *key2, Size keysize);
 
+/* Alex : fontion for iterating the hash table
+ *
+ */
+extern void * hash_get_next(HTAB *hashp, HASH_ITER * iter);
+extern void init_hash_iter(HASH_ITER ** iter);
+extern void hash_reset(HTAB *hashp );
+void * hash_get_element_key( void * helem);
 #endif   /* HSEARCH_H */

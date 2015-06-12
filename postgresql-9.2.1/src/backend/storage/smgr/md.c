@@ -688,6 +688,9 @@ mdread(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 										reln->smgr_rnode.node.relNode,
 										reln->smgr_rnode.backend);
 
+//	if (blocknum % 1000 == 0) {
+//		printf("mdread block %u rel %u\n", blocknum, reln->smgr_rnode.node.relNode);
+//	}
 	v = _mdfd_getseg(reln, forknum, blocknum, false, EXTENSION_FAIL);
 
 	seekpos = (off_t) BLCKSZ *(blocknum % ((BlockNumber) RELSEG_SIZE));
