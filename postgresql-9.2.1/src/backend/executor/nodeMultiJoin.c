@@ -1241,8 +1241,8 @@ static void ExecMultiJoinGetNewChunk(MultiJoinState * mhjoinstate) {
 }
 
 /*
- * Buil the intersection of subplans for every relation in the MJOIN. User can pass an initial list of subplans for a relation
- * and the realtion id to be skipped.
+ * Build the intersection of subplans for every relation in the MJOIN. User can pass an initial list of subplans for a relation
+ * and the relation id to be skipped.
  *
  */
 

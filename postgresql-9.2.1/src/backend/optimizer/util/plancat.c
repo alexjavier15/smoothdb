@@ -121,8 +121,9 @@ get_relation_info(PlannerInfo *root, Oid relationObjectId, bool inhparent,
 						  &rel->pages, &rel->tuples, &rel->allvisfrac);
 
 
-	if (multi_join_tuple_count)
+	if (multi_join_tuple_count){
 		num_chunks = rel->tuples / multi_join_chunk_tup;
+		num_chunks = num_chunks <= 1.0 ? 1.0 : num_chunks;}
 	else
 		num_chunks = ceil((double) rel->pages * BLCKSZ / (multi_join_chunk_size * 1024L));
 
