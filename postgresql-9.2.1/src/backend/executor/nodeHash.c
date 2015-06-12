@@ -415,7 +415,7 @@ MultiExecMultiHash(MultiHashState *node)
 						false,
 						&node->hashable_array[hinfo->id],
 						scan->len,
-						node->currChunk->pages);
+						node->currChunk->numBlocks);
 
 			}
 
@@ -1217,7 +1217,7 @@ ExecChooseMultiHashTableSize(double ntuples, int tupwidth, int *numbuckets)
 //	else
 	nbuckets =  ceil ((ntuples * BLCKSZ) / tupwidth);
 
-	nbuckets = Min(nbuckets, ntuples);
+	//nbuckets = Min(nbuckets, ntuples);
 	nbuckets = ceil(nbuckets / NTUP_PER_BUCKET);
 	nbuckets = 1 << my_log2(nbuckets);
 
