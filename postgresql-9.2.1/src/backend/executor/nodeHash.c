@@ -371,12 +371,12 @@ MultiExecMultiHash(MultiHashState *node)
 
 		if (TupIsNull(slot)) {
 
-			// it's our last chunk
-			if(node->currChunk->state == CH_WAITTING && scan->es_scanBytes > 0){
-				node->needUpdate = true;
-
-				break;
-			}
+//			// it's our last chunk
+//			if(node->currChunk->state == CH_WAITTING && scan->es_scanBytes > 0){
+//				node->needUpdate = false;
+//
+//				break;
+//			}
 
 			// we are reading an dropped chunk so rescan to refill and update the supblans
 			if(node->currChunk->state == CH_DROPPED){
