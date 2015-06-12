@@ -1158,8 +1158,8 @@ static void ExecPrepareChunk(MultiJoinState * mhjoinstate, MultiHashState *mhsta
 }
 
 static void ExecInitJoinCache(MultiJoinState * mhjoinstate) {
-	int chunksLeft = Min(chunks_per_cycle, list_length(JC_GetChunks()));
-
+	//int chunksLeft = Min(chunks_per_cycle, list_length(JC_GetChunks()));
+	int chunksLeft = chunks_per_cycle;
 	while (chunksLeft) {
 
 		RelChunk * chunk =  JC_processNextChunk();

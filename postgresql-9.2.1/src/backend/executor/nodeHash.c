@@ -381,7 +381,7 @@ MultiExecMultiHash(MultiHashState *node)
 			// we are reading an dropped chunk so rescan to refill and update the supblans
 			if(node->currChunk->state == CH_DROPPED){
 
-			node->needUpdate = true;
+			//node->needUpdate = true;
 			printf("CALLING RESCAN in %d scanbytes %d\n", outerNode->type, scan->es_scanBytes);
 			fflush(stdout);
 
@@ -389,9 +389,11 @@ MultiExecMultiHash(MultiHashState *node)
 
 			continue;
 			}
+			printf("got null with %d tuples read ", scan->es_scanBytes);
+			fflush(stdout);
 
-
-			return NULL;
+		//	return NULL;
+			break;
 
 		}
 
