@@ -115,7 +115,7 @@ typedef struct JCacheMemHeader	/* standard header for all Postgres shmem */
 extern void JC_InitCache(void);
 extern void JC_EndCache(void);
 extern List *JC_GetChunks(void);
-extern List *JC_isFull(void);
+extern bool JC_isFull(void);
 extern void JC_AddChunkedSubPlan(ChunkedSubPlan *subplan);
 extern List *JC_GetChunkedSubPlans( RelChunk *chunk);
 extern void JC_dropChunk( RelChunk *chunk);

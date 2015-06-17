@@ -474,18 +474,18 @@ MultiExecMultiHash(MultiHashState *node)
 	scan->es_scanBytes = 0;
 
 
-	foreach(lc,node->all_hashkeys) {
-
-		HashInfo * hinfo = (HashInfo *) lfirst(lc);
-
-		hashtable = node->hashable_array[hinfo->id];
-
-		printf("\nTotal tuples for hashtable %d  : %0.lf \n",
-				hinfo->id,
-				hashtable->totalTuples);
-		fflush(stdout);
-
-	}
+//	foreach(lc,node->all_hashkeys) {
+//
+//		HashInfo * hinfo = (HashInfo *) lfirst(lc);
+//
+//		hashtable = node->hashable_array[hinfo->id];
+//
+//		printf("\nTotal tuples for hashtable %d  : %0.lf \n",
+//				hinfo->id,
+//				hashtable->totalTuples);
+//		fflush(stdout);
+//
+//	}
 
 	/*
 	 * We do not return the hash table directly because it's not a subtype of
