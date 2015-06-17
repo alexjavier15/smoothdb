@@ -160,7 +160,7 @@ RelChunk * JC_processNextChunk(void) {
 
 			random_chunk = rand() % list_length(seq_cycle);
 
-		} while (!bms_is_member(refused_set, random_chunk));
+		} while (!bms_is_member( random_chunk, refused_set));
 
 		// = nextChunk->next;
 		result = (RelChunk *) list_nth(seq_cycle,random_chunk);
