@@ -155,17 +155,17 @@ RelChunk * JC_processNextChunk(void) {
 			fflush(stdout);
 		}
 
-
+		refused_set = bms_add_member(refused_set,random_chunk);
 		do {
 
 			random_chunk = rand() % list_length(seq_cycle);
 
-		} while (!bms_is_member( random_chunk, refused_set));
+		} while (bms_is_member( random_chunk, refused_set));
 
 		// = nextChunk->next;
 		result = (RelChunk *) list_nth(seq_cycle,random_chunk);
 		isValid= JC_isValidChunk(result);
-		refused_set = bms_add_member(refused_set,random_chunk);
+
 	}
 
 	printf("RECEIVING CHUNK: \n");
