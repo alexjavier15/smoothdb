@@ -1368,6 +1368,11 @@ static RelChunk * ExecMultiJoinChooseDroppedChunk(MultiJoinState * mhjoinstate, 
 
 
 
+	if(lchunks == NIL){
+
+		return newChunk;
+	}
+
 	foreach(lc,lchunks) {
 
 		result = list_union(result, ((RelChunk *) lfirst(lc))->subplans);
