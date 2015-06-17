@@ -1824,9 +1824,11 @@ void ExecMultiHashTableInsert(SimpleHashTable hashtable, MinimalTuple tuple, uin
 		 */
 
 		/* Create the HashJoinTuple */
-		if( hashtable->freeList == NULL)
-			elog(ERROR, "out of memory: No more buckets in the hashtable, nbuckets :%d, total_tuples: %0.lf",hashtable->nbuckets,hashtable->totalTuples);
+		if( hashtable->freeList == NULL){
 
+
+			elog(ERROR, "out of memory: No more buckets in the hashtable, nbuckets :%d, total_tuples: %0.lf ",hashtable->nbuckets,hashtable->totalTuples);
+		}
 		jtuple = hashtable->freeList;
 		jtuple->hashvalue = hashvalue;
 		jtuple->mtuple=tuple;
