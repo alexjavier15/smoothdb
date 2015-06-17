@@ -363,6 +363,7 @@ void make_random_seq(RelOptInfo ** rel_array, int size) {
 //	}
 //	nextChunk = list_head(result);
 
+	seq_cycle = result;
 }
 
 void JC_EndCache(void) {
