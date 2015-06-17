@@ -1307,7 +1307,7 @@ static List * ExecMultiJoinPrepareSubplans(MultiJoinState * mhjoinstate, int ski
 			if (subplans == NIL) {
 				printf("NOT more subplans for relation %d!\n",  i);
 
-				pprint(mhjoinstate->pendingSubplans);
+				//pprint(mhjoinstate->pendingSubplans);
 				fflush(stdout);
 				result = NIL;
 				break;
@@ -1329,7 +1329,7 @@ static List * ExecMultiJoinPrepareSubplans(MultiJoinState * mhjoinstate, int ski
 
 		}
 		printf("GOT %d SUBPLANS  with new !\n", list_length(result));
-		pprint(result);
+		//pprint(result);
 
 		return result;
 
