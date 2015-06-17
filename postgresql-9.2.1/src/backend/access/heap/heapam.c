@@ -215,7 +215,7 @@ heapgetpage(HeapScanDesc scan, BlockNumber page)
 	bool		all_visible;
 
 //	Assert(page < scan->rs_nblocks);
-	if(page < scan->rs_nblocks)
+	if(page >= scan->rs_nblocks)
 	elog(ERROR, "Invalid page %d  / %d\n ",page,scan->rs_nblocks);
 
 
