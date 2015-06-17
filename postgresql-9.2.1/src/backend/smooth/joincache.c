@@ -36,7 +36,7 @@ static HTAB * RelationChunksIndex = NULL;
 int chunk_size;
 
 static List * seq_cycle;
-static ListCell *nextChunk;
+//static ListCell *nextChunk;
 
 void JC_InitCache(void) {
 	int hash_tag = HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT;
@@ -173,7 +173,6 @@ RelChunk * JC_processNextChunk(void) {
 	fflush(stdout);
 	JCacheSegHdr->chunks = lappend(JCacheSegHdr->chunks, result);
 	JCacheSegHdr->cachedIds = bms_add_member(JCacheSegHdr->cachedIds, ChunkGetRelid(result));
-	nextChunk = nextChunk->next;
 	return result;
 
 }
@@ -356,13 +355,13 @@ void make_random_seq(RelOptInfo ** rel_array, int size) {
 	/* Make a circular list*/
 	chunks_per_cycle = Min(chunks_per_cycle, list_length(result));
 
-	{
-		ListCell * last = list_tail(result);
-		last->next = list_head(result);
-
-		seq_cycle = result;
-	}
-	nextChunk = list_head(result);
+//	{
+//		ListCell * last = list_tail(result);
+//		last->next = list_head(result);
+//
+//		seq_cycle = result;
+//	}
+//	nextChunk = list_head(result);
 
 }
 
@@ -375,10 +374,10 @@ void JC_DeleteChunk(RelChunk* chunk) {
 
 	ListCell *cell;
 	ListCell *prev;
-	if (equal(lfirst(nextChunk), chunk)) {
-		nextChunk = nextChunk->next;
-
-	}
+//	if (equal(lfirst(nextChunk), chunk)) {
+//		nextChunk = nextChunk->next;
+//
+//	}
 
 	prev = NULL;
 	foreach(cell, seq_cycle) {
