@@ -434,8 +434,8 @@ static bool JC_isValidChunk(RelChunk *chunk){
 					(chunk_slot_left > rel_left  ||chunk_slot_left <= 0) ? true :
 					bms_is_member(ChunkGetRelid(chunk), JCacheSegHdr->cachedIds)  == true ? false :
 					true;
-	printf("chunk_slot_left %d , rel_left %d \n ",chunk_slot_left , rel_left);
-	printf("Is valid  %d \n", isValid);
+	//printf("chunk_slot_left %d , rel_left %d \n ",chunk_slot_left , rel_left);
+	//printf("Is valid  %d \n", isValid);
 
 	return isValid;
 }
