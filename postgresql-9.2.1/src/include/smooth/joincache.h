@@ -105,7 +105,9 @@ typedef struct JCacheMemHeader	/* standard header for all Postgres shmem */
 	List   		*chunks;
 	List		*freeList;
 	bool		isFull;
-
+	Bitmapset   *relids;		/*relids used for this join*/
+	Bitmapset   *cachedIds;		/*relids with more than one cached chunk*/
+	int max_chunks;
 } JCacheMemHeader;
 
 

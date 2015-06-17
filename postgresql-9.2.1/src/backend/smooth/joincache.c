@@ -26,23 +26,19 @@
 
 List * make_random_list(int max_relid);
 MemoryContext JC_GetChunkMemoryContext(void);
-static  void JC_InitChunkTuples(RelChunk * chunk);
+static void JC_InitChunkTuples(RelChunk * chunk);
 
- // chunks of cache for a relation */
+// chunks of cache for a relation */
 static JCacheMemHeader *JCacheSegHdr;
 
 static HTAB * RelationChunksIndex = NULL;
 //static List *JChunkQueue =  NIL;
-int  chunk_size;
-
+int chunk_size;
 
 static List * seq_cycle;
 static ListCell *nextChunk;
 
-
-
-
-void JC_InitCache(void){
+void JC_InitCache(void) {
 	int hash_tag = HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT;
 	HASHCTL * hctl = NULL;
 	StringInfoData str;
@@ -52,17 +48,16 @@ void JC_InitCache(void){
 	double num_chunks;
 	int i;
 
-	parent_mcxt = 	AllocSetContextCreate(TopMemoryContext,
-						"Multi Join Cache",
-						ALLOCSET_SMALL_MINSIZE,
-						ALLOCSET_SMALL_INITSIZE,
-						ALLOCSET_SMALL_MAXSIZE);
+	parent_mcxt = AllocSetContextCreate(TopMemoryContext,
+			"Multi Join Cache",
+			ALLOCSET_SMALL_MINSIZE,
+			ALLOCSET_SMALL_INITSIZE,
+			ALLOCSET_SMALL_MAXSIZE);
 
 	oldcxt = MemoryContextSwitchTo(parent_mcxt);
-	hctl= (HASHCTL*)palloc0(sizeof(HASHCTL));
+	hctl = (HASHCTL*) palloc0(sizeof(HASHCTL));
 
 	JCacheSegHdr = palloc(sizeof(JCacheMemHeader));
-
 
 	hctl->keysize = sizeof(JoinCacheKey);
 	hctl->entrysize = JCACHE_ENTRY_SIZE;
@@ -71,19 +66,20 @@ void JC_InitCache(void){
 	JCacheSegHdr->chunks = NIL;
 	JCacheSegHdr->isFull = false;
 
-	RelationChunksIndex = hash_create("JoinCache Hash",
-										32,
-										hctl,hash_tag);
+	RelationChunksIndex = hash_create("JoinCache Hash", 32, hctl, hash_tag);
 	chunk_size = multi_join_chunk_size * 1024L;
 
 	JCacheSegHdr->mctx = parent_mcxt;
 	JCacheSegHdr->nextID = 0;
 	JCacheSegHdr->freesize = multi_join_cache_size;
 	//Compue num of chunks;
-	num_chunks =  floor((double)multi_join_cache_size / multi_join_chunk_size);
-	JCacheSegHdr->totalsize  = num_chunks * chunk_size;
+	num_chunks = floor((double) multi_join_cache_size / multi_join_chunk_size);
+	JCacheSegHdr->totalsize = num_chunks * chunk_size;
+	JCacheSegHdr->max_chunks = num_chunks;
 	JCacheSegHdr->freesize = JCacheSegHdr->totalsize;
 	JCacheSegHdr->freeList = NIL;
+	JCacheSegHdr->relids = NULL;
+	JCacheSegHdr->cachedIds = NULL;
 	// create chunk contexts
 	initStringInfo(&str);
 	appendStringInfoString(&str, CHUNK_PREFIX);
@@ -100,16 +96,14 @@ void JC_InitCache(void){
 		resetStringInfo(&str);
 
 	}
-	JCacheSegHdr->nextID=i;
+	JCacheSegHdr->nextID = i;
 
 	pfree(str.data);
 	MemoryContextSwitchTo(oldcxt);
 
-
 }
 
-
-void JC_AddChunkedSubPlan(ChunkedSubPlan *subplan){
+void JC_AddChunkedSubPlan(ChunkedSubPlan *subplan) {
 
 	ListCell *lc;
 
@@ -134,51 +128,61 @@ void JC_AddChunkedSubPlan(ChunkedSubPlan *subplan){
 //		}
 //
 		relchunk->subplans = lappend(relchunk->subplans, subplan);
-		relchunk->state =CH_WAITTING;
+		relchunk->state = CH_WAITTING;
 	}
-
-
 
 }
 
-
-RelChunk * JC_processNextChunk(void){
+RelChunk * JC_processNextChunk(void) {
 
 //	JoinCacheEntry *jcentry;
-	RelChunk *result = (RelChunk *) lfirst(nextChunk);
-	while(list_length( result->subplans) == 0 || result->state == CH_READ){
+
+	// Get a ramdom item from the seq_cycle list
+	int random_chunk =  rand() % list_length(seq_cycle);
+
+	RelChunk *result = (RelChunk *) list_nth(seq_cycle,random_chunk);
+
+	int chunk_slot_left = JCacheSegHdr->max_chunks - list_length(JCacheSegHdr->chunks);
+	int rel_left = bms_num_members(JCacheSegHdr->relids) - bms_num_members(JCacheSegHdr->cachedIds);
+
+	// decide if we got a valid chunk. a valid incoming chunk must respect a cache constraint
+	// that at any time we must reserve a cache slot per relation in join
+	bool isValid = chunk_slot_left > rel_left ? true :
+					bms_is_member(ChunkGetRelid(result),JCacheSegHdr->cachedIds) ? false : true;
+
+
+	while (isValid && (list_length(result->subplans) == 0 || result->state == CH_READ) ) {
 
 		nextChunk = nextChunk->next;
 		result = (RelChunk *) lfirst(nextChunk);
 
 	}
 
-
 	printf("RECEIVING CHUNK: \n");
-	printf("rel : %d chunk : %d\n", ChunkGetRelid(result),ChunkGetID(result));
+	printf("rel : %d chunk : %d\n", ChunkGetRelid(result), ChunkGetID(result));
 	fflush(stdout);
 	JCacheSegHdr->chunks = lappend(JCacheSegHdr->chunks, result);
+	JCacheSegHdr->cachedIds = bms_add_member(JCacheSegHdr->cachedIds, ChunkGetRelid(result));
 	nextChunk = nextChunk->next;
 	return result;
 
-
 }
 
+void JC_dropChunk(RelChunk *chunk) {
 
-
-
-void JC_dropChunk( RelChunk *chunk){
-
-	if(chunk == NULL)
+	if (chunk == NULL)
 		elog(ERROR, "Cannot drop a null chunk !");
 
 	printf("Dropping chunk : \n");
-    printf("rel : %d chunk : %d , state : %d , subplans : %d\n", ChunkGetRelid(chunk),ChunkGetID(chunk), chunk->state, list_length(chunk->subplans));
-
+	printf("rel : %d chunk : %d , state : %d , subplans : %d\n",
+			ChunkGetRelid(chunk),
+			ChunkGetID(chunk),
+			chunk->state,
+			list_length(chunk->subplans));
 
 	MemoryContextReset(chunk->mcxt);
-	chunk->next  = NULL;
-	chunk->head  = NULL;
+	chunk->next = NULL;
+	chunk->head = NULL;
 	chunk->state = CH_DROPPED;
 	chunk->tupledata = NULL;
 	chunk->priority = 0;
@@ -188,7 +192,7 @@ void JC_dropChunk( RelChunk *chunk){
 
 }
 
-MemoryContext JC_GetChunkMemoryContext(void){
+MemoryContext JC_GetChunkMemoryContext(void) {
 
 	/* use volatile pointer to prevent code rearrangement */
 	volatile JCacheMemHeader *jcacheSegHdr = JCacheSegHdr;
@@ -199,7 +203,7 @@ MemoryContext JC_GetChunkMemoryContext(void){
 		return NULL;
 	}
 	result = linitial(jcacheSegHdr->freeList);
-	jcacheSegHdr->freeList =list_delete_first(jcacheSegHdr->freeList);
+	jcacheSegHdr->freeList = list_delete_first(jcacheSegHdr->freeList);
 	return result;
 
 }
@@ -210,7 +214,7 @@ void JC_InitChunkMemoryContext(RelChunk *chunk, RelChunk * toDrop) {
 
 //	volatile JCacheMemHeader *jcacheSegHdr = JCacheSegHdr;
 
-	if(mcxt == NULL){
+	if (mcxt == NULL) {
 
 		JC_dropChunk(toDrop);
 		mcxt = JC_GetChunkMemoryContext();
@@ -221,34 +225,31 @@ void JC_InitChunkMemoryContext(RelChunk *chunk, RelChunk * toDrop) {
 	chunk->mcxt = mcxt;
 	JC_InitChunkTuples(chunk);
 
-
-
-
 }
 
-MinimalTuple JC_StoreMinmalTuple(RelChunk *chunk , MinimalTuple mtuple){
+MinimalTuple JC_StoreMinmalTuple(RelChunk *chunk, MinimalTuple mtuple) {
 	MinimalTuple copyTuple;
-	uint32  tupsize = MAXALIGN(mtuple->t_len);
+	uint32 tupsize = MAXALIGN(mtuple->t_len);
 	volatile JCacheMemHeader *jcacheSegHdr = JCacheSegHdr;
 
-	if(chunk->freespace <  tupsize ){
-		elog(ERROR, "out of memory for chunk  %d in relation %d",
-					 ChunkGetID(chunk), ChunkGetRelid(chunk));
+	if (chunk->freespace < tupsize) {
+		elog(ERROR,
+				"out of memory for chunk  %d in relation %d",
+				ChunkGetID(chunk),
+				ChunkGetRelid(chunk));
 
 	}
 
-
-	copyTuple = (MinimalTuple )chunk->next;
-	if(!chunk->head)
+	copyTuple = (MinimalTuple) chunk->next;
+	if (!chunk->head)
 		chunk->head = copyTuple;
 
+	memcpy(copyTuple, mtuple, mtuple->t_len);
 
-	memcpy(copyTuple, mtuple,mtuple->t_len);
-
-	chunk->next =ChunkGetNextTuple(chunk,copyTuple);
+	chunk->next = ChunkGetNextTuple(chunk,copyTuple);
 	Assert(chunk->next != NULL);
-	chunk->freespace-=tupsize;
-	jcacheSegHdr->freesize = jcacheSegHdr->freesize -tupsize;
+	chunk->freespace -= tupsize;
+	jcacheSegHdr->freesize = jcacheSegHdr->freesize - tupsize;
 	return copyTuple;
 
 }
@@ -261,10 +262,7 @@ void JC_AddChunkMemoryContext(MemoryContext mcxt) {
 
 }
 
-
 /* Join Cache Simulator */
-
-
 
 List * make_random_list(int max_relid) {
 
@@ -276,7 +274,7 @@ List * make_random_list(int max_relid) {
 	while (bms_num_members(relids) != size) {
 
 		nextid = (rand() % max_relid);
-		if (nextid != 0 && !bms_is_member(nextid,relids)) {
+		if (nextid != 0 && !bms_is_member(nextid, relids)) {
 			relids = bms_add_member(relids, nextid);
 			result = lappend_int(result, nextid);
 		}
@@ -290,14 +288,15 @@ void make_random_seq(RelOptInfo ** rel_array, int size) {
 
 	Bitmapset * allChunks = NULL;
 	List *result = NIL;
-	List  *relSeq = NIL;
-	int  total_chunks = 0;
+	List *relSeq = NIL;
+	int total_chunks = 0;
 	int max_rel;
 	int i;
-
-	for (i = 1 ; i < size; i++){
-		if(rel_array[i] != NULL){
-		total_chunks +=  list_length(rel_array[i]->chunks);
+	JCacheSegHdr->relids = NULL;
+	for (i = 1; i < size; i++) {
+		if (rel_array[i] != NULL) {
+			JCacheSegHdr->relids = bms_add_member(JCacheSegHdr->relids, i);
+			total_chunks += list_length(rel_array[i]->chunks);
 
 		}
 
@@ -315,7 +314,9 @@ void make_random_seq(RelOptInfo ** rel_array, int size) {
 			int nextChunk = 0;
 			uint32 chunkid;
 			RelOptInfo * rel = rel_array[relid];
-			if( rel!= NULL){
+			if (rel != NULL) {
+				// decide how many random chunks we will get for this relation: 1 < k  < list_length(rel->chunks)
+
 				nextChunk = rand() % list_length(rel->chunks);
 				//	printf( " chunk for rel %d = %d \n", relid,nextChunk);
 				chunkid = (uint32) (relid << 16) | nextChunk;
@@ -327,6 +328,7 @@ void make_random_seq(RelOptInfo ** rel_array, int size) {
 
 					result = lappend(result, chunk);
 				}
+
 			}
 
 		}
@@ -352,20 +354,14 @@ void make_random_seq(RelOptInfo ** rel_array, int size) {
 	}
 	nextChunk = list_head(result);
 
-
-
-
 }
 
-void JC_EndCache(void){
-
+void JC_EndCache(void) {
 
 	MemoryContextDelete(JCacheSegHdr->mctx);
 
-
-
 }
-void JC_DeleteChunk(RelChunk* chunk){
+void JC_DeleteChunk(RelChunk* chunk) {
 
 	ListCell *cell;
 	ListCell *prev;
@@ -377,7 +373,6 @@ void JC_DeleteChunk(RelChunk* chunk){
 	prev = NULL;
 	foreach(cell, seq_cycle) {
 		if (equal(lfirst(cell), chunk)) {
-
 
 			if (prev)
 				prev->next = cell->next;
@@ -391,28 +386,24 @@ void JC_DeleteChunk(RelChunk* chunk){
 		prev = cell;
 	}
 
-
 	list_free(chunk->subplans);
 	pfree(chunk);
 }
 
-List *JC_GetChunks(void){
+List *JC_GetChunks(void) {
 	return JCacheSegHdr->chunks;
 
 }
-List *JC_isFull(void){
+List *JC_isFull(void) {
 	return JCacheSegHdr->isFull;
 
 }
 
-
-static  void JC_InitChunkTuples(RelChunk * chunk){
-
+static void JC_InitChunkTuples(RelChunk * chunk) {
 
 	chunk->tupledata = MemoryContextAlloc(chunk->mcxt, MAXALIGN(chunk_size));
 	chunk->head = chunk->tupledata;
 	chunk->next = chunk->head;
-	chunk->freespace =  MAXALIGN(chunk_size);
-
+	chunk->freespace = MAXALIGN(chunk_size);
 
 }
