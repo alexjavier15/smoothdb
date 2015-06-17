@@ -1228,7 +1228,7 @@ static void ExecMultiJoinGetNewChunk(MultiJoinState * mhjoinstate) {
 		chunk = JC_processNextChunk();
 		mhstate = mhjoinstate->mhashnodes[ChunkGetRelid(chunk)];
 
-		if (list_length(mhstate->lchunks) > 0) {
+		if (list_length(mhstate->lchunks) >= 0) {
 
 			toDrop = ExecMultiJoinChooseDroppedChunk(mhjoinstate, chunk);
 		}
