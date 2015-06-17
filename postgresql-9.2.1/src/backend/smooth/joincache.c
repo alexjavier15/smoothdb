@@ -27,7 +27,7 @@
 List * make_random_list(int max_relid);
 MemoryContext JC_GetChunkMemoryContext(void);
 static void JC_InitChunkTuples(RelChunk * chunk);
-
+static bool JC_isValidChunk(RelChunk *chunk);
 // chunks of cache for a relation */
 static JCacheMemHeader *JCacheSegHdr;
 
@@ -138,24 +138,34 @@ RelChunk * JC_processNextChunk(void) {
 //	JoinCacheEntry *jcentry;
 
 	// Get a ramdom item from the seq_cycle list
+	Bitmapset * refused_set= NULL;
 	int random_chunk =  rand() % list_length(seq_cycle);
 
 	RelChunk *result = (RelChunk *) list_nth(seq_cycle,random_chunk);
 
-	int chunk_slot_left = JCacheSegHdr->max_chunks - list_length(JCacheSegHdr->chunks);
-	int rel_left = bms_num_members(JCacheSegHdr->relids) - bms_num_members(JCacheSegHdr->cachedIds);
+	bool isValid = JC_isValidChunk(result);
 
-	// decide if we got a valid chunk. a valid incoming chunk must respect a cache constraint
-	// that at any time we must reserve a cache slot per relation in join
-	bool isValid = chunk_slot_left > rel_left ? true :
-					bms_is_member(ChunkGetRelid(result),JCacheSegHdr->cachedIds) ? false : true;
+	refused_set = bms_add_member(refused_set,random_chunk);
+
+	while (!isValid && (list_length(result->subplans) == 0 || result->state == CH_READ) ) {
+
+		if(!isValid){
+
+			printf("Refusing Chunk: [ rel : %d, id %d ] !\n",ChunkGetRelid(result), ChunkGetID(result));
+			fflush(stdout);
+		}
 
 
-	while (isValid && (list_length(result->subplans) == 0 || result->state == CH_READ) ) {
+		do {
 
-		nextChunk = nextChunk->next;
-		result = (RelChunk *) lfirst(nextChunk);
+			random_chunk = rand() % list_length(seq_cycle);
 
+		} while (!bms_is_member(refused_set, random_chunk));
+
+		// = nextChunk->next;
+		result = (RelChunk *) list_nth(seq_cycle,random_chunk);
+		isValid= JC_isValidChunk(result);
+		refused_set = bms_add_member(refused_set,random_chunk);
 	}
 
 	printf("RECEIVING CHUNK: \n");
@@ -406,4 +416,17 @@ static void JC_InitChunkTuples(RelChunk * chunk) {
 	chunk->next = chunk->head;
 	chunk->freespace = MAXALIGN(chunk_size);
 
+}
+static bool JC_isValidChunk(RelChunk *chunk){
+
+	int chunk_slot_left = JCacheSegHdr->max_chunks - list_length(JCacheSegHdr->chunks);
+	int rel_left = bms_num_members(JCacheSegHdr->relids) - bms_num_members(JCacheSegHdr->cachedIds);
+
+	// decide if we got a valid chunk. a valid incoming chunk must respect a cache constraint
+	// that at any time we must reserve a cache slot per relation in join
+	bool isValid = chunk_slot_left > rel_left ? true :
+					bms_is_member(ChunkGetRelid(chunk), JCacheSegHdr->cachedIds) ? false : true;
+
+
+	return isValid;
 }
