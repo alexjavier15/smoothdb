@@ -214,7 +214,10 @@ heapgetpage(HeapScanDesc scan, BlockNumber page)
 	ItemId		lpp;
 	bool		all_visible;
 
-	Assert(page < scan->rs_nblocks);
+//	Assert(page < scan->rs_nblocks);
+	if(page < scan->rs_nblocks)
+	elog(ERROR, "Invalid page %d  / %d\n ",page,scan->rs_nblocks);
+
 
 	/* release previous scan buffer, if any */
 	if (BufferIsValid(scan->rs_cbuf))
