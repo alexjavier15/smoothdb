@@ -268,51 +268,51 @@ ExecMultiHash(MultiHashState *node) {
 		} else
 			break;
 
-			slot = ExecProcNode(outerNode);
-			if (TupIsNull(slot))
-				break;
-			/* We have to compute the hash value */
-			econtext->ecxt_innertuple = slot;
-
-			mtuple = ExecFetchSlotMinimalTuple(slot);
-
-
-
-			hashTuple = JC_StoreMinmalTuple(node->currChunk,mtuple);
-
-
-
-			foreach(lc,node->all_hashkeys) {
-
-				HashInfo * hinfo = (HashInfo *) lfirst(lc);
-
-				hashtable = node->hashable_array[hinfo->id];
-				//printf("idx : %d  ",hinfo->id );
-
-				/*
-				 * set expression context
-				 */
-				hashkeys = hinfo->hashkeys;
-				//pprint(hashkeys);
-
-				if (ExecMultiHashGetHashValue(hashtable,
-						econtext,
-						hashkeys,
-						false,
-						hashtable->keepNulls,
-						&hashvalue)) {
-					inserted = true;
-					/* Not subject to skew optimization, so insert normally */
-					ExecMultiHashTableInsert(hashtable, hashTuple, hashvalue);
-					hashtable->totalTuples += 1;
-				}
-
-				/* must provide our own instrumentation support */
-					if (node->hstate.ps.instrument)
-						InstrStopNode(node->hstate.ps.instrument, hashtable->totalTuples);
-			}
-			if(inserted)
-					return slot;
+//			slot = ExecProcNode(outerNode);
+//			if (TupIsNull(slot))
+//				break;
+//			/* We have to compute the hash value */
+//			econtext->ecxt_innertuple = slot;
+//
+//			mtuple = ExecFetchSlotMinimalTuple(slot);
+//
+//
+//
+//			hashTuple = JC_StoreMinmalTuple(node->currChunk,mtuple);
+//
+//
+//
+//			foreach(lc,node->all_hashkeys) {
+//
+//				HashInfo * hinfo = (HashInfo *) lfirst(lc);
+//
+//				hashtable = node->hashable_array[hinfo->id];
+//				//printf("idx : %d  ",hinfo->id );
+//
+//				/*
+//				 * set expression context
+//				 */
+//				hashkeys = hinfo->hashkeys;
+//				//pprint(hashkeys);
+//
+//				if (ExecMultiHashGetHashValue(hashtable,
+//						econtext,
+//						hashkeys,
+//						false,
+//						hashtable->keepNulls,
+//						&hashvalue)) {
+//					inserted = true;
+//					/* Not subject to skew optimization, so insert normally */
+//					ExecMultiHashTableInsert(hashtable, hashTuple, hashvalue);
+//					hashtable->totalTuples += 1;
+//				}
+//
+//				/* must provide our own instrumentation support */
+//					if (node->hstate.ps.instrument)
+//						InstrStopNode(node->hstate.ps.instrument, hashtable->totalTuples);
+//			}
+//			if(inserted)
+//					return slot;
 	}
 
 
@@ -1825,7 +1825,7 @@ void ExecMultiHashTableInsert(SimpleHashTable hashtable, MinimalTuple tuple, uin
 
 		/* Create the HashJoinTuple */
 		if( hashtable->freeList == NULL)
-			elog(ERROR, "out of memory: No more buckets in the hashtable, nbuckets :%d, total_tuples: %d",hashtable->nbuckets,hashtable->totalTuples);
+			elog(ERROR, "out of memory: No more buckets in the hashtable, nbuckets :%d, total_tuples: %0.lf",hashtable->nbuckets,hashtable->totalTuples);
 
 		jtuple = hashtable->freeList;
 		jtuple->hashvalue = hashvalue;
@@ -3078,6 +3078,7 @@ static void ExecMultiHashAllocateHashtable(SimpleHashTable hashtable) {
 
 	prevElement = NULL;
 	tmpElement = firstElement;
+	int count = 0;
 
 	for (i = 0; i < num_elements; i++) {
 
