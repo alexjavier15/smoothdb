@@ -1438,7 +1438,7 @@ static RelChunk * ExecMultiJoinChooseDroppedChunk(MultiJoinState * mhjoinstate, 
 				ChunkGetRelid(newChunk),
 				ChunkGetID(newChunk));
 		fflush(stdout);
-
+		JC_removeChunk(newChunk);
 
 
 		return NULL;

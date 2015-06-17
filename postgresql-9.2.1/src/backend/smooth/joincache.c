@@ -196,8 +196,13 @@ void JC_dropChunk(RelChunk *chunk) {
 	chunk->tupledata = NULL;
 	chunk->priority = 0;
 	chunk->freespace = MAXALIGN(chunk_size);
-	JCacheSegHdr->chunks = list_delete(JCacheSegHdr->chunks, chunk);
+	JC_removeChunk( chunk);
 	JC_AddChunkMemoryContext(chunk->mcxt);
+
+}
+
+void JC_removeChunk(RelChunk *chunk){
+	JCacheSegHdr->chunks = list_delete(JCacheSegHdr->chunks, chunk);
 
 }
 

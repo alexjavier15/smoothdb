@@ -119,6 +119,7 @@ extern bool JC_isFull(void);
 extern void JC_AddChunkedSubPlan(ChunkedSubPlan *subplan);
 extern List *JC_GetChunkedSubPlans( RelChunk *chunk);
 extern void JC_dropChunk( RelChunk *chunk);
+extern void JC_removeChunk(RelChunk *chunk);
 extern void  JC_InitChunkMemoryContext(RelChunk *chunk, RelChunk * toDrop);
 void JC_AddChunkMemoryContext(MemoryContext mcxt);
 extern RelationChunksDesc  JC_InitRelationChunks(uint32 size, Relation relation);
