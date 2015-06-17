@@ -426,7 +426,7 @@ static bool JC_isValidChunk(RelChunk *chunk){
 	// decide if we got a valid chunk. a valid incoming chunk must respect a cache constraint
 	// that at any time we must reserve a cache slot per relation in join
 	bool isValid =
-					(chunk_slot_left > rel_left  ||chunk_slot_left == 0) ? true :
+					(chunk_slot_left > rel_left  ||chunk_slot_left <= 0) ? true :
 					bms_is_member(ChunkGetRelid(chunk), JCacheSegHdr->cachedIds)  == true ? false :
 					true;
 	printf("chunk_slot_left %d , rel_left %d \n ",chunk_slot_left , rel_left);
