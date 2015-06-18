@@ -333,6 +333,8 @@ MultiExecMultiHash(MultiHashState *node)
 	List	   *hashkeys;
 	SimpleHashTable hashtable;
 	ScanState *scan;
+	SeqScanState * seqScan;
+	HeapScanDescData *scanDesc;
 	TupleTableSlot *slot;
 	ExprContext *econtext;
 	uint32		hashvalue;
@@ -355,6 +357,10 @@ MultiExecMultiHash(MultiHashState *node)
 	econtext = node->hstate.ps.ps_ExprContext;
 	scan = (ScanState *)outerNode;
 
+	seqScan = (SeqScanState *) outerNode;
+	scanDesc = 	(HeapScanDescData *)seqScan->ss_currentScanDesc;
+
+	printf("Starting seq scan at : %d  for %d blocks ", scanDesc->rs_startblock, scanDesc->num_total_blocks );
 	/*
 	 * get all inner tuples and insert into the hash table (or temp files)
 	 */
