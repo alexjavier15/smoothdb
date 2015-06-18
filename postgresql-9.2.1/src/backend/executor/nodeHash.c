@@ -37,6 +37,8 @@
 #include "utils/memutils.h"
 #include "utils/lsyscache.h"
 #include "utils/syscache.h"
+#include "nodes/execnodes.h"
+#include "access/relscan.h"
 
 
 typedef struct  uint32 HTIndexKey;
