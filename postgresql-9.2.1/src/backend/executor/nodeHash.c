@@ -422,7 +422,7 @@ MultiExecMultiHash(MultiHashState *node)
 						false,
 						&node->hashable_array[hinfo->id],
 						scan->len,
-						node->currChunk->pages);
+						node->currChunk->numBlocks);
 
 			}
 
