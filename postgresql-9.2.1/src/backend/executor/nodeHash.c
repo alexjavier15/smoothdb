@@ -422,7 +422,7 @@ MultiExecMultiHash(MultiHashState *node)
 						false,
 						&node->hashable_array[hinfo->id],
 						scan->len,
-						multi_join_chunk_size * 1024L / BLCKSZ);
+						node->currChunk->pages);
 
 			}
 
