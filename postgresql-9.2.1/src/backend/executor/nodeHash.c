@@ -495,7 +495,7 @@ MultiExecMultiHash(MultiHashState *node)
 //		fflush(stdout);
 //
 //	}
-	printf("\nTotal tuples for hashtable %d  : %d \n", node->currChunk->tuples);
+	printf("\nTotal tuples in chunk  : %d   \n", node->currChunk->tuples);
 	fflush(stdout);
 
 	/*
