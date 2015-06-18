@@ -1146,7 +1146,7 @@ static void ExecPrepareChunk(MultiJoinState * mhjoinstate, MultiHashState *mhsta
 	scan = 	(HeapScanDescData *)outerNode->ss_currentScanDesc;
 	scan->num_total_blocks = chunk->numBlocks;
 	scan->rs_startblock = ChunkGetID(chunk)*  multi_join_chunk_size * 1024L / BLCKSZ;
-	scan->rs_inited = false;
+	//scan->rs_inited = false;
 
 	if (chunk->state != CH_READ)
 		(void) MultiExecProcNode((PlanState *) mhstate);

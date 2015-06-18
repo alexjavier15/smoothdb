@@ -371,24 +371,24 @@ MultiExecMultiHash(MultiHashState *node)
 
 		if (TupIsNull(slot)) {
 
-//			// it's our last chunk
-//			if(node->currChunk->state == CH_WAITTING && scan->es_scanBytes > 0){
-//				node->needUpdate = false;
+////			// it's our last chunk
+////			if(node->currChunk->state == CH_WAITTING && scan->es_scanBytes > 0){
+////				node->needUpdate = false;
+////
+////				break;
+////			}
 //
-//				break;
-//			}
-
-			// we are reading an dropped chunk so rescan to refill and update the supblans
-			if(node->currChunk->state == CH_DROPPED){
-
-			//node->needUpdate = true;
-			printf("CALLING RESCAN in %d scanbytes %d\n", outerNode->type, scan->es_scanBytes);
-			fflush(stdout);
-
+//			// we are reading an dropped chunk so rescan to refill and update the supblans
+//			if(node->currChunk->state == CH_DROPPED){
+//
+//			//node->needUpdate = true;
+//			printf("CALLING RESCAN in %d scanbytes %d\n", outerNode->type, scan->es_scanBytes);
+//			fflush(stdout);
+//
 			ExecReScan(outerNode);
 
-			continue;
-			}
+//			continue;
+//			}
 			printf("got null with %d tuples read ", scan->es_scanBytes);
 			fflush(stdout);
 
