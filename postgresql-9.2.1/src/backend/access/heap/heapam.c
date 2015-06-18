@@ -799,6 +799,10 @@ heapgettup_pagemode(HeapScanDesc scan,
 			page++;
 			if(enable_multi_join){
 				finished = (page - scan->rs_startblock == scan->num_total_blocks);
+				if(finished ){
+
+					printf("finished scan -> start_blk : %d,  num_total_blocks : %d ", scan->rs_startblock ,scan->num_total_blocks);
+				}
 			}else{
 
 				if (page >= scan->rs_nblocks)
