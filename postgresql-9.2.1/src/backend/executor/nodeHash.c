@@ -398,7 +398,7 @@ MultiExecMultiHash(MultiHashState *node)
 
 //			continue;
 //			}
-			printf("got null with %d tuples read ", scan->es_scanBytes);
+			printf("got null with %d tuples read  \n", scan->es_scanBytes);
 			fflush(stdout);
 
 		//	return NULL;
@@ -464,10 +464,13 @@ MultiExecMultiHash(MultiHashState *node)
 
 		//todo renata raja - do computattion for num tuples!!!
 		//if (scan->es_scanBytes == multi_join_chunk_tup || scan->es_scanBytes  == node->currChunk->tuples) {
-		if ((multi_join_tuple_count && scan->es_scanBytes == multi_join_chunk_tup )|| scan->es_scanBytes  == node->currChunk->tuples) {
-			node->chunkIds = bms_add_member(node->chunkIds, (int)ChunkGetID(node->currChunk));
-			break;
-		}
+
+//		if(multi_join_tuple_count){
+//		if (scan->es_scanBytes == multi_join_chunk_tup )|| scan->es_scanBytes  == node->currChunk->tuples) {
+//			node->chunkIds = bms_add_member(node->chunkIds, (int)ChunkGetID(node->currChunk));
+//			break;
+//		}
+//		}
 
 
 	}
