@@ -341,12 +341,12 @@ MultiExecMultiHash(MultiHashState *node)
 	ExprContext *econtext;
 	uint32		hashvalue;
 	ListCell *lc;
-	int tuples = 0;
+
 		/* must provide our own instrumentation support */
 
 
 	Assert(node->currChunk != NULL);
-
+	Assert (node->currChunk->tuples == 0);
 
 
 	if (node->hstate.ps.instrument)
@@ -363,7 +363,7 @@ MultiExecMultiHash(MultiHashState *node)
 	seqScan = (SeqScanState *) outerNode;
 	scanDesc = 	(HeapScanDescData *)seqScan->ss_currentScanDesc;
 
-	printf("Starting seq scan at : %d  for %d blocks ", scanDesc->rs_startblock, scanDesc->num_total_blocks );
+	printf("Starting seq scan at : %d  for %d blocks  \n", scanDesc->rs_startblock, scanDesc->num_total_blocks );
 	/*
 	 * get all inner tuples and insert into the hash table (or temp files)
 	 */
@@ -398,21 +398,17 @@ MultiExecMultiHash(MultiHashState *node)
 
 //			continue;
 //			}
-			printf("got null with %d tuples read  \n", scan->es_scanBytes);
-			fflush(stdout);
 
 		//	return NULL;
 			break;
 
 		}
-
+		node->currChunk->tuples++;
 		node->started = true;
-		tuples++;
 		/* We have to compute the hash value */
 		econtext->ecxt_innertuple = slot;
 
 		mtuple = ExecFetchSlotMinimalTuple(slot);
-		scan->es_scanBytes++;
 
 		hashTuple = JC_StoreMinmalTuple(node->currChunk,mtuple);
 
@@ -462,28 +458,17 @@ MultiExecMultiHash(MultiHashState *node)
 
 		}
 
-		//todo renata raja - do computattion for num tuples!!!
-		//if (scan->es_scanBytes == multi_join_chunk_tup || scan->es_scanBytes  == node->currChunk->tuples) {
-
-//		if(multi_join_tuple_count){
-//		if (scan->es_scanBytes == multi_join_chunk_tup )|| scan->es_scanBytes  == node->currChunk->tuples) {
-//			node->chunkIds = bms_add_member(node->chunkIds, (int)ChunkGetID(node->currChunk));
-//			break;
-//		}
-//		}
-
 
 	}
 
 
-	node->currChunk->tuples = tuples;
+
 
 	node->currChunk->state = CH_READ;
 	node->chunkIds = bms_add_member(node->chunkIds,(int) ChunkGetID(node->currChunk));
 
 
 	node->lchunks = lappend(node->lchunks , node->currChunk);
-	scan->es_scanBytes = 0;
 
 
 //	foreach(lc,node->all_hashkeys) {
@@ -577,7 +562,6 @@ ExecInitMultiHash(MultiHash *node, EState *estate, int eflags)
 
 
 
-	scanNode->es_scanBytes  = 0;
 //	pprint(node->hash.plan.targetlist);
 	/*
 	 * initialize tuple type. no need to initialize projection info because

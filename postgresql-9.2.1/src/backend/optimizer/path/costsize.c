@@ -101,7 +101,6 @@ double		cpu_operator_cost = DEFAULT_CPU_OPERATOR_COST;
 int			effective_cache_size = DEFAULT_EFFECTIVE_CACHE_SIZE;
 int			multi_join_cache_size = 1024;
 int			multi_join_chunk_size = 1024;
-int			multi_join_chunk_tup= 1000;
 /* renata - increased the value */
 Cost		disable_cost = 1.0e20;
 
@@ -121,7 +120,6 @@ bool		enable_mergejoin = true;
 bool		enable_hashjoin = true;
 bool		enable_mhashjoin = false;
 bool		enable_multi_join = false;
-bool		multi_join_tuple_count=false;
 
 /* renata
  * Should we enable Smooth Scan Operator

@@ -889,16 +889,6 @@ static struct config_bool ConfigureNamesBool[] =
 		NULL, NULL, NULL
 	},
 	{
-		{"multi_join_tuple_count", PGC_USERSET, QUERY_TUNING_METHOD,
-			gettext_noop("Enables the planner's use of Mhash join plans."),
-			NULL
-		},
-		&multi_join_tuple_count,
-		false,
-		NULL, NULL, NULL
-	},
-
-	{
 		{"geqo", PGC_USERSET, QUERY_TUNING_GEQO,
 			gettext_noop("Enables genetic query optimization."),
 			gettext_noop("This algorithm attempts to do planning without "
@@ -1896,20 +1886,6 @@ static struct config_int ConfigureNamesInt[] =
 		1024, 64, INT_MAX / 2,
 		NULL, NULL, NULL
 	},
-	{
-
-		{"multi_join_chunk_tup", PGC_USERSET, RESOURCES_MEM,
-			gettext_noop("Sets the maximum  memory to be used for multijoin cache."),
-			gettext_noop("This much memory can be used by each smooth  internal "
-											 " hash table before switching to "
-											 "temporary disk files."),
-			GUC_UNIT_KB
-		},
-		&multi_join_chunk_tup,
-		1024, 64, INT_MAX / 2,
-		NULL, NULL, NULL
-	},
-
 	{
 		{"smooth_work_mem", PGC_USERSET, RESOURCES_MEM,
 			gettext_noop("Sets the maximum shared memory to be used for smooth scans."),
