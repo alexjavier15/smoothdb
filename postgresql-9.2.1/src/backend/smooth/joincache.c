@@ -196,6 +196,7 @@ void JC_dropChunk(RelChunk *chunk) {
 	chunk->tupledata = NULL;
 	chunk->priority = 0;
 	chunk->freespace = MAXALIGN(chunk_size);
+	chunk->tuples = 0;
 	JC_removeChunk( chunk);
 	JC_AddChunkMemoryContext(chunk->mcxt);
 

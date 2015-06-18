@@ -341,6 +341,7 @@ MultiExecMultiHash(MultiHashState *node)
 	ExprContext *econtext;
 	uint32		hashvalue;
 	ListCell *lc;
+	int tuples = 0;
 		/* must provide our own instrumentation support */
 
 
@@ -406,7 +407,7 @@ MultiExecMultiHash(MultiHashState *node)
 		}
 
 		node->started = true;
-
+		tuples++;
 		/* We have to compute the hash value */
 		econtext->ecxt_innertuple = slot;
 
@@ -471,8 +472,8 @@ MultiExecMultiHash(MultiHashState *node)
 
 	}
 
-	if(hashtable && node->currChunk->state == CH_WAITTING)
-		node->currChunk->tuples = hashtable->totalTuples;
+
+	node->currChunk->tuples = tuples;
 
 	node->currChunk->state = CH_READ;
 	node->chunkIds = bms_add_member(node->chunkIds,(int) ChunkGetID(node->currChunk));
@@ -494,6 +495,8 @@ MultiExecMultiHash(MultiHashState *node)
 //		fflush(stdout);
 //
 //	}
+	printf("\nTotal tuples for hashtable %d  : %d \n", node->currChunk->tuples);
+	fflush(stdout);
 
 	/*
 	 * We do not return the hash table directly because it's not a subtype of
