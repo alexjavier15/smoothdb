@@ -214,9 +214,7 @@ heapgetpage(HeapScanDesc scan, BlockNumber page)
 	ItemId		lpp;
 	bool		all_visible;
 
-//	Assert(page < scan->rs_nblocks);
-	if(page >= scan->rs_nblocks)
-	elog(ERROR, "Invalid page %d  / %d\n ",page,scan->rs_nblocks);
+	Assert(page < scan->rs_nblocks);
 
 
 	/* release previous scan buffer, if any */
@@ -799,10 +797,7 @@ heapgettup_pagemode(HeapScanDesc scan,
 			page++;
 			if(enable_multi_join){
 				finished = (page - scan->rs_startblock == scan->num_total_blocks);
-				if(finished ){
 
-					printf("finished scan -> start_blk : %d,  num_total_blocks : %d ", scan->rs_startblock ,scan->num_total_blocks);
-				}
 			}else{
 
 				if (page >= scan->rs_nblocks)
