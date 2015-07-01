@@ -17,6 +17,10 @@
 #include "nodes/execnodes.h"
 #include "smooth/joincache.h"
 
+typedef struct MHASH_ITER
+{
+	uint32 elemindex;
+} MHASH_ITER;
 
 extern HashState *ExecInitHash(Hash *node, EState *estate, int eflags);
 extern HashState *
@@ -26,6 +30,8 @@ extern TupleTableSlot *ExecHash(HashState *node);
 extern TupleTableSlot *ExecMultiHash(MultiHashState *node);
 extern Node *MultiExecHash(HashState *node);
 extern Node *MultiExecMultiHash(MultiHashState *node);
+extern void
+ExecMultiHashTablesDestroy(MultiHashState * mhstate, int chunkidx);
 extern void ExecEndHash(HashState *node);
 extern void ExecReScanHash(HashState *node);
 
@@ -93,5 +99,7 @@ extern void ExecMultiHashCreateHashTables(MultiHashState * mhstate);
 extern HashInfo *  add_hashinfo(MultiHashState *mhstate , List * clauses, List *hoperators, Bitmapset *relids);
 extern HashInfo *GetUniqueHashInfo (MultiHashState *mhstate , List * clauses, List *hoperators, bool *found);
 extern void ExecChooseHashInfo(MultiHashState *node , HashInfo **hinfo, List *hashkeys, List * hoperators);
+
+extern void ExecMultiHashResetHashTables(MultiHashState * mhstate, int chunkidx);
 
 #endif   /* NODEHASH_H */

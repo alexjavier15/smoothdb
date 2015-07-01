@@ -1238,9 +1238,14 @@ static void ExecMultiJoinGetNewChunk(MultiJoinState * mhjoinstate) {
 
 		JC_InitChunkMemoryContext(chunk, toDrop);
 		if (toDrop != NULL && toDrop->state == CH_DROPPED) {
+			MultiHashState *dropped_mhstate = mhjoinstate->mhashnodes[ChunkGetRelid(toDrop)];
+			dropped_mhstate->lchunks = list_delete(dropped_mhstate->lchunks, toDrop);
+			dropped_mhstate->hasDropped = true;
+			if (ChunkGetRelid(toDrop) == ChunkGetRelid(chunk))
 
-			mhstate->lchunks = list_delete_first(mhstate->lchunks);
-			mhstate->hasDropped = true;
+				ExecMultiHashResetHashTables(dropped_mhstate, ChunkGetID(toDrop));
+			else
+				ExecMultiHashTablesDestroy(dropped_mhstate, ChunkGetID(toDrop));
 
 		}
 		break;
@@ -1482,6 +1487,9 @@ static RelChunk * ExecMultiJoinChooseDroppedChunk(MultiJoinState * mhjoinstate, 
 			}
 
 			toDrop = ExecSortChuks(chunk_array, list_length(chunks));
+
+			// Don't delete! Implementation for choosing a lowet priority chunk
+			// from the same relation as the new chunk
 			foreach( lc,chunks) {
 
 				RelChunk *chunk = lfirst(lc);
@@ -1490,6 +1498,12 @@ static RelChunk * ExecMultiJoinChooseDroppedChunk(MultiJoinState * mhjoinstate, 
 						ChunkGetID(chunk),
 						chunk->priority);
 				fflush(stdout);
+
+				if (chunk->priority		== toDrop->priority
+						&& ChunkGetRelid(chunk) == ChunkGetRelid(newChunk)) {
+
+					toDrop = chunk;
+				}
 				chunk->priority = 0;
 
 			}

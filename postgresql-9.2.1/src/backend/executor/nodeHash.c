@@ -68,6 +68,7 @@ static void ExecMHashDumpBatch(MJoinTable hashtable);
 static TupleTableSlot *  ExecMJoinGetNextTuple(HashState *hashtable);
 static MinimalTuple copyMinmalTuple(MultiHashState *mhstate , MinimalTuple mtuple);
 static void ExecMultiHashAllocateHashtable(SimpleHashTable hashtable);
+static void ExecMultiHashResetHashTable(SimpleHashTable hashtable);
 
 /* ----------------------------------------------------------------
  *	Alex: Return and insert one tuple from  the outer node scan
@@ -3095,5 +3096,117 @@ static void ExecMultiHashAllocateHashtable(SimpleHashTable hashtable) {
 	 */
 
 	MemoryContextSwitchTo(oldcxt);
+
+}
+/* ----------------------------------------------------------------
+ *		ExecMultiHashTablesDestroy
+ *
+ *		destroy a hash table array in the per chunk hash table array
+ * ----------------------------------------------------------------
+ */
+void
+ExecMultiHashTablesDestroy(MultiHashState * mhstate, int chunkidx)
+{
+	SimpleHashTable * hashtable_array = mhstate->chunk_hashables[chunkidx]; // hashtable array for chunkidx
+	int num_hashkeys = list_length(mhstate->all_hashkeys);
+	int hkidx = 0;   // hahskey 0 -index
+
+	for (hkidx = 0; hkidx < num_hashkeys; hkidx++) {
+
+		SimpleHashTable hashtable = hashtable_array[hkidx];
+		MemoryContextDelete(hashtable->hashCxt);
+		hashtable_array[hkidx] = NULL;
+		hashtable->spaceUsed = 0;
+		hashtable->totalTuples = 0;
+
+	}
+
+//	MemoryContextStats(CurrentMemoryContext);
+
+
+
+}
+//JoinTuple MultiHash_get_next(SimpleHashTable *hashp, MHASH_ITER * iter){
+//
+//
+//	Size		elementSize;
+//	JoinTuple firstElement;
+//	JoinTuple nextElement;
+//	MinimalTuple hashentry;
+//	int nelem = hashp->nbuckets *NTUP_PER_BUCKET;
+//
+//
+//	elementSize = MAXALIGN(sizeof(JoinTupleData));
+//
+//	for(;;){
+//		if (iter->elemindex > nelem)
+//			return NULL;
+//
+//		firstElement = hashp->firstElement;
+//
+//		nextElement =(JoinTuple) ((char *)firstElement + (iter->elemindex * elementSize));
+//		iter->elemindex++;
+//
+//		hashentry =  nextElement->mtuple;
+//
+//		if (hashentry != NULL)
+//			return nextElement;
+//
+//
+//
+//	}
+//
+//	return NULL;
+//
+//}
+
+static void ExecMultiHashResetHashTable(SimpleHashTable hashtable){
+
+	int i;
+	Size elementSize;
+	JoinTuple firstElement = hashtable->firstElement;
+	JoinTuple tmpElement;
+	JoinTuple prevElement;
+	int nelem = hashtable->nbuckets *NTUP_PER_BUCKET;
+	//int nbuckets = hashtable->nbuckets;
+
+	prevElement = NULL;
+	tmpElement = firstElement;
+
+	elementSize = MAXALIGN(sizeof(JoinTupleData));
+
+	// relink all the elements in the freelist setting its contents to NULL
+	for (i = 0; i < nelem; i++) {
+		MemSet(tmpElement,0, elementSize);
+		tmpElement->next = prevElement;
+		prevElement = tmpElement;
+		tmpElement = (JoinTuple) (((char *) tmpElement) + elementSize);
+	}
+//	for (i = 0; i < nbuckets; i++) {
+//		hashtable->buckets[i]= NULL;
+//		}
+	// restet de bucket array
+	MemSet(hashtable->buckets, 0 ,hashtable->nbuckets * sizeof(JoinTuple));
+	hashtable->freeList = prevElement;
+	hashtable->spaceUsed = 0;
+	hashtable->totalTuples = 0;
+}
+
+void ExecMultiHashResetHashTables(MultiHashState * mhstate, int chunkidx){
+
+	SimpleHashTable * hashtable_array = mhstate->chunk_hashables[chunkidx]; // hashtable array for chunkidx
+	int num_hashkeys = list_length(mhstate->all_hashkeys);
+	int hkidx = 0; // hahskey 0 -index
+
+
+	printf(" Recycling hash table\n");
+	for (hkidx = 0; hkidx < num_hashkeys; hkidx++) {
+
+		SimpleHashTable hashtable = hashtable_array[hkidx];
+		ExecMultiHashResetHashTable(hashtable);
+		hashtable_array[hkidx] = NULL;
+
+	}
+
 
 }
