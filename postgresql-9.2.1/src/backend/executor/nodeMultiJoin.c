@@ -56,6 +56,7 @@ static RelChunk * ExecMerge(RelChunk ** chunk_array, int size, int m);
 static RelChunk * ExecSortChuks(RelChunk ** chunk_array, int size);
 static Selectivity ExecGetSelectivity(Instrumentation *instrument);
 static CHashJoinState * ExecChoseBestPlan(MultiJoinState *node);
+static void ExecCleanInfeasibleSubplans(MultiJoinState *node);
 
 TupleTableSlot * /* return: a tuple or NULL */
 ExecCHashJoin(CHashJoinState *node) {
@@ -457,28 +458,30 @@ ExecMultiJoin(MultiJoinState *node) {
 
 				node->js.ps.state->started = true;
 				if (TupIsNull(slot)) {
-					ListCell *lc;
-					ListCell *pc;
+		//			ListCell *lc;
+	//				ListCell *pc;
 					ChunkedSubPlan *curr_subplan =  linitial(node->chunkedSubplans);
-					int i;
+//					int i;
 					ExecMultiJoinEndSubPlan(node,curr_subplan);
 					pfree( curr_subplan);
-					printf("GOT NULL TUPLE :processed tuples ");
-							"//%.0f!\n",
+					printf("\nGOT NULL TUPLE :processed tuples \n");
+//							"//%.0f!\n",
 //							node->js.ps.state->unique_instr[0].tuplecount);
 
 					node->mhj_JoinState = MHJ_NEED_NEW_SUBPLAN;
 					printf("----------------------------------\n");
 
-					for (i = 1; i < node->hashnodes_array_size - 1; i++) {
-						show_instrumentation_count_b(&node->js.ps.state->unique_instr[i]);
-					}
-					InstrEndLoop(node->js.ps.state->unique_instr);
+//					for (i = 1; i < node->hashnodes_array_size - 1; i++) {
+//						show_instrumentation_count_b(&node->js.ps.state->unique_instr[i]);
+//					}
+//					InstrEndLoop(node->js.ps.state->unique_instr);
 					printf(":----------------------------------\nTotal Subplan stats\n");
 					show_instrumentation_count(&node->js.ps.state->unique_instr[0]);
-					printf(":----------------------------------\n");
+					printf(":-------------END---------------------\n");
 
 					{
+						ExecCleanInfeasibleSubplans(node);
+
 //						CHashJoinState *best_plan= ExecChoseBestPlan(node);
 //						if (best_plan) {
 //
@@ -1084,7 +1087,7 @@ static void ExecSetSeqNumber(CHashJoinState * chjoinstate, EState *estate) {
 
 }
 
-static void ExecMultiJoinCleanUpChunk(MultiJoinState * mhjoinstate, MultiHashState *mhstate) {
+static void ExecMultiJoinCleanUpChunk(MultiJoinState * mhjoinstate,MultiHashState *mhstate) {
 	Bitmapset *tmpset;
 	ListCell *lc;
 	List *freelist = NIL;
@@ -1146,7 +1149,7 @@ static void ExecPrepareChunk(MultiJoinState * mhjoinstate, MultiHashState *mhsta
 	scan = 	(HeapScanDescData *)outerNode->ss_currentScanDesc;
 	scan->num_total_blocks = chunk->numBlocks;
 	scan->rs_startblock = ChunkGetID(chunk)*  multi_join_chunk_size * 1024L / BLCKSZ;
-	//scan->rs_inited = false;
+	scan->rs_inited = false;
 
 	if (chunk->state != CH_READ)
 		(void) MultiExecProcNode((PlanState *) mhstate);
@@ -1645,14 +1648,68 @@ static RelChunk * ExecSortChuks(RelChunk ** chunk_array, int size) {
 	return ExecMerge(chunk_array, size, m);
 
 }
-// static void ExecCleanInfeasibleSubplans(MultiJoinState *node){
-//	int i = 1;
-//	int join_lvl = 0;
-//	for (i = 1; i < node->hashnodes_array_size - 1; i++) {
-//		show_instrumentation_count_b(&node->js.ps.state->unique_instr[i]);
-//
-//		if(node->js.ps.state->unique_instr[i].)
-//	}
-//
-//
-// }
+ static void ExecCleanInfeasibleSubplans(MultiJoinState *node){
+	int start = node->hashnodes_array_size - 2 ; // reverse order
+	int i = 0;
+	int njoin_rel = 0;
+	for (i = start; i >= 1; i--) {
+		show_instrumentation_count_b(&node->js.ps.state->unique_instr[i]);
+
+		// Detected a join who has produced zero tuples
+		if (node->js.ps.state->unique_instr[i].ntuples == 0.0) {
+
+			njoin_rel = node->hashnodes_array_size - i;
+
+			break;
+		}
+	}
+
+	// if we detected un infaisible join extract the relations
+	if (njoin_rel) {
+		ListCell *lc;
+
+		ChunkedSubPlan *p_subplan = makeNode(ChunkedSubPlan);
+		ChunkedSubPlan * subplan = NULL;
+		List *endSubplans = NIL;
+
+		int i = 0;
+
+		printf("Pending subplans before clean up: %d\n",
+							list_length(node->pendingSubplans));
+		foreach(lc,node->current_ps->plan_relids) {
+
+			// add the cunrrent chunks not producing tuples
+			p_subplan->chunks = lappend(p_subplan->chunks, node->mhashnodes[lfirst_int(lc)]->currChunk);
+			i++;
+			if (i == njoin_rel)
+				break;
+		}
+
+
+		foreach(lc,node->pendingSubplans) {
+			List *lchunks = NIL;
+			subplan = lfirst(lc);
+			lchunks = list_difference(p_subplan->chunks, subplan->chunks);
+			if (lchunks == NIL) {
+				pprint(subplan);
+				endSubplans = lappend(endSubplans, subplan);
+
+			}
+
+		}
+		if (endSubplans != NIL) {
+			foreach(lc,endSubplans) {
+				subplan = lfirst(lc);
+				ExecMultiJoinEndSubPlan(node, subplan);
+
+			}
+			list_free(endSubplans);
+
+			printf("Pending subplans after clean up: %d\n",
+					list_length(node->pendingSubplans));
+
+
+		}
+	}
+
+}
