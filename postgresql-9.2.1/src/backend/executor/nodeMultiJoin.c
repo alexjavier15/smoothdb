@@ -482,6 +482,7 @@ ExecMultiJoin(MultiJoinState *node) {
 					printf(":-------------END---------------------\n");
 
 					{
+						if(enable_cleaning_subplan)
 						ExecCleanInfeasibleSubplans(node);
 
 //						CHashJoinState *best_plan= ExecChoseBestPlan(node);
