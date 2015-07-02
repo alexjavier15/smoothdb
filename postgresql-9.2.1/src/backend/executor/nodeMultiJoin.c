@@ -1134,10 +1134,10 @@ static void ExecPrepareChunk(MultiJoinState * mhjoinstate, MultiHashState *mhsta
 	fflush(stdout);
 
 	mhstate->currChunk = chunk;
-	if (chunk->state == CH_DROPPED) {
-
-		ExecResetMultiHashtable(mhstate, mhstate->chunk_hashables[ChunkGetID(chunk)]);
-	}
+//	if (chunk->state == CH_DROPPED) {
+//
+//		ExecResetMultiHashtable(mhstate, mhstate->chunk_hashables[ChunkGetID(chunk)]);
+//	}
 	//before we read data we have to set starting point of the block
 	/*
 	 * get state info from node
@@ -1241,10 +1241,11 @@ static void ExecMultiJoinGetNewChunk(MultiJoinState * mhjoinstate) {
 			MultiHashState *dropped_mhstate = mhjoinstate->mhashnodes[ChunkGetRelid(toDrop)];
 			dropped_mhstate->lchunks = list_delete(dropped_mhstate->lchunks, toDrop);
 			dropped_mhstate->hasDropped = true;
-			if (ChunkGetRelid(toDrop) == ChunkGetRelid(chunk))
+			if (ChunkGetRelid(toDrop) == ChunkGetRelid(chunk)){
 
 				ExecMultiHashResetHashTables(dropped_mhstate, ChunkGetID(toDrop));
-			else
+				mhstate->chunk_hashables[ChunkGetID(chunk)]=mhstate->chunk_hashables[ChunkGetID(toDrop)];
+			}else
 				ExecMultiHashTablesDestroy(dropped_mhstate, ChunkGetID(toDrop));
 
 		}

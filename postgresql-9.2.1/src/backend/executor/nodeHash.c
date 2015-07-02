@@ -3065,7 +3065,7 @@ static void ExecMultiHashAllocateHashtable(SimpleHashTable hashtable) {
 
 
 	oldcxt = MemoryContextSwitchTo(hashtable->hashCxt);
-	//printf(" created hashtable with %d buckets", hashtable->nbuckets);
+	printf(" Allocating hashtable with %d buckets", hashtable->nbuckets);
 	hashtable->buckets = (JoinTuple *) palloc0(hashtable->nbuckets * sizeof(JoinTuple));
 
 	elementSize = MAXALIGN(sizeof(JoinTupleData));
@@ -3174,10 +3174,10 @@ static void ExecMultiHashResetHashTable(SimpleHashTable hashtable){
 	tmpElement = firstElement;
 
 	elementSize = MAXALIGN(sizeof(JoinTupleData));
-
+	memset(tmpElement,0, nelem * elementSize);
 	// relink all the elements in the freelist setting its contents to NULL
 	for (i = 0; i < nelem; i++) {
-		MemSet(tmpElement,0, elementSize);
+
 		tmpElement->next = prevElement;
 		prevElement = tmpElement;
 		tmpElement = (JoinTuple) (((char *) tmpElement) + elementSize);
@@ -3186,7 +3186,7 @@ static void ExecMultiHashResetHashTable(SimpleHashTable hashtable){
 //		hashtable->buckets[i]= NULL;
 //		}
 	// restet de bucket array
-	MemSet(hashtable->buckets, 0 ,hashtable->nbuckets * sizeof(JoinTuple));
+	memset(hashtable->buckets, 0 ,hashtable->nbuckets * sizeof(JoinTuple));
 	hashtable->freeList = prevElement;
 	hashtable->spaceUsed = 0;
 	hashtable->totalTuples = 0;
@@ -3204,7 +3204,7 @@ void ExecMultiHashResetHashTables(MultiHashState * mhstate, int chunkidx){
 
 		SimpleHashTable hashtable = hashtable_array[hkidx];
 		ExecMultiHashResetHashTable(hashtable);
-		hashtable_array[hkidx] = NULL;
+
 
 	}
 
