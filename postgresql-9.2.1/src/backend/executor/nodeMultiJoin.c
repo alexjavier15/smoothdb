@@ -1684,6 +1684,7 @@ static RelChunk * ExecSortChuks(RelChunk ** chunk_array, int size) {
 			if (i == njoin_rel)
 				break;
 		}
+		printf("Not producing tuples chunks :\n");
 		pprint(p_subplan);
 
 		foreach(lc,node->pendingSubplans) {
@@ -1691,6 +1692,7 @@ static RelChunk * ExecSortChuks(RelChunk ** chunk_array, int size) {
 			subplan = lfirst(lc);
 			lchunks = list_difference(p_subplan->chunks, subplan->chunks);
 			if (lchunks == NIL) {
+				printf("Preparing for cleaning subplan with zero tuples:\n");
 				pprint(subplan);
 				endSubplans = lappend(endSubplans, subplan);
 
