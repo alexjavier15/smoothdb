@@ -430,7 +430,9 @@ ExecMultiJoin(MultiJoinState *node) {
 				node->mhj_JoinState = MHJ_NEED_NEW_SUBPLAN;
 
 			case MHJ_NEED_NEW_SUBPLAN: {
+
 				ChunkedSubPlan *subplan = ExecMultiJoinGetNewSubplan(node);
+				InstrStartNode(node->js.ps.state->unique_instr);
 				if (subplan == NULL) {
 
 					node->mhj_JoinState = MHJ_NEED_NEW_CHUNK;
@@ -453,7 +455,7 @@ ExecMultiJoin(MultiJoinState *node) {
 				node->mhj_JoinState = MHJ_BUILD_SUBPLANS;
 				break;
 			case MHJ_EXEC_JOIN: {
-				InstrStartNode(node->js.ps.state->unique_instr);
+
 				TupleTableSlot * slot = ExecProcNode(node->current_ps);
 
 				node->js.ps.state->started = true;
