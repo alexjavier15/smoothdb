@@ -1684,7 +1684,7 @@ static RelChunk * ExecSortChuks(RelChunk ** chunk_array, int size) {
 			if (i == njoin_rel)
 				break;
 		}
-
+		pprint(p_subplan);
 
 		foreach(lc,node->pendingSubplans) {
 			List *lchunks = NIL;
@@ -1705,11 +1705,9 @@ static RelChunk * ExecSortChuks(RelChunk ** chunk_array, int size) {
 			}
 			list_free(endSubplans);
 
-			printf("Pending subplans after clean up: %d\n",
-					list_length(node->pendingSubplans));
-
-
 		}
+		printf("Pending subplans after clean up: %d\n",
+						list_length(node->pendingSubplans));
 	}
 
 }
