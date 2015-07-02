@@ -474,7 +474,7 @@ ExecMultiJoin(MultiJoinState *node) {
 //					for (i = 1; i < node->hashnodes_array_size - 1; i++) {
 //						show_instrumentation_count_b(&node->js.ps.state->unique_instr[i]);
 //					}
-//					InstrEndLoop(node->js.ps.state->unique_instr);
+					InstrEndLoop(node->js.ps.state->unique_instr);
 					printf(":----------------------------------\nTotal Subplan stats\n");
 					show_instrumentation_count(&node->js.ps.state->unique_instr[0]);
 					printf(":-------------END---------------------\n");
