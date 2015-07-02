@@ -212,7 +212,7 @@ MemoryContext JC_GetChunkMemoryContext(void) {
 	/* use volatile pointer to prevent code rearrangement */
 	volatile JCacheMemHeader *jcacheSegHdr = JCacheSegHdr;
 	MemoryContext result;
-	jcacheSegHdr->isFull = false;
+
 	if (list_length(jcacheSegHdr->freeList) == 0) {
 		jcacheSegHdr->isFull = true;
 		return NULL;

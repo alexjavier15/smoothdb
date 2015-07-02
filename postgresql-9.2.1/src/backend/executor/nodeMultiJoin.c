@@ -1233,8 +1233,11 @@ static void ExecMultiJoinGetNewChunk(MultiJoinState * mhjoinstate) {
 			toDrop = ExecMultiJoinChooseDroppedChunk(mhjoinstate, chunk);
 		}
 
-		if (toDrop == NULL)
+		if ((toDrop == NULL) && JC_isFull()){
+			JC_removeChunk(chunk);
 			continue;
+		}
+
 
 		JC_InitChunkMemoryContext(chunk, toDrop);
 		if (toDrop != NULL && toDrop->state == CH_DROPPED) {
@@ -1450,7 +1453,7 @@ static RelChunk * ExecMultiJoinChooseDroppedChunk(MultiJoinState * mhjoinstate, 
 				ChunkGetRelid(newChunk),
 				ChunkGetID(newChunk));
 		fflush(stdout);
-		JC_removeChunk(newChunk);
+
 
 
 		return NULL;
