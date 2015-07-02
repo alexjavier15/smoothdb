@@ -468,11 +468,11 @@ ExecMultiJoin(MultiJoinState *node) {
 //							node->js.ps.state->unique_instr[0].tuplecount);
 
 					node->mhj_JoinState = MHJ_NEED_NEW_SUBPLAN;
-//					printf("----------------------------------\n");
-//
-//					for (i = 1; i < node->hashnodes_array_size - 1; i++) {
-//						show_instrumentation_count_b(&node->js.ps.state->unique_instr[i]);
-//					}
+					printf("----------------------------------\n");
+
+					for (i = 1; i < node->hashnodes_array_size - 1; i++) {
+						show_instrumentation_count_b(&node->js.ps.state->unique_instr[i]);
+					}
 					InstrEndLoop(node->js.ps.state->unique_instr);
 					printf(":----------------------------------\nTotal Subplan stats\n");
 					show_instrumentation_count(&node->js.ps.state->unique_instr[0]);
@@ -1645,3 +1645,14 @@ static RelChunk * ExecSortChuks(RelChunk ** chunk_array, int size) {
 	return ExecMerge(chunk_array, size, m);
 
 }
+// static void ExecCleanInfeasibleSubplans(MultiJoinState *node){
+//	int i = 1;
+//	int join_lvl = 0;
+//	for (i = 1; i < node->hashnodes_array_size - 1; i++) {
+//		show_instrumentation_count_b(&node->js.ps.state->unique_instr[i]);
+//
+//		if(node->js.ps.state->unique_instr[i].)
+//	}
+//
+//
+// }
