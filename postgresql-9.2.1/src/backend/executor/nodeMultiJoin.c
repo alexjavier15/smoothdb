@@ -485,8 +485,9 @@ ExecMultiJoin(MultiJoinState *node) {
 
 
 					if (node->js.ps.state->unique_instr->ntuples ==  ntuples) {
-						InstrEndLoop(node->counter);
 						InstrStopNode(node->counter,0.0);
+						InstrEndLoop(node->counter);
+
 						printf("\n:----------------------------------\n NULL Subplan stats\n");
 
 						show_instrumentation_count(node->counter);
