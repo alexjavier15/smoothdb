@@ -1772,6 +1772,7 @@ typedef struct MultiJoinState
 	CHashJoinState		*current_ps;
 	List			*chunkedSubplans;
 	List			*pendingSubplans;
+	Instrumentation *counter;
 } MultiJoinState;
 
 typedef struct SymHashJoinState

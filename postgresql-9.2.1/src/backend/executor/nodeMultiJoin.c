@@ -416,7 +416,7 @@ ExecCHashJoin(CHashJoinState *node) {
 TupleTableSlot *
 ExecMultiJoin(MultiJoinState *node) {
 
-	Instrumentation * counter =InstrAlloc(1, INSTRUMENT_ROWS | INSTRUMENT_TIMER);
+
 	for (;;) {
 		switch (node->mhj_JoinState) {
 
@@ -442,7 +442,7 @@ ExecMultiJoin(MultiJoinState *node) {
 				}
 				node->mhj_JoinState = MHJ_EXEC_JOIN;
 				ExecMultiJoiSetSubplan(node, subplan);
-
+				InstrStartNode(node->counter);
 				break;
 
 			}
@@ -456,7 +456,7 @@ ExecMultiJoin(MultiJoinState *node) {
 				node->mhj_JoinState = MHJ_BUILD_SUBPLANS;
 				break;
 			case MHJ_EXEC_JOIN: {
-				InstrStartNode(counter);
+
 				TupleTableSlot * slot = ExecProcNode(node->current_ps);
 
 				node->js.ps.state->started = true;
@@ -482,11 +482,16 @@ ExecMultiJoin(MultiJoinState *node) {
 					show_instrumentation_count(&node->js.ps.state->unique_instr[0]);
 
 					printf(":-------------END---------------------\n");
-					printf("\n:----------------------------------\n Only Subplan stats\n");
-					InstrEndLoop(counter);
-					InstrStopNode(counter,0.0);
-					show_instrumentation_count(counter);
-					printf(":-------------END---------------------\n");
+
+
+					if (node->js.ps.state->unique_instr->ntuples == 0) {
+						InstrEndLoop(node->counter);
+						InstrStopNode(node->counter,0.0);
+						printf("\n:----------------------------------\n NULL Subplan stats\n");
+
+						show_instrumentation_count(node->counter);
+						printf(":-------------END---------------------\n");
+					}
 
 					{
 						if(enable_cleaning_subplan)
@@ -870,6 +875,7 @@ ExecInitMultiJoin(MultiJoin *node, EState *estate, int eflags) {
 
 	mhjstate->mhj_JoinState = MHJ_BUILD_SUBPLANS;
 	ExecInitJoinCache(mhjstate);
+	mhjstate->counter =InstrAlloc(1, INSTRUMENT_ROWS | INSTRUMENT_TIMER);
 
 	return mhjstate;
 }
