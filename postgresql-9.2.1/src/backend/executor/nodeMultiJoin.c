@@ -984,7 +984,7 @@ void ExecEndMultiJoin(MultiJoinState *node) {
 	/*
 	 * Free the exprcontext
 	 */
-	MemoryContextStats(TopMemoryContext);
+	//MemoryContextStats(TopMemoryContext);
 	ExecFreeExprContext(&node->js.ps);
 	for (i = 1; i < node->hashnodes_array_size; i++) {
 
