@@ -416,6 +416,7 @@ ExecCHashJoin(CHashJoinState *node) {
 TupleTableSlot *
 ExecMultiJoin(MultiJoinState *node) {
 
+	Instrumentation * counter =InstrAlloc(1, INSTRUMENT_ROWS | INSTRUMENT_TIMER);
 	for (;;) {
 		switch (node->mhj_JoinState) {
 
@@ -455,7 +456,7 @@ ExecMultiJoin(MultiJoinState *node) {
 				node->mhj_JoinState = MHJ_BUILD_SUBPLANS;
 				break;
 			case MHJ_EXEC_JOIN: {
-
+				InstrStartNode(counter);
 				TupleTableSlot * slot = ExecProcNode(node->current_ps);
 
 				node->js.ps.state->started = true;
@@ -478,6 +479,11 @@ ExecMultiJoin(MultiJoinState *node) {
 //					}
 					InstrEndLoop(node->js.ps.state->unique_instr);
 					printf(":----------------------------------\nTotal Subplan stats\n");
+					show_instrumentation_count(&node->js.ps.state->unique_instr[0]);
+
+					printf(":-------------END---------------------\n");
+					printf("\n:----------------------------------\n Only Subplan stats\n");
+					InstrStopNode(counter,0.0);
 					show_instrumentation_count(&node->js.ps.state->unique_instr[0]);
 					printf(":-------------END---------------------\n");
 
@@ -517,7 +523,7 @@ ExecMultiJoin(MultiJoinState *node) {
 //					fflush(stdout);
 				}
 				InstrStopNode(&node->js.ps.state->unique_instr[0], 1.0);
-
+				InstrStopNode(counter,1.0);
 
 				return slot;
 			}
