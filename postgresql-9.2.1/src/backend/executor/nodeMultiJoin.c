@@ -1235,6 +1235,7 @@ static void ExecMultiJoinGetNewChunk(MultiJoinState * mhjoinstate) {
 		chunk = JC_processNextChunk();
 		mhstate = mhjoinstate->mhashnodes[ChunkGetRelid(chunk)];
 
+		// Do we have any chunk to drop?
 		if (list_length(mhstate->lchunks) >= 0) {
 
 			toDrop = ExecMultiJoinChooseDroppedChunk(mhjoinstate, chunk);
@@ -1247,14 +1248,16 @@ static void ExecMultiJoinGetNewChunk(MultiJoinState * mhjoinstate) {
 
 
 		JC_InitChunkMemoryContext(chunk, toDrop);
+
+		// Cleaning stuff for dropping chunks. We handle two mean cases. If we are abouut reusing a already allocated
+		// hash table we have to
 		if (toDrop != NULL && toDrop->state == CH_DROPPED) {
 			MultiHashState *dropped_mhstate = mhjoinstate->mhashnodes[ChunkGetRelid(toDrop)];
 			dropped_mhstate->lchunks = list_delete(dropped_mhstate->lchunks, toDrop);
 			dropped_mhstate->hasDropped = true;
 			if (ChunkGetRelid(toDrop) == ChunkGetRelid(chunk) && toDrop->numBlocks >= chunk->numBlocks){
 
-				ExecMultiHashResetHashTables(dropped_mhstate, ChunkGetID(toDrop));
-				mhstate->chunk_hashables[ChunkGetID(chunk)]=dropped_mhstate->chunk_hashables[ChunkGetID(toDrop)];
+				ExecMultiHashResetHashTables(dropped_mhstate,chunk,toDrop);
 
 			}else{
 				ExecMultiHashTablesDestroy(dropped_mhstate, ChunkGetID(toDrop));

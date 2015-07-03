@@ -3165,9 +3165,10 @@ static void ExecMultiHashResetHashTable(SimpleHashTable hashtable){
 	hashtable->totalTuples = 0;
 }
 
-void ExecMultiHashResetHashTables(MultiHashState * mhstate, int chunkidx){
+void ExecMultiHashResetHashTables(MultiHashState * mhstate, RelChunk *newchunk ,RelChunk *toDrop){
 
-	SimpleHashTable * hashtable_array = mhstate->chunk_hashables[chunkidx]; // hashtable array for chunkidx
+	SimpleHashTable * dropped_htp = mhstate->chunk_hashables[ChunkGetID(toDrop)]; // hashtable array for dropped chunk
+	SimpleHashTable * newchk_htp = mhstate->chunk_hashables[ChunkGetID(newchunk)]; // hashtable array for newchunk
 	int num_hashkeys = list_length(mhstate->all_hashkeys);
 	int hkidx = 0; // hahskey 0 -index
 
@@ -3175,11 +3176,10 @@ void ExecMultiHashResetHashTables(MultiHashState * mhstate, int chunkidx){
 	printf(" Recycling hash table\n");
 	for (hkidx = 0; hkidx < num_hashkeys; hkidx++) {
 
-		SimpleHashTable hashtable = hashtable_array[hkidx];
+		SimpleHashTable hashtable = dropped_htp[hkidx];
 		ExecMultiHashResetHashTable(hashtable);
-
+		newchk_htp[hkidx] = hashtable;
 
 	}
-
 
 }

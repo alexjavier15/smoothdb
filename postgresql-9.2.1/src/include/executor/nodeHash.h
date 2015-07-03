@@ -100,6 +100,5 @@ extern HashInfo *  add_hashinfo(MultiHashState *mhstate , List * clauses, List *
 extern HashInfo *GetUniqueHashInfo (MultiHashState *mhstate , List * clauses, List *hoperators, bool *found);
 extern void ExecChooseHashInfo(MultiHashState *node , HashInfo **hinfo, List *hashkeys, List * hoperators);
 
-extern void ExecMultiHashResetHashTables(MultiHashState * mhstate, int chunkidx);
-
+extern void ExecMultiHashResetHashTables(MultiHashState * mhstate, RelChunk *newchunk ,RelChunk *toDrop);
 #endif   /* NODEHASH_H */
