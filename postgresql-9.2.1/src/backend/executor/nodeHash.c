@@ -368,6 +368,7 @@ MultiExecMultiHash(MultiHashState *node)
 	/*
 	 * get all inner tuples and insert into the hash table (or temp files)
 	 */
+	ExecReScan(outerNode);
 	for (;;)
 	{
 		MinimalTuple mtuple = NULL;
@@ -395,7 +396,7 @@ MultiExecMultiHash(MultiHashState *node)
 //			printf("CALLING RESCAN in %d scanbytes %d\n", outerNode->type, scan->es_scanBytes);
 //			fflush(stdout);
 //
-			ExecReScan(outerNode);
+
 
 //			continue;
 //			}
@@ -3065,7 +3066,7 @@ static void ExecMultiHashAllocateHashtable(SimpleHashTable hashtable) {
 
 
 	oldcxt = MemoryContextSwitchTo(hashtable->hashCxt);
-	printf(" Allocating hashtable with %d buckets", hashtable->nbuckets);
+	printf(" Allocating hashtable with %d buckets \n", hashtable->nbuckets);
 	hashtable->buckets = (JoinTuple *) palloc0(hashtable->nbuckets * sizeof(JoinTuple));
 
 	elementSize = MAXALIGN(sizeof(JoinTupleData));
@@ -3115,9 +3116,10 @@ ExecMultiHashTablesDestroy(MultiHashState * mhstate, int chunkidx)
 
 		SimpleHashTable hashtable = hashtable_array[hkidx];
 		MemoryContextDelete(hashtable->hashCxt);
-		hashtable_array[hkidx] = NULL;
+		mhstate->chunk_hashables[chunkidx][hkidx] =NULL;
 		hashtable->spaceUsed = 0;
 		hashtable->totalTuples = 0;
+		hashtable->hashCxt= NULL;
 
 	}
 

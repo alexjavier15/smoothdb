@@ -1135,7 +1135,7 @@ static void ExecPrepareChunk(MultiJoinState * mhjoinstate, MultiHashState *mhsta
 	SeqScanState  *outerNode;
 	HeapScanDescData *scan;
 	mhstate->hashable_array = mhstate->chunk_hashables[ChunkGetID(chunk)];
-	;
+	
 	printf("PREPARING rel : %d chunk : %d\n", ChunkGetRelid(chunk), ChunkGetID(chunk));
 	fflush(stdout);
 
@@ -1157,8 +1157,8 @@ static void ExecPrepareChunk(MultiJoinState * mhjoinstate, MultiHashState *mhsta
 	if (chunk->state != CH_READ)
 		(void) MultiExecProcNode((PlanState *) mhstate);
 
-	if (mhstate->needUpdate)
-		ExecMultiJoinCleanUpChunk(mhjoinstate, mhstate);
+//	if (mhstate->needUpdate)
+//		ExecMultiJoinCleanUpChunk(mhjoinstate, mhstate);
 
 	mhstate->currTuple = (MinimalTuple ) mhstate->currChunk->head;
 
@@ -1254,9 +1254,10 @@ static void ExecMultiJoinGetNewChunk(MultiJoinState * mhjoinstate) {
 
 				ExecMultiHashResetHashTables(dropped_mhstate, ChunkGetID(toDrop));
 				mhstate->chunk_hashables[ChunkGetID(chunk)]=mhstate->chunk_hashables[ChunkGetID(toDrop)];
-			}else
+			}else{
 				ExecMultiHashTablesDestroy(dropped_mhstate, ChunkGetID(toDrop));
-
+			
+			}
 		}
 		break;
 	}
@@ -1500,6 +1501,8 @@ static RelChunk * ExecMultiJoinChooseDroppedChunk(MultiJoinState * mhjoinstate, 
 
 			// Don't delete! Implementation for choosing a lowet priority chunk
 			// from the same relation as the new chunk
+
+			bool  done = false;
 			foreach( lc,chunks) {
 
 				RelChunk *chunk = lfirst(lc);
@@ -1509,10 +1512,13 @@ static RelChunk * ExecMultiJoinChooseDroppedChunk(MultiJoinState * mhjoinstate, 
 						chunk->priority);
 				fflush(stdout);
 
-				if (chunk->priority		== toDrop->priority
-						&& ChunkGetRelid(chunk) == ChunkGetRelid(newChunk)) {
+				if (  !done
+					&& (ChunkGetRelid(toDrop) != ChunkGetRelid(newChunk)) 
+					&& (chunk->priority == toDrop->priority)
+					&& (ChunkGetRelid(chunk) == ChunkGetRelid(newChunk))) {
 
 					toDrop = chunk;
+					done = true;
 				}
 				chunk->priority = 0;
 
