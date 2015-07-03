@@ -371,7 +371,7 @@ MultiExecMultiHash(MultiHashState *node)
 	/*
 	 * get all inner tuples and insert into the hash table (or temp files)
 	 */
-	ExecReScan(outerNode);
+
 	fflush(stdout);
 	for (;;)
 	{
@@ -385,27 +385,7 @@ MultiExecMultiHash(MultiHashState *node)
 
 
 		if (TupIsNull(slot)) {
-
-////			// it's our last chunk
-////			if(node->currChunk->state == CH_WAITTING && scan->es_scanBytes > 0){
-////				node->needUpdate = false;
-////
-////				break;
-////			}
-//
-//			// we are reading an dropped chunk so rescan to refill and update the supblans
-//			if(node->currChunk->state == CH_DROPPED){
-//
-//			//node->needUpdate = true;
-//			printf("CALLING RESCAN in %d scanbytes %d\n", outerNode->type, scan->es_scanBytes);
-//			fflush(stdout);
-//
-
-
-//			continue;
-//			}
-
-		//	return NULL;
+			ExecReScan(outerNode);
 			break;
 
 		}
