@@ -1253,12 +1253,13 @@ static void ExecMultiJoinGetNewChunk(MultiJoinState * mhjoinstate) {
 			if (ChunkGetRelid(toDrop) == ChunkGetRelid(chunk) && toDrop->numBlocks >= chunk->numBlocks){
 
 				ExecMultiHashResetHashTables(dropped_mhstate, ChunkGetID(toDrop));
+				mhstate->chunk_hashables[ChunkGetID(chunk)]=dropped_mhstate->chunk_hashables[ChunkGetID(toDrop)];
 
 			}else{
 				ExecMultiHashTablesDestroy(dropped_mhstate, ChunkGetID(toDrop));
-			
+				ExecResetMultiHashtable(mhstate, mhstate->chunk_hashables[ChunkGetID(chunk)]);
 			}
-			mhstate->chunk_hashables[ChunkGetID(chunk)]=dropped_mhstate->chunk_hashables[ChunkGetID(toDrop)];
+
 		}
 		break;
 	}
@@ -1706,7 +1707,9 @@ static RelChunk * ExecSortChuks(RelChunk ** chunk_array, int size) {
 				pprint(subplan);
 				endSubplans = lappend(endSubplans, subplan);
 
-			}
+			}else
+				list_free(lchunks);
+
 
 		}
 		if (endSubplans != NIL) {
@@ -1718,6 +1721,8 @@ static RelChunk * ExecSortChuks(RelChunk ** chunk_array, int size) {
 			list_free(endSubplans);
 
 		}
+		list_free(p_subplan->chunks);
+		pfree(p_subplan);
 		printf("Pending subplans after clean up: %d\n",
 						list_length(node->pendingSubplans));
 	}

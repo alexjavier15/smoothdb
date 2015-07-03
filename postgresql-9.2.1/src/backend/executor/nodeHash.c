@@ -3036,20 +3036,7 @@ void ExecResetMultiHashtable(MultiHashState *node, SimpleHashTable  * hashtables
 
 		HashInfo * hinfo = (HashInfo *) lfirst(lc);
 
-		hashtable = hashtables[hinfo->id];
-
-		MemoryContextReset(hashtable->hashCxt);
-
-
-
-		// Update hashtable info
-		hashtable->totalTuples = 0;
-		hashtable->spaceAllowed += hashtable->spaceUsed;
-
-
-		/* Allocate data that will live for the life of the multihashjoin */
-		ExecMultiHashAllocateHashtable(hashtable);
-
+		hashtable = hashtables[hinfo->id] = NULL;
 
 
 	}
