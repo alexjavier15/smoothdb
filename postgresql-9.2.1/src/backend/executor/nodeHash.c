@@ -364,11 +364,15 @@ MultiExecMultiHash(MultiHashState *node)
 	seqScan = (SeqScanState *) outerNode;
 	scanDesc = 	(HeapScanDescData *)seqScan->ss_currentScanDesc;
 
-	printf("Starting seq scan at : %d  for %d blocks  \n", scanDesc->rs_startblock, scanDesc->num_total_blocks );
+	printf("Starting seq scan at : %d  for %d blocks  \n", scanDesc->rs_startblock, 	scanDesc->num_total_blocks );
+  	node->hashable_array = node->chunk_hashables[ChunkGetID(node->currChunk)]; 
+	if(node->hashable_array[0]  == NULL)
+	printf("hashtable is NULL \n" );
 	/*
 	 * get all inner tuples and insert into the hash table (or temp files)
 	 */
 	ExecReScan(outerNode);
+	fflush(stdout);
 	for (;;)
 	{
 		MinimalTuple mtuple = NULL;
@@ -784,7 +788,7 @@ SimpleHashTable ExecChooseHashTable(MultiHashState * mhstate, List *hoperators, 
 
 	mhstate->hashable_array = mhstate->chunk_hashables[ChunkGetID(mhstate->currChunk)];
 
-	mhstate->hashable_array[idx]->totalTuples = mhstate->currChunk->tuples;
+	//mhstate->hashable_array[idx]->totalTuples = mhstate->currChunk->tuples;
 	return mhstate->hashable_array[idx];
 
 
@@ -3111,7 +3115,7 @@ ExecMultiHashTablesDestroy(MultiHashState * mhstate, int chunkidx)
 	SimpleHashTable * hashtable_array = mhstate->chunk_hashables[chunkidx]; // hashtable array for chunkidx
 	int num_hashkeys = list_length(mhstate->all_hashkeys);
 	int hkidx = 0;   // hahskey 0 -index
-
+	printf("Destryoing hash table \n");
 	for (hkidx = 0; hkidx < num_hashkeys; hkidx++) {
 
 		SimpleHashTable hashtable = hashtable_array[hkidx];
