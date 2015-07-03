@@ -1253,11 +1253,12 @@ static void ExecMultiJoinGetNewChunk(MultiJoinState * mhjoinstate) {
 			if (ChunkGetRelid(toDrop) == ChunkGetRelid(chunk) && toDrop->numBlocks >= chunk->numBlocks){
 
 				ExecMultiHashResetHashTables(dropped_mhstate, ChunkGetID(toDrop));
-				mhstate->chunk_hashables[ChunkGetID(chunk)]=dropped_mhstate->chunk_hashables[ChunkGetID(toDrop)];
+
 			}else{
 				ExecMultiHashTablesDestroy(dropped_mhstate, ChunkGetID(toDrop));
 			
 			}
+			mhstate->chunk_hashables[ChunkGetID(chunk)]=dropped_mhstate->chunk_hashables[ChunkGetID(toDrop)];
 		}
 		break;
 	}
