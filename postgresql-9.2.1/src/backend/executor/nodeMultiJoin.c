@@ -458,7 +458,7 @@ ExecMultiJoin(MultiJoinState *node) {
 			case MHJ_EXEC_JOIN: {
 
 				TupleTableSlot * slot = ExecProcNode(node->current_ps);
-
+				int ntuples =node->js.ps.state->unique_instr->ntuples;
 				node->js.ps.state->started = true;
 				if (TupIsNull(slot)) {
 		//			ListCell *lc;
@@ -484,7 +484,7 @@ ExecMultiJoin(MultiJoinState *node) {
 					printf(":-------------END---------------------\n");
 
 
-					if (node->js.ps.state->unique_instr->ntuples == 0) {
+					if (node->js.ps.state->unique_instr->ntuples ==  ntuples) {
 						InstrEndLoop(node->counter);
 						InstrStopNode(node->counter,0.0);
 						printf("\n:----------------------------------\n NULL Subplan stats\n");
