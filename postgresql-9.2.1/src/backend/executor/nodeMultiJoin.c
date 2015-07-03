@@ -484,7 +484,7 @@ ExecMultiJoin(MultiJoinState *node) {
 					printf(":-------------END---------------------\n");
 					printf("\n:----------------------------------\n Only Subplan stats\n");
 					InstrStopNode(counter,0.0);
-					show_instrumentation_count(&node->js.ps.state->unique_instr[0]);
+					show_instrumentation_count(counter);
 					printf(":-------------END---------------------\n");
 
 					{
