@@ -1286,11 +1286,10 @@ typedef enum
 } CHUNKSTATE;
 
 
-
 typedef struct RelChunk{
 	Node node;
 	uint32 chunkID;
-	MemoryContext mcxt;
+//	void * mcxt;
 	CHUNKSTATE state;
 	int		priority;
 	List	*subplans;

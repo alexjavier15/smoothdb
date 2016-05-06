@@ -1706,6 +1706,9 @@ typedef struct HashJoinTupleData *HashJoinTuple;
 typedef struct HashJoinTableData *HashJoinTable;
 
 typedef struct JoinTupleData *JoinTuple;
+
+/*hash table for a single chunk and a single hash key in mjoin ( i.e.
+ * total of  SimpleHashTable = num_chunks * num_hash_keys*/
 typedef struct SimpleHashTableData *SimpleHashTable;
 
 typedef struct MJoinTableData *MJoinTable;

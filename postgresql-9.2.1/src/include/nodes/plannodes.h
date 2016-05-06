@@ -973,6 +973,7 @@ typedef struct HashInfo{
 	List	*hoperators;
 	Selectivity sel;
 	Index	id;
+	bool	isCurrent;
 
 }HashInfo;
 #endif   /* PLANNODES_H */

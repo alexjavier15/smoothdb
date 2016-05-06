@@ -25,7 +25,8 @@
 #define ChunkGetHashKey(chunk)  ((uint32) (chunk->ch_id & 0xFFFF | chunk->relid << 16 ));
 
 List * make_random_list(int max_relid);
-MemoryContext JC_GetChunkMemoryContext(void);
+//MemoryContext JC_GetChunkMemoryContext(void);
+void * JC_GetChunkMemoryContext(void);
 static  void JC_InitChunkTuples(RelChunk * chunk);
 
  // chunks of cache for a relation */
@@ -46,7 +47,8 @@ void JC_InitCache(void){
 	int hash_tag = HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT;
 	HASHCTL * hctl = NULL;
 	StringInfoData str;
-	MemoryContext mcxt;
+	//MemoryContext mcxt;
+	void* mcxt;
 	MemoryContext parent_mcxt;
 	MemoryContext oldcxt;
 	double num_chunks;
@@ -88,14 +90,19 @@ void JC_InitCache(void){
 	initStringInfo(&str);
 	appendStringInfoString(&str, CHUNK_PREFIX);
 	printf("NUM OF ALLOCATED CHUNKS : %.0f , Free mem: %ld \n", num_chunks, JCacheSegHdr->freesize);
+	MemoryContextSwitchTo(oldcxt);
+	oldcxt = MemoryContextSwitchTo(TopMemoryContext);
 	for (i = 0; i < num_chunks; i++) {
 		appendStringInfo(&str, "%d", i);
+		/**Dynamic memory allocation for chunks
 		mcxt = AllocSetContextCreate(parent_mcxt,
 				str.data,
 				ALLOCSET_DEFAULT_MINSIZE,
 				ALLOCSET_DEFAULT_INITSIZE,
-				ALLOCSET_DEFAULT_MAXSIZE);
-
+				ALLOCSET_DEFAULT_MAXSIZE);*/
+		/*Shared memory allocation for chunks"*/
+		bool found = false;
+		mcxt = ShmemInitStruct(str.data, MAXALIGN(chunk_size), &found);
 		JC_AddChunkMemoryContext(mcxt);
 		resetStringInfo(&str);
 
@@ -176,7 +183,7 @@ void JC_dropChunk( RelChunk *chunk){
     printf("rel : %d chunk : %d , state : %d , subplans : %d\n", ChunkGetRelid(chunk),ChunkGetID(chunk), chunk->state, list_length(chunk->subplans));
 
 
-	MemoryContextReset(chunk->mcxt);
+//	MemoryContextReset(chunk->mcxt);
 	chunk->next  = NULL;
 	chunk->head  = NULL;
 	chunk->state = CH_DROPPED;
@@ -184,15 +191,16 @@ void JC_dropChunk( RelChunk *chunk){
 	chunk->priority = 0;
 	chunk->freespace = MAXALIGN(chunk_size);
 	JCacheSegHdr->chunks = list_delete(JCacheSegHdr->chunks, chunk);
-	JC_AddChunkMemoryContext(chunk->mcxt);
+	JC_AddChunkMemoryContext(chunk->tupledata);
 
 }
 
-MemoryContext JC_GetChunkMemoryContext(void){
-
+//MemoryContext JC_GetChunkMemoryContext(void){
+void * JC_GetChunkMemoryContext(void){
 	/* use volatile pointer to prevent code rearrangement */
 	volatile JCacheMemHeader *jcacheSegHdr = JCacheSegHdr;
-	MemoryContext result;
+	//MemoryContext result;
+	void * result;
 	jcacheSegHdr->isFull = false;
 	if (list_length(jcacheSegHdr->freeList) == 0) {
 		jcacheSegHdr->isFull = true;
@@ -206,7 +214,8 @@ MemoryContext JC_GetChunkMemoryContext(void){
 
 void JC_InitChunkMemoryContext(RelChunk *chunk, RelChunk * toDrop) {
 
-	MemoryContext mcxt = JC_GetChunkMemoryContext();
+	//MemoryContext * mcxt = JC_GetChunkMemoryContext();
+	void * mcxt = JC_GetChunkMemoryContext();
 
 //	volatile JCacheMemHeader *jcacheSegHdr = JCacheSegHdr;
 
@@ -218,7 +227,7 @@ void JC_InitChunkMemoryContext(RelChunk *chunk, RelChunk * toDrop) {
 	}
 	Assert(mcxt != NULL);
 
-	chunk->mcxt = mcxt;
+	chunk->tupledata = mcxt;
 	JC_InitChunkTuples(chunk);
 
 
@@ -252,8 +261,8 @@ MinimalTuple JC_StoreMinmalTuple(RelChunk *chunk , MinimalTuple mtuple){
 	return copyTuple;
 
 }
-void JC_AddChunkMemoryContext(MemoryContext mcxt) {
-
+//void JC_AddChunkMemoryContext(MemoryContext mcxt) {
+void JC_AddChunkMemoryContext(void* mcxt) {
 	/* use volatile pointer to prevent code rearrangement */
 	volatile JCacheMemHeader *jcacheSegHdr = JCacheSegHdr;
 
@@ -409,7 +418,7 @@ List *JC_isFull(void){
 static  void JC_InitChunkTuples(RelChunk * chunk){
 
 
-	chunk->tupledata = MemoryContextAlloc(chunk->mcxt, MAXALIGN(chunk_size));
+	//chunk->tupledata = MemoryContextAlloc(chunk->mcxt, MAXALIGN(chunk_size));
 	chunk->head = chunk->tupledata;
 	chunk->next = chunk->head;
 	chunk->freespace =  MAXALIGN(chunk_size);

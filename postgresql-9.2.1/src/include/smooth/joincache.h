@@ -118,7 +118,8 @@ extern void JC_AddChunkedSubPlan(ChunkedSubPlan *subplan);
 extern List *JC_GetChunkedSubPlans( RelChunk *chunk);
 extern void JC_dropChunk( RelChunk *chunk);
 extern void  JC_InitChunkMemoryContext(RelChunk *chunk, RelChunk * toDrop);
-void JC_AddChunkMemoryContext(MemoryContext mcxt);
+//void JC_AddChunkMemoryContext(MemoryContext mcxt);
+void JC_AddChunkMemoryContext(void * mcxt);
 extern RelationChunksDesc  JC_InitRelationChunks(uint32 size, Relation relation);
 extern MinimalTuple JC_StoreMinmalTuple(RelChunk *chunk , MinimalTuple mtuple);
 

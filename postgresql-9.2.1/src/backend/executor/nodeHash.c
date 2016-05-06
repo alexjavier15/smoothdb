@@ -231,6 +231,14 @@ MultiExecHash(HashState *node)
 	return NULL;
 }
 
+/**
+ * ExecMultiHash
+ * ----------------------------------------------------------------
+ * Read tuples from the join cache and insert them into the proper hash table in according
+ * to the chunk id and the join filter
+ * ----------------------------------------------------------------
+ * **/
+
 TupleTableSlot *
 ExecMultiHash(MultiHashState *node) {
 	PlanState  *outerNode;
@@ -283,30 +291,29 @@ ExecMultiHash(MultiHashState *node) {
 
 
 			foreach(lc,node->all_hashkeys) {
-
-				HashInfo * hinfo = (HashInfo *) lfirst(lc);
-
-				hashtable = node->hashable_array[hinfo->id];
-				//printf("idx : %d  ",hinfo->id );
-
-				/*
-				 * set expression context
+				/* Quick shortcut for only inserting tuples in
+				 * the current used hash table. To be reworked for join
+				 * reordering
 				 */
-				hashkeys = hinfo->hashkeys;
-				//pprint(hashkeys);
+				HashInfo * hinfo = (HashInfo *) lfirst(lc);
+				if (hinfo->isCurrent) {
+					hashtable = node->hashable_array[hinfo->id];
+					//printf("idx : %d  ",hinfo->id );
 
-				if (ExecMultiHashGetHashValue(hashtable,
-						econtext,
-						hashkeys,
-						false,
-						hashtable->keepNulls,
-						&hashvalue)) {
-					inserted = true;
-					/* Not subject to skew optimization, so insert normally */
-					ExecMultiHashTableInsert(hashtable, hashTuple, hashvalue);
-					hashtable->totalTuples += 1;
+					/*
+					 * set expression context
+					 */
+					hashkeys = hinfo->hashkeys;
+					//pprint(hashkeys);
+
+					if (ExecMultiHashGetHashValue(hashtable, econtext, hashkeys,
+					false, hashtable->keepNulls, &hashvalue)) {
+						inserted = true;
+						/* Not subject to skew optimization, so insert normally */
+						ExecMultiHashTableInsert(hashtable, hashTuple, hashvalue);
+						hashtable->totalTuples += 1;
+					}
 				}
-
 				/* must provide our own instrumentation support */
 					if (node->hstate.ps.instrument)
 						InstrStopNode(node->hstate.ps.instrument, hashtable->totalTuples);
@@ -322,12 +329,12 @@ ExecMultiHash(MultiHashState *node) {
 /* ----------------------------------------------------------------
  *		MultiExecHash
  *
- *		build hash table for hashjoin, doing partitioning if more
- *		than one batch is required.
+ *		build hash tables for MJoin. In comparison to ExecMultiHash, this method reads tuples
+ *		from the scan .
  * ----------------------------------------------------------------
  */
 Node *
-MultiExecMultiHash(MultiHashState *node)
+MultiHashFillTupleCache(MultiHashState *node)
 {
 	PlanState  *outerNode;
 	List	   *hashkeys;
@@ -405,16 +412,16 @@ MultiExecMultiHash(MultiHashState *node)
 
 		hashTuple = JC_StoreMinmalTuple(node->currChunk,mtuple);
 
-		foreach(lc,node->all_hashkeys) {
+		//The insertion now is centralized by ExecMultiHash
+
+		/*foreach(lc,node->all_hashkeys) {
 
 			HashInfo * hinfo = (HashInfo *) lfirst(lc);
 
 			hashtable = node->hashable_array[hinfo->id];
 
 
-			/*
-			 * set expression context
-			 */
+
 			hashkeys = hinfo->hashkeys;
 
 			if (ExecMultiHashGetHashValue(hashtable,
@@ -424,7 +431,6 @@ MultiExecMultiHash(MultiHashState *node)
 					hashtable->keepNulls,
 					&hashvalue)) {
 
-				/* Not subject to skew optimization, so insert normally */
 				ExecMultiHashTableInsert(hashtable, hashTuple, hashvalue);
 
 				hashtable->totalTuples += 1;
@@ -436,12 +442,12 @@ MultiExecMultiHash(MultiHashState *node)
 						pfree(hashTuple);
 				}
 			}
-			/* must provide our own instrumentation support */
+			// must provide our own instrumentation support
 				if (node->hstate.ps.instrument)
 					InstrStopNode(node->hstate.ps.instrument, hashtable->totalTuples);
 
 
-		}
+		}*/
 
 
 		if (scan->es_scanBytes == multi_join_chunk_tup || scan->es_scanBytes  == node->currChunk->tuples) {
@@ -714,6 +720,11 @@ void ExecMultiHashCreateHashTables(MultiHashState * mhstate){
 		int i;
 		Index relid;
 		MemoryContext oldctx;
+
+		//Skip this if we already initialized the hash tables
+		if(mhstate->chunk_hashables == NULL)
+			return;
+
 		mhstate->nun_hashtables = num_htables;
 
 		oldctx = MemoryContextSwitchTo(mhstate->tupCxt);
@@ -730,12 +741,15 @@ void ExecMultiHashCreateHashTables(MultiHashState * mhstate){
 		htidx = 0;
 
 			foreach(lc, hkeysList) {
+				// Shortcut for olny creating hash tables for the current
+				// hash key. To be reworked for join reordering.
 				HashInfo * hinfo = (HashInfo *) lfirst(lc);
-
+				if(hinfo->isCurrent){
 				 ExecMultiHashTableCreate(mhstate,
 						hinfo->hoperators,
 						false, &mhstate->chunk_hashables[i][htidx]);
 				hinfo->id = htidx;
+				}
 				htidx++;
 			}
 
@@ -763,6 +777,7 @@ SimpleHashTable ExecChooseHashTable(MultiHashState * mhstate, List *hoperators, 
 
 	result = list_member_return(mhstate->all_hashkeys, dummy_hinfo);
 	*hinfo = result;
+	((HashInfo *) result)->isCurrent=true;
 	idx = ((HashInfo *) result)->id;
 	Assert(result != NULL);
 	pfree(dummy_hinfo);
@@ -3014,21 +3029,25 @@ void ExecResetMultiHashtable(MultiHashState *node, SimpleHashTable  * hashtables
 
 
 		HashInfo * hinfo = (HashInfo *) lfirst(lc);
-
-		hashtable = hashtables[hinfo->id];
-
-		MemoryContextReset(hashtable->hashCxt);
-
-
-
-		// Update hashtable info
-		hashtable->totalTuples = 0;
-		hashtable->spaceAllowed += hashtable->spaceUsed;
+		/* Quick shortcut for only inserting tuples in
+		* the current used hash table. To be reworked for join
+		* reordering
+		*/
+		if(hinfo->isCurrent){
+			hashtable = hashtables[hinfo->id];
+			//TODO: Use relative position to avoid dropping hash tables
+			MemoryContextReset(hashtable->hashCxt);
 
 
-		/* Allocate data that will live for the life of the multihashjoin */
-		ExecMultiHashAllocateHashtable(hashtable);
 
+			// Update hashtable info
+			hashtable->totalTuples = 0;
+			hashtable->spaceAllowed += hashtable->spaceUsed;
+
+
+			/* Allocate data that will live for the life of the multihashjoin */
+			ExecMultiHashAllocateHashtable(hashtable);
+		}
 
 
 	}

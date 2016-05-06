@@ -630,8 +630,9 @@ MultiExecProcNode(PlanState *node)
 		case T_BitmapOrState:
 			result = MultiExecBitmapOr((BitmapOrState *) node);
 			break;
-		case T_MultiHashState:
-			result = MultiExecMultiHash((MultiHashState *) node);
+
+		//case T_MultiHashState:
+		//	result = MultiExecMultiHash((MultiHashState *) node);
 
 			break;
 		default:

@@ -156,12 +156,13 @@ ExecCHashJoin(CHashJoinState *node) {
 
 
 
+
 				/*
 				 * execute the Hash node, to build the hash table
 				 */
 
 //				if(hashtable->totalTuples == 0.0){
-//			(void) MultiExecProcNode((PlanState *) hashNode);
+
 				//			}
 				node->js.ps.instrument->card1 = hashtable->totalTuples;
 				node->js.ps.instrument->nloops = 0;
@@ -725,16 +726,28 @@ ExecInitCHashJoin(HashJoin *node, EState *estate, int eflags) {
 				copyhashkeys,
 				chjstate->chj_HashOperators,
 				NULL);
-
-
+		 chjstate->outer_hinfo->isCurrent=true;
+		 // Create empty hash tables for the outer node
+		 ExecMultiHashCreateHashTables((MultiHashState *) outerPlanState(chjstate));
+		 // build the hash table for the current outer hash key
+		(void) ExecProcNode((PlanState *) outerPlanState(chjstate));
 	}
 
 //
 //	 ExecChooseHashInfo((MultiHashState *) innerPlanState(node),	&hinfo,
 //			 rclauses,  hoperators);
+
 	 Assert(inner_hinfo !=  NULL);
 	 chjstate->selstate->hinfo = list_append_unique(chjstate->selstate->hinfo, inner_hinfo);
 	 chjstate->inner_hinfo = inner_hinfo;
+	 chjstate->inner_hinfo->isCurrent=true;
+	 // Create empty hash tables for the inner node
+
+	 ExecMultiHashCreateHashTables((MultiHashState *) innerPlanState(chjstate));
+	 // build the hash table for the current inner hash key
+	 (void) ExecProcNode((PlanState *) innerPlanState(chjstate));
+
+
 
 	node->ps = (PlanState *) chjstate;
 	return chjstate;
@@ -832,11 +845,12 @@ ExecInitMultiJoin(MultiJoin *node, EState *estate, int eflags) {
 	mhjstate->planlist = all_plans;
 	fflush(stdout);
 
-	for (i = 1; i < ps_index; i++) {
+	// Moved to CHashJoin in order to create only needed hash tables.
+	/*for (i = 1; i < ps_index; i++) {
 
 		ExecMultiHashCreateHashTables((MultiHashState *) hashnodes[i]);
 
-	}
+	}*/
 
 	mhjstate->current_ps = node->hashjoin.ps;
 	pprint(mhjstate->current_ps->plan_relids);
@@ -1138,7 +1152,7 @@ static void ExecPrepareChunk(MultiJoinState * mhjoinstate, MultiHashState *mhsta
 	}
 
 	if (chunk->state != CH_READ)
-		(void) MultiExecProcNode((PlanState *) mhstate);
+		(void) MultiHashFillTupleCache((MultiHashState *) mhstate);
 
 	if (mhstate->needUpdate)
 		ExecMultiJoinCleanUpChunk(mhjoinstate, mhstate);
