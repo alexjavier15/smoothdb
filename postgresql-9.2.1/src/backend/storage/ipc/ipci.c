@@ -104,7 +104,7 @@ CreateSharedMemoryAndSemaphores(bool makePrivate, int port)
 		size = 100000;
 		size = add_size(size, hash_estimate_size(SHMEM_INDEX_SIZE,
 												 sizeof(ShmemIndexEnt)));
-		smooth_work_mem=mul_size((Size)smooth_work_mem,1024L);
+		smooth_work_mem=mul_size((Size)smooth_work_mem,(Size)1024);
 		elog(INFO, "smooth work memory(size=%lu, size_t(%lu)",
 					 (unsigned long) smooth_work_mem,  (unsigned long) sizeof(size_t));
 		size = add_size(size, smooth_work_mem);
