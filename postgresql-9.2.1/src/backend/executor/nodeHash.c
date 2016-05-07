@@ -2415,7 +2415,6 @@ void ExecMultiHashCreateHashTablesArray(MultiHashState * mhstate){
 			foreach(lc, hkeysList) {
 				HashInfo * hinfo = (HashInfo *) lfirst(lc);
 
- 				HashInfo * hinfo = (HashInfo *) lfirst(lc);
 
 				mhstate->chunk_hashables[i][htidx] =NULL;
 
