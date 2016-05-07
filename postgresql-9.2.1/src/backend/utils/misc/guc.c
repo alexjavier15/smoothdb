@@ -1895,18 +1895,6 @@ static struct config_int ConfigureNamesInt[] =
 		1024, 64, INT_MAX / 2,
 		NULL, NULL, NULL
 	},
-	{
-		{"smooth_work_mem", PGC_USERSET, RESOURCES_MEM,
-			gettext_noop("Sets the maximum shared memory to be used for smooth scans."),
-			gettext_noop("This much memory can be used by each smooth  internal "
-										 " hash table before switching to "
-										 "temporary disk files."),
-			GUC_UNIT_KB
-		},
-		&smooth_work_mem,
-		1024L, 64, LONG_MAX,
-		NULL, NULL, NULL
-	},
 
 	{
 		{"maintenance_work_mem", PGC_USERSET, RESOURCES_MEM,
@@ -2605,6 +2593,18 @@ static struct config_int ConfigureNamesInt[] =
 
 static struct config_real ConfigureNamesReal[] =
 {
+	{
+			{"smooth_work_mem", PGC_USERSET, RESOURCES_MEM,
+				gettext_noop("Sets the maximum shared memory to be used for smooth scans."),
+				gettext_noop("This much memory can be used by each smooth  internal "
+											 " hash table before switching to "
+											 "temporary disk files."),
+				GUC_UNIT_KB
+			},
+			&smooth_work_mem,
+			1024, 64, DBL_MAX,
+				NULL, NULL, NULL
+		},
 	{
 		{"seq_page_cost", PGC_USERSET, QUERY_TUNING_COST,
 			gettext_noop("Sets the planner's estimate of the cost of a "
