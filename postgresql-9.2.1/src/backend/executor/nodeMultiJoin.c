@@ -1212,7 +1212,7 @@ static void ExecPrepareChunk(MultiJoinState * mhjoinstate, MultiHashState *mhsta
 	scan->rs_inited = false;
 
 	if (chunk->state != CH_READ)
-		(void) MultiExecProcNode((PlanState *) mhstate);
+		(void) ExecMultiHashFillTupleCache(mhstate);
 
 //	if (mhstate->needUpdate)
 //		ExecMultiJoinCleanUpChunk(mhjoinstate, mhstate);
