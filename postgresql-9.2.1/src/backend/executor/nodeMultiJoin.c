@@ -1286,6 +1286,7 @@ static void ExecMultiJoinGetNewChunk(MultiJoinState * mhjoinstate) {
 	MultiHashState *mhstate = NULL;
 
 	// loop the simulator until we find a chunk with feasible(s) join(s)
+	printf("***Getting new chunk in MultiJoin node****");
 	for (;;) {
 		RelChunk * toDrop = NULL;
 		chunk = JC_processNextChunk();
@@ -1324,6 +1325,8 @@ static void ExecMultiJoinGetNewChunk(MultiJoinState * mhjoinstate) {
 		break;
 	}
 	ExecPrepareChunk(mhjoinstate, mhstate, chunk);
+	printf("***END Getting new chunk in MultiJoin node****");
+
 	if(mhjoinstate->chunkedSubplans == NIL)
 	mhjoinstate->chunkedSubplans = ExecMultiJoinPrepareSubplans(mhjoinstate,0, NIL);
 
