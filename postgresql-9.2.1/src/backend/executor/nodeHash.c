@@ -3079,12 +3079,13 @@ ExecMultiHashTablesDestroy(MultiHashState * mhstate, int chunkidx)
 	for (hkidx = 0; hkidx < num_hashkeys; hkidx++) {
 
 		SimpleHashTable hashtable = hashtable_array[hkidx];
-		MemoryContextDelete(hashtable->hashCxt);
-		mhstate->chunk_hashables[chunkidx][hkidx] =NULL;
-		hashtable->spaceUsed = 0;
-		hashtable->totalTuples = 0;
-		hashtable->hashCxt= NULL;
-
+		if(hashtable!=NULL){
+			MemoryContextDelete(hashtable->hashCxt);
+			mhstate->chunk_hashables[chunkidx][hkidx] =NULL;
+			hashtable->spaceUsed = 0;
+			hashtable->totalTuples = 0;
+			hashtable->hashCxt= NULL;
+		}
 	}
 
 
