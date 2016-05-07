@@ -99,7 +99,7 @@ void JC_InitCache(void) {
 				ALLOCSET_DEFAULT_MAXSIZE);*/
 				/*Shared memory allocation for chunks"*/
 		bool found = false;
-		mcxt = ShmemInitStruct(str.data, MAXALIGN(chunk_size), &found);
+		mcxt = ShmemInitStruct(str.data, MAXALIGN(multi_join_chunk_size), &found);
 		JC_AddChunkMemoryContext(mcxt);
 		resetStringInfo(&str);
 

@@ -105,7 +105,7 @@ CreateSharedMemoryAndSemaphores(bool makePrivate, int port)
 		size = add_size(size, hash_estimate_size(SHMEM_INDEX_SIZE,
 												 sizeof(ShmemIndexEnt)));
 		smooth_work_mem=mul_size((Size)smooth_work_mem,1024);
-		//printf("Smooth size : %ld Kb", smooth_work_mem);
+		printf("Smooth size : %ld Kb", smooth_work_mem);
 		size = add_size(size, smooth_work_mem);
 		size = add_size(size, BufferShmemSize());
 		size = add_size(size, LockShmemSize());
