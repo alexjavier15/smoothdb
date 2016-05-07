@@ -1290,11 +1290,10 @@ typedef enum
 typedef struct RelChunk{
 	Node node;
 	uint32 chunkID;
-	MemoryContext mcxt;
 	CHUNKSTATE state;
 	int		priority;
 	List	*subplans;
-	void	*tupledata;
+	void	*tupledata; // same that mctx for shared memory
 	void    *head;
 	void	*next;
 	int		tuples;
