@@ -145,6 +145,20 @@ typedef struct ExprContext
 	ExprContext_CB *ecxt_callbacks;
 } ExprContext;
 
+/*Alex : Intrumentation for  Expr Statistics collection*/
+typedef struct ExprInstrumentation
+{ ExprContext  *ecxt;
+  Selectivity   sel;
+  double		tuplecount;		/* Tuples emitted so far this cycle */
+  /* Accumulated statistics across all completed cycles: */
+  double		startup;		/* Total startup time (in seconds) */
+  double		total;			/* Total total time (in seconds) */
+  double		ntuples;		/* Total tuples produced */
+  double		nloops;			/* # of run cycles for this expr */
+
+}ExprInstrumentation;
+
+
 /*
  * Set-result status returned by ExecEvalExpr()
  */
@@ -398,6 +412,11 @@ typedef struct EState
 	HeapTuple  *es_epqTuple;	/* array of EPQ substitute tuples */
 	bool	   *es_epqTupleSet; /* true if EPQ tuple is provided */
 	bool	   *es_epqScanDone; /* true if EPQ tuple has been fetched */
+	int			join_depth;
+	Instrumentation *unique_instr;
+	bool 		replan;
+	bool		started;
+	bool		*scanReady;
 } EState;
 
 
@@ -1007,7 +1026,11 @@ typedef struct PlanState
 	ProjectionInfo *ps_ProjInfo;	/* info for doing tuple projection */
 	bool		ps_TupFromTlist;/* state flag for processing set-valued
 								 * functions in targetlist */
+
+
 } PlanState;
+
+
 
 /* ----------------
  *	these are defined to avoid confusion problems with "left"
@@ -1193,6 +1216,8 @@ typedef struct ScanState
 	Relation	ss_currentRelation;
 	HeapScanDesc ss_currentScanDesc;
 	TupleTableSlot *ss_ScanTupleSlot;
+	int	   		es_scanBytes;
+	int			len;
 } ScanState;
 
 /*
@@ -1282,6 +1307,7 @@ typedef struct IndexSmoothScanState
 	IndexScanDesc iss_ScanDesc;
 	List	   *allqual; // for Smooth Scan all predicates should be kept (not only the ones that are kept in indexqualorig)
 						// because indexqualorig keeps only predicates for index - but for full scan part we need other one that belong to filter (qual!!)
+
 } IndexSmoothScanState;
 
 /*		For accessing the heap. The logic is now two step, similar to bitmap heap and index scan.
@@ -1679,6 +1705,10 @@ typedef struct MergeJoinState
 typedef struct HashJoinTupleData *HashJoinTuple;
 typedef struct HashJoinTableData *HashJoinTable;
 
+typedef struct JoinTupleData *JoinTuple;
+typedef struct SimpleHashTableData *SimpleHashTable;
+
+typedef struct MJoinTableData *MJoinTable;
 typedef struct HashJoinState
 {
 	JoinState	js;				/* its first field is NodeTag */
@@ -1699,7 +1729,149 @@ typedef struct HashJoinState
 	int			hj_JoinState;
 	bool		hj_MatchedOuter;
 	bool		hj_OuterNotEmpty;
+
+
 } HashJoinState;
+
+typedef struct MultiHashState MultiHashState;
+typedef struct CHashJoinState CHashJoinState;
+
+
+typedef struct MultiJoinState
+{
+	JoinState	js;				/* its first field is NodeTag */
+	List	   *hashclauses;	/* list of ExprState nodes */
+	List	   *mhj_OuterHashKeys;		/* list of ExprState nodes */
+	List	   *mhj_InnerHashKeys;		/* list of ExprState nodes */
+	List	   *mhj_HashOperators;		/* list of operator OIDs */
+	uint32		mhj_CurHashValue;
+	int			mhj_CurBucketNo;
+	HashJoinTuple mhj_CurTuple;
+	TupleTableSlot *mhj_OuterTupleSlot;
+	TupleTableSlot *mhj_InnerTupleSlot;
+	int			mhj_JoinState;
+	int			mhj_LastState;
+	bool		mhj_MatchedOuter;
+	bool		mhj_OuterNotEmpty;
+	bool		  	mhj_MatchedInner;
+	bool		  	mhj_InnerNotEmpty;
+	MJoinTable	mhj_ScanHashTable;
+	TupleTableSlot  **mhj_ScanEcxt_slot;
+	bool			mhj_HasMoreOuter;
+	bool			mhj_HasMoreInner;
+	/*Fields for hybrid MJoin */
+	MJoinTable	mhj_NextHashTable;
+	int			mhj_NextBucketNo;
+	TupleTableSlot  **mhj_NextEcxt_slot;
+	HashJoinTuple mhj_NextInnerTuple;
+	HashJoinTuple mhj_NextOuterTuple;
+	HashJoinTuple mhj_NextTuple;
+	List			* planlist;
+	List			** plans;
+	MultiHashState	**mhashnodes;
+	int				hashnodes_array_size;
+	CHashJoinState		*current_ps;
+	List			*chunkedSubplans;
+	List			*pendingSubplans;
+} MultiJoinState;
+
+typedef struct SymHashJoinState
+{
+	JoinState	js;				/* its first field is NodeTag */
+	List	   *hashclauses;	/* list of ExprState nodes */
+	List	   *mhj_OuterHashKeys;		/* list of ExprState nodes */
+	List	   *mhj_InnerHashKeys;		/* list of ExprState nodes */
+	List	   *mhj_HashOperators;		/* list of operator OIDs */
+	MJoinTable mhj_InnerHashTable;
+	MJoinTable mhj_OuterHashTable;
+	uint32		mhj_CurHashValue;
+	int			mhj_CurBucketNo;
+	HashJoinTuple mhj_CurTuple;
+	TupleTableSlot *mhj_OuterTupleSlot;
+	TupleTableSlot *mhj_InnerTupleSlot;
+	int			mhj_JoinState;
+	int			mhj_LastState;
+	bool		mhj_MatchedOuter;
+	bool		mhj_OuterNotEmpty;
+	bool		  	mhj_MatchedInner;
+	bool		  	mhj_InnerNotEmpty;
+	MJoinTable	mhj_ScanHashTable;
+	TupleTableSlot  **mhj_ScanEcxt_slot;
+	bool			mhj_HasMoreOuter;
+	bool			mhj_HasMoreInner;
+	/*Fields for hybrid MJoin */
+	MJoinTable	mhj_NextHashTable;
+	int			mhj_NextBucketNo;
+	TupleTableSlot  **mhj_NextEcxt_slot;
+	HashJoinTuple mhj_NextInnerTuple;
+	HashJoinTuple mhj_NextOuterTuple;
+	HashJoinTuple mhj_NextTuple;
+
+} SymHashJoinState;
+
+typedef struct SelectivityState
+{ 	NodeTag		type;
+	List	*hinfo;
+
+
+
+}SelectivityState;
+/*Alex:*/
+ struct CHashJoinState
+{
+	JoinState	js;				/* its first field is NodeTag */
+	List	   *hashclauses;	/* list of ExprState nodes */
+	List	   *chj_OuterHashKeys;		/* list of ExprState nodes */
+	List	   *chj_InnerHashKeys;		/* list of ExprState nodes */
+	List	   *chj_HashOperators;		/* list of operator OIDs */
+	SimpleHashTable chj_HashTable;
+	uint32		chj_CurHashValue;
+	int			chj_CurBucketNo;
+	JoinTuple chj_CurTuple;
+	TupleTableSlot *chj_OuterTupleSlot;
+	TupleTableSlot *chj_HashTupleSlot;
+	TupleTableSlot *chj_NullOuterTupleSlot;
+	TupleTableSlot *chj_NullInnerTupleSlot;
+	TupleTableSlot *chj_FirstOuterTupleSlot;
+	int			chj_JoinState;
+	bool		chj_MatchedOuter;
+	bool		chj_OuterNotEmpty;
+	Index		seq_num;
+	SelectivityState *selstate;
+	HashInfo 	*outer_hinfo;
+	HashInfo 	*inner_hinfo;
+	List 		*plan_relids;
+
+
+};
+
+/* ----------------
+ *	 MHashJoinState information
+ *
+ *		see: HashJoinState
+ * ----------------
+ */
+
+
+
+typedef struct MultiHashSeqState
+{
+	JoinState	js;				/* its first field is NodeTag */
+	List	   *hashclauses;	/* list of ExprState nodes */
+	List	   *hj_OuterHashKeys;		/* list of ExprState nodes */
+	List	   *hj_InnerHashKeys;		/* list of ExprState nodes */
+	List	   *hj_HashOperators;		/* list of operator OIDs */
+	SimpleHashTable hj_HashTable;
+	JoinTuple	hj_CurTuple;
+	uint32		hj_CurHashValue;
+	int			hj_CurBucketNo;
+	TupleTableSlot *hj_OuterTupleSlot;
+	TupleTableSlot *hj_InnerTupleSlot;
+	int			hj_JoinState;
+	bool		hj_MatchedOuter;
+	bool		hj_OuterNotEmpty;
+} MultiHashSeqState;
+
 
 
 /* ----------------------------------------------------------------
@@ -1875,13 +2047,45 @@ typedef struct UniqueState
  *	 HashState information
  * ----------------
  */
+
+
 typedef struct HashState
 {
 	PlanState	ps;				/* its first field is NodeTag */
 	HashJoinTable hashtable;	/* hash table for the hashjoin */
 	List	   *hashkeys;		/* list of ExprState nodes */
 	/* hashkeys is same as parent's hj_InnerHashKeys */
+	/*ALex  MJOIN*/
+	//HashJoinTable innerHashtable;
+	//HashJoinTable outerHashtable;
+	bool isOuter;
+
+
 } HashState;
+
+struct MultiHashState{
+
+	HashState		hstate;
+	Index			relid;
+	List			*all_hashkeys;
+	int				nun_hashtables; /*number of hash tables */
+	int				num_chunks;
+	SimpleHashTable	*hashable_array;
+	SimpleHashTable	**chunk_hashables;
+	RelChunk *	   currChunk;
+	List			*lchunks;
+	MinimalTuple 	currTuple;
+	MemoryContext   tupCxt;
+	bool 			started;
+	bool 			needUpdate;
+	bool			hasDropped;
+	Bitmapset		*chunkIds;
+	List 			*allChunks;
+
+
+};
+
+
 
 /* ----------------
  *	 SetOpState information

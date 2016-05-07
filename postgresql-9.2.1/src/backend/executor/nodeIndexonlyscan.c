@@ -375,7 +375,6 @@ ExecInitIndexOnlyScan(IndexOnlyScan *node, EState *estate, int eflags)
 	indexstate->ss.ps.plan = (Plan *) node;
 	indexstate->ss.ps.state = estate;
 	indexstate->ioss_HeapFetches = 0;
-	indexstate->ss.es_scanBytes = 0;
 
 	/*
 	 * Miscellaneous initialization

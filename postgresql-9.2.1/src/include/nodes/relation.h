@@ -453,7 +453,7 @@ typedef struct RelOptInfo
 	/*Alex : join clauses involded this relation used for
 	 * pre-building hash tables in mjoin*/
 	MultiJoinInfo *best_mjinfo;
-
+	int			tupwidth;
 	List       *joinclauses;
 	struct MultiHash *hash_plan;
 	List *chunks;

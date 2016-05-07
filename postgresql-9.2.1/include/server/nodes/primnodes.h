@@ -1270,4 +1270,46 @@ typedef struct FromExpr
 	Node	   *quals;			/* qualifiers on join, if any */
 } FromExpr;
 
+
+
+typedef struct ChunkID{
+	uint16 relid;
+    uint16 ch_id;
+
+}ChunkID;
+typedef enum
+{
+	CH_DROPPED,
+	CH_RECEIVED,
+	CH_WAITTING,
+	CH_READ
+} CHUNKSTATE;
+
+
+
+typedef struct RelChunk{
+	Node node;
+	uint32 chunkID;
+	MemoryContext mcxt;
+	CHUNKSTATE state;
+	int		priority;
+	List	*subplans;
+	void	*tupledata;
+	void    *head;
+	void	*next;
+	int		tuples;
+	int 	numBlocks;
+	uint32		freespace;
+}RelChunk;
+
+
+typedef struct ChunkedSubPlan{
+	Node node;
+	List *chunks;
+	bool done;
+
+
+
+}ChunkedSubPlan;
+
 #endif   /* PRIMNODES_H */

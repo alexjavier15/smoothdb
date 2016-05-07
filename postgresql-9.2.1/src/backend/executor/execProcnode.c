@@ -6,7 +6,6 @@
  *	 If the node has children, then it will presumably call ExecInitNode,
  *	 ExecProcNode, or ExecEndNode on its subnodes and do the appropriate
  *	 processing.
- *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
@@ -630,9 +629,8 @@ MultiExecProcNode(PlanState *node)
 		case T_BitmapOrState:
 			result = MultiExecBitmapOr((BitmapOrState *) node);
 			break;
-
 		//case T_MultiHashState:
-		//	result = MultiExecMultiHash((MultiHashState *) node);
+		//result = MultiExecMultiHash((MultiHashState *) node);
 
 			break;
 		default:

@@ -20,6 +20,7 @@
 #include "storage/lock.h"
 #include "utils/relcache.h"
 #include "utils/snapshot.h"
+#include "optimizer/cost.h"
 
 /*
  * Struct for statistics returned by ambuild
@@ -74,6 +75,7 @@ typedef struct IndexBulkDeleteResult
 	double		tuples_removed; /* # removed during vacuum operation */
 	BlockNumber pages_deleted;	/* # unused pages in index */
 	BlockNumber pages_free;		/* # pages available for reuse */
+
 } IndexBulkDeleteResult;
 
 /* Typedef for callback function to determine if a tuple is bulk-deletable */
@@ -123,6 +125,8 @@ typedef enum IndexUniqueCheck
  *		True iff the index scan is valid.
  */
 #define IndexScanIsValid(scan) PointerIsValid(scan)
+#define HasSmoothInfo(scan) PointerIsValid(scan->smoothInfo)  && enable_smoothshare
+
 
 extern Relation index_open(Oid relationId, LOCKMODE lockmode);
 extern void index_close(Relation relation, LOCKMODE lockmode);

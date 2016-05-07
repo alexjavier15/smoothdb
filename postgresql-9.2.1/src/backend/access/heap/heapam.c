@@ -216,6 +216,7 @@ heapgetpage(HeapScanDesc scan, BlockNumber page)
 
 	Assert(page < scan->rs_nblocks);
 
+
 	/* release previous scan buffer, if any */
 	if (BufferIsValid(scan->rs_cbuf))
 	{
@@ -783,6 +784,9 @@ heapgettup_pagemode(HeapScanDesc scan,
 		 */
 		if (backward)
 		{
+			if (enable_multi_join){
+				Assert(0);
+			}
 			finished = (page == scan->rs_startblock);
 			if (page == 0)
 				page = scan->rs_nblocks;
@@ -791,9 +795,16 @@ heapgettup_pagemode(HeapScanDesc scan,
 		else
 		{
 			page++;
-			if (page >= scan->rs_nblocks)
-				page = 0;
-			finished = (page == scan->rs_startblock);
+			if(enable_multi_join){
+				finished = (page - scan->rs_startblock == scan->num_total_blocks);
+
+			}else{
+
+				if (page >= scan->rs_nblocks)
+					page = 0;
+				finished = (page == scan->rs_startblock);
+			}
+
 
 			/*
 			 * Report our new scan position for synchronization purposes. We

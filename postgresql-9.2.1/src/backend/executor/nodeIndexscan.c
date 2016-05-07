@@ -483,7 +483,6 @@ ExecInitIndexScan(IndexScan *node, EState *estate, int eflags)
 	indexstate = makeNode(IndexScanState);
 	indexstate->ss.ps.plan = (Plan *) node;
 	indexstate->ss.ps.state = estate;
-	indexstate->ss.es_scanBytes = 0;
 	/*
 	 * Miscellaneous initialization
 	 *

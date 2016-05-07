@@ -105,7 +105,9 @@ typedef struct JCacheMemHeader	/* standard header for all Postgres shmem */
 	List   		*chunks;
 	List		*freeList;
 	bool		isFull;
-
+	Bitmapset   *relids;		/*relids used for this join*/
+	Bitmapset   *cachedIds;		/*relids with more than one cached chunk*/
+	int max_chunks;
 } JCacheMemHeader;
 
 
@@ -113,12 +115,12 @@ typedef struct JCacheMemHeader	/* standard header for all Postgres shmem */
 extern void JC_InitCache(void);
 extern void JC_EndCache(void);
 extern List *JC_GetChunks(void);
-extern List *JC_isFull(void);
+extern bool JC_isFull(void);
 extern void JC_AddChunkedSubPlan(ChunkedSubPlan *subplan);
 extern List *JC_GetChunkedSubPlans( RelChunk *chunk);
 extern void JC_dropChunk( RelChunk *chunk);
+extern void JC_removeChunk(RelChunk *chunk);
 extern void  JC_InitChunkMemoryContext(RelChunk *chunk, RelChunk * toDrop);
-//void JC_AddChunkMemoryContext(MemoryContext mcxt);
 void JC_AddChunkMemoryContext(void * mcxt);
 extern RelationChunksDesc  JC_InitRelationChunks(uint32 size, Relation relation);
 extern MinimalTuple JC_StoreMinmalTuple(RelChunk *chunk , MinimalTuple mtuple);

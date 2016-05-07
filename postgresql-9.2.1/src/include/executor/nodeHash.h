@@ -17,6 +17,10 @@
 #include "nodes/execnodes.h"
 #include "smooth/joincache.h"
 
+typedef struct MHASH_ITER
+{
+	uint32 elemindex;
+} MHASH_ITER;
 
 extern HashState *ExecInitHash(Hash *node, EState *estate, int eflags);
 extern HashState *
@@ -26,6 +30,8 @@ extern TupleTableSlot *ExecHash(HashState *node);
 extern TupleTableSlot *ExecMultiHash(MultiHashState *node);
 extern Node *MultiExecHash(HashState *node);
 extern Node *MultiExecMultiHash(MultiHashState *node);
+extern void
+ExecMultiHashTablesDestroy(MultiHashState * mhstate, int chunkidx);
 extern void ExecEndHash(HashState *node);
 extern void ExecReScanHash(HashState *node);
 
@@ -33,8 +39,7 @@ extern HashJoinTable ExecHashTableCreate(Hash *node, List *hashOperators,
 					bool keepNulls);
 extern MJoinTable
 ExecMHashTableCreate(Hash *node, List *hashOperators, bool keepNulls, bool isLeft, int nbuckets, int nbatch);
-extern void
-ExecMultiHashTableCreate(MultiHashState *node, List *hashOperators, bool keepNulls,  SimpleHashTable * hashtableptr);
+
 extern void ExecHashTableDestroy(HashJoinTable hashtable);
 extern void ExecMHashTableDestroy(MJoinTable hashtable);
 extern void ExecHashTableInsert(HashJoinTable hashtable,
@@ -72,7 +77,7 @@ ExecMultiHashGetBucket(SimpleHashTable hashtable,
 						  uint32 hashvalue,
 						  int *bucketno);
 extern bool ExecScanHashBucket(HashJoinState *hjstate, ExprContext *econtext);
-extern bool ExecScanMultiHashBucket(CHashJoinState *chjstate, ExprContext *econtext);
+extern bool ExecMultiHashScanBucket(CHashJoinState *chjstate, ExprContext *econtext);
 
 extern void ExecPrepHashTableForUnmatched(HashJoinState *hjstate);
 extern bool ExecScanHashTableForUnmatched(HashJoinState *hjstate,
@@ -87,10 +92,11 @@ extern void ExecChooseHashTableSize(double ntuples, int tupwidth, bool useskew,
 extern int	ExecHashGetSkewBucket(HashJoinTable hashtable, uint32 hashvalue);
 extern void
 ExecMHashIncreaseNumBatches(SymHashJoinState *mhjstate);
-extern SimpleHashTable ExecChooseHashTable(MultiHashState * mhstate, List *hoperators, List *hashkeys, HashInfo **hinfo);
-extern void ExecMultiHashCreateHashTables(MultiHashState * mhstate);
+extern SimpleHashTable ExecMultiHashSelectHashTable(MultiHashState * mhstate, List *hoperators, List *hashkeys, HashInfo **hinfo);
+extern void ExecMultiHashCreateHashTablesArray(MultiHashState * mhstate);
 extern HashInfo *  add_hashinfo(MultiHashState *mhstate , List * clauses, List *hoperators, Bitmapset *relids);
 extern HashInfo *GetUniqueHashInfo (MultiHashState *mhstate , List * clauses, List *hoperators, bool *found);
-extern void ExecChooseHashInfo(MultiHashState *node , HashInfo **hinfo, List *hashkeys, List * hoperators);
+extern void ExecMultiHashSetHashInfo(MultiHashState *node , HashInfo **hinfo, List *hashkeys, List * hoperators);
 
+extern void ExecMultiHashResetHashTables(MultiHashState * mhstate, RelChunk *newchunk ,RelChunk *toDrop);
 #endif   /* NODEHASH_H */

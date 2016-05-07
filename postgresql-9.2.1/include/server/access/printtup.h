@@ -18,6 +18,9 @@
 
 extern DestReceiver *printtup_create_DR(CommandDest dest);
 
+extern void printatt(unsigned attributeId, Form_pg_attribute attributeP,
+		 char *value);
+
 extern void SetRemoteDestReceiverParams(DestReceiver *self, Portal portal);
 
 extern void SendRowDescriptionMessage(TupleDesc typeinfo, List *targetlist,

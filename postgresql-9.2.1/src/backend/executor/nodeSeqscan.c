@@ -65,6 +65,8 @@ SeqNext(SeqScanState *node)
 	 */
 	tuple = heap_getnext(scandesc, direction);
 
+
+
 	/*
 	 * save the tuple and the buffer returned to us by the access methods in
 	 * our scan tuple slot and return the slot.  Note: we pass 'false' because
@@ -73,12 +75,14 @@ SeqNext(SeqScanState *node)
 	 * that ExecStoreTuple will increment the refcount of the buffer; the
 	 * refcount will not be dropped until the tuple table slot is cleared.
 	 */
-	if (tuple)
+	if (tuple){
 		ExecStoreTuple(tuple,	/* tuple to store */
 					   slot,	/* slot to store in */
 					   scandesc->rs_cbuf,		/* buffer associated with this
 												 * tuple */
 					   false);	/* don't pfree this pointer */
+		node->len = tuple->t_len;
+	}
 	else
 		ExecClearTuple(slot);
 
@@ -142,6 +146,7 @@ InitScanRelation(SeqScanState *node, EState *estate)
 
 	node->ss_currentRelation = currentRelation;
 	node->ss_currentScanDesc = currentScanDesc;
+	node->ss_currentScanDesc->num_total_blocks = 0;
 
 	ExecAssignScanType(node, RelationGetDescr(currentRelation));
 }
@@ -169,7 +174,6 @@ ExecInitSeqScan(SeqScan *node, EState *estate, int eflags)
 	scanstate = makeNode(SeqScanState);
 	scanstate->ps.plan = (Plan *) node;
 	scanstate->ps.state = estate;
-	scanstate->es_scanBytes = 0;
 
 	/*
 	 * Miscellaneous initialization
@@ -271,6 +275,8 @@ ExecReScanSeqScan(SeqScanState *node)
 	HeapScanDesc scan;
 
 	scan = node->ss_currentScanDesc;
+
+	//scan->num_total_blocks = 0; // ColdStorage
 
 	heap_rescan(scan,			/* scan desc */
 				NULL);			/* new scan keys */

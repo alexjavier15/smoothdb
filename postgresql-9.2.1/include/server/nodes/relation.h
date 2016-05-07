@@ -244,6 +244,8 @@ typedef struct PlannerInfo
 
 	/* Added post-release, will be in a saner place in 9.3: */
 	List	   *plan_params;	/* list of PlannerParamItems, see below */
+
+	List	   *subplans;
 } PlannerInfo;
 
 
@@ -391,6 +393,13 @@ typedef enum RelOptKind
 	RELOPT_DEADREL
 } RelOptKind;
 
+typedef struct JoinClause {
+	List *expr;
+	Relids lh_relids;
+	Relids rh_relids;
+
+}JoinClause;
+typedef struct MultiJoinInfo MultiJoinInfo;
 typedef struct RelOptInfo
 {
 	NodeTag		type;
@@ -439,6 +448,16 @@ typedef struct RelOptInfo
 	List	   *joininfo;		/* RestrictInfo structures for join clauses
 								 * involving this rel */
 	bool		has_eclass_joins;		/* T means joininfo is incomplete */
+	List	   *multijoin_info;
+
+	/*Alex : join clauses involded this relation used for
+	 * pre-building hash tables in mjoin*/
+	MultiJoinInfo *best_mjinfo;
+
+	List       *joinclauses;
+	struct MultiHash *hash_plan;
+	List *chunks;
+
 } RelOptInfo;
 
 /*
@@ -701,6 +720,10 @@ typedef struct Path
 
 	List	   *pathkeys;		/* sort ordering of path's output */
 	/* pathkeys is a List of PathKey nodes; see above */
+	List	   *restrict_list;
+	/*Alex Multi Join field*/
+	struct Plan * plan;
+	bool is_best;
 } Path;
 
 /* Macro for extracting a path's parameterization relids; beware double eval */
@@ -1052,8 +1075,10 @@ typedef struct JoinPath
 	/*
 	 * See the notes for RelOptInfo and ParamPathInfo to understand why
 	 * joinrestrictinfo is needed in JoinPath, and can't be merged into the
+	 *
 	 * parent RelOptInfo.
 	 */
+	bool		has_alljoins;
 } JoinPath;
 
 /*
@@ -1114,6 +1139,16 @@ typedef struct HashPath
 	List	   *path_hashclauses;		/* join clauses used for hashing */
 	int			num_batches;	/* number of batches expected */
 } HashPath;
+
+typedef struct MHashPath
+{
+	JoinPath	jpath;
+	List	   *path_hashclauses;		/* join clauses used for hashing */
+	int			num_batches;	/* number of batches expected */
+	List	   *restrictList;
+} MHashPath;
+
+
 
 /*
  * Restriction clause info.
@@ -1679,5 +1714,24 @@ typedef struct JoinCostWorkspace
 	int			numbuckets;
 	int			numbatches;
 } JoinCostWorkspace;
+
+/*
+ALex
+struct MultiJoinInfo
+{
+	NodeTag		type;
+
+	struct MultiJoinInfo * nextJoin;
+	RelOptInfo 	*innerRel;
+	RelOptInfo 	*outerRel;
+	List 		*join_quals;
+	List 		*all_quals;
+	List        *tlist;
+	List		*sequence;
+	int length;
+
+
+};
+*/
 
 #endif   /* RELATION_H */

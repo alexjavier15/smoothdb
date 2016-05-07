@@ -1216,7 +1216,6 @@ typedef struct ScanState
 	Relation	ss_currentRelation;
 	HeapScanDesc ss_currentScanDesc;
 	TupleTableSlot *ss_ScanTupleSlot;
-	int	   		es_scanBytes;
 	int			len;
 } ScanState;
 
@@ -1776,6 +1775,7 @@ typedef struct MultiJoinState
 	CHashJoinState		*current_ps;
 	List			*chunkedSubplans;
 	List			*pendingSubplans;
+	Instrumentation *counter;
 } MultiJoinState;
 
 typedef struct SymHashJoinState

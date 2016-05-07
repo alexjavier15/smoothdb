@@ -15,5 +15,6 @@
 #define DYNAHASH_H
 
 extern int	my_log2(long num);
+extern int	my_log1(long num);
 
 #endif   /* DYNAHASH_H */
