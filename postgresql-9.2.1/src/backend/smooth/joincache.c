@@ -108,6 +108,7 @@ void JC_InitCache(void) {
 
 	pfree(str.data);
 	MemoryContextSwitchTo(oldcxt);
+	msgq_client_init();
 
 }
 
@@ -141,19 +142,155 @@ void JC_AddChunkedSubPlan(ChunkedSubPlan *subplan) {
 
 }
 
-RelChunk * JC_processNextChunk(void) {
+int JC_swiftNextChunk(RelChunk **result)
+{
+    jbuilder_t *builder;
+    char cbuf[128], obuf[128], *json_data, *fname, *rel_name;
+    ListCell *cell, *elem, *prev;
+    RelChunk *chunk;
+    uint32 rel_id, index, chunk_id;
+	List *clist = NIL;
+
+    struct container_wrapper {
+        container_t *c;
+        uint32 rel_id;
+    } *cw, *ctarget;
+
+    /* We should issue requests to swift for all chinks if 
+     * 1) this is the first call or
+     * 2) if we have received all chunks we previously requested
+     *
+     * In case 1, nchunks_received will be 0. In last case, it will be
+     * whatever the length of list was during last issue phase. Since
+     * chunks are removed from seq_cycle as subplans finish, we maintain
+     * this value is nchunks_requested separately.
+     */
+    if (nchunks_requested == 0 || 
+            (nchunks_received == nchunks_requested)) {
+
+        builder = jbuilder_init(NULL);
+        assert(builder);
+
+        /* first go through chunks and find out all relations. For each
+         * relation, create a container
+         */
+	    foreach(cell, seq_cycle) {
+		    chunk = (RelChunk *) lfirst(cell);
+
+            // find relevant container
+            ctarget = NULL;
+	        foreach(elem, clist) {
+                cw = (struct container_wrapper *) lfirst(elem);
+
+                if (chunk->rel_id == cw->rel_id) {
+                    ctarget = cw;
+                    break;
+                }
+            }
+
+            snprintf(cbuf, sizeof(cbuf), "%d", chunk->rel_id);
+
+            // if container is not found, we have to create one
+            if (!ctarget) {
+                ctarget = calloc(1, sizeof(struct container_wrapper));
+                Assert(ctarget);
+
+                ctarget->c = jbuilder_create_container(builder, cbuf);
+                ctarget->rel_id = chunk->rel_id;
+
+			    clist = lappend(clist, ctarget);
+            }
+
+            Assert(ctarget);
+
+            // now add the chunk itself to the container
+            if ((chunk->chunkID & 0xFFFF) == 0) {
+                snprintf(obuf, sizeof(obuf), "%s", cbuf);
+            } else {
+                snprintf(obuf, sizeof(obuf), "%s.%d", cbuf, 
+                    chunk->chunkID & 0xFFFF);
+            }
+
+            jbuilder_add_object(builder, ctarget->c, obuf);
+            nchunks_requested++;
+
+            printf("Adding chunk %u to cont %u\n", chunk->chunkID & 0xFFFF,
+                    ctarget->rel_id);
+        }
+
+        json_data = jbuilder_serialize(builder);
+        printf("json is %s\n", json_data);
+
+        msgq_client_send(json_data);
+
+        jbuilder_cleanup(builder);
+
+	    foreach(elem, clist) {
+            free(lfirst(elem));
+        }
+
+        list_free(clist);
+    }
+
+
+    // now get next chunk from swift
+    fname = msgq_client_receive();
+    nchunks_received++;
+
+    rel_name = basename(fname);
+    printf("Got file %s base %s\n", fname, rel_name);
+
+    // get ids from file name
+    if (strchr(rel_name, '.')) {
+        rel_id = atoi(strtok(rel_name, "."));
+        chunk_id = atoi(strtok(NULL, "."));
+    } else {
+        rel_id = atoi(rel_name);
+        chunk_id = 0;
+    }
+
+    printf("Got rel %d chunk %u\n", rel_id, chunk_id);
+
+    free(fname);
+
+    // find the right chunk
+    index = 0;
+	foreach(cell, seq_cycle) {
+        index++;
+        chunk = (RelChunk *) lfirst(cell);
+        if (chunk->rel_id == rel_id && 
+                (chunk->chunkID & 0xFFFF) == chunk_id)
+            break;
+
+        chunk = NULL;
+    }
+
+    assert(chunk);
+ 
+    *result = chunk;
+
+    return index;
+}
+
+RelChunk * JC_processNextChunk(bool poll_swift) {
+
 
 //	JoinCacheEntry *jcentry;
+   int random_chunk;
+   RelChunk *result;
+   
+   random_chunk = JC_swiftNextChunk(&result);
 
 	// Get a ramdom item from the seq_cycle list
 	Bitmapset * refused_set= NULL;
-	int random_chunk =  rand() % list_length(seq_cycle);
+	//int random_chunk =  rand() % list_length(seq_cycle);
 
-	RelChunk *result = (RelChunk *) list_nth(seq_cycle,random_chunk);
+	//RelChunk *result = (RelChunk *) list_nth(seq_cycle,random_chunk);
 
 	bool isValid = JC_isValidChunk(result);
 
-	refused_set = bms_add_member(refused_set,random_chunk);
+	//refused_set = bms_add_member(refused_set,random_chunk);
+	refused_set = bms_add_member(refused_set, random_chunk);
 
 	while (!isValid || (list_length(result->subplans) == 0 || result->state == CH_READ) ) {
 
@@ -166,25 +303,28 @@ RelChunk * JC_processNextChunk(void) {
 		refused_set = bms_add_member(refused_set,random_chunk);
 		do {
 
-			random_chunk = rand() % list_length(seq_cycle);
+			//random_chunk = rand() % list_length(seq_cycle);
+            random_chunk = JC_swiftNextChunk(&result);
 
-		} while (bms_is_member( random_chunk, refused_set));
+		//} while (bms_is_member(random_chunk, refused_set));
+		} while (bms_is_member(result->rel_id, refused_set));
 
 		// = nextChunk->next;
-		result = (RelChunk *) list_nth(seq_cycle,random_chunk);
+		//result = (RelChunk *) list_nth(seq_cycle,random_chunk);
 		isValid= JC_isValidChunk(result);
 
 	}
 
 	printf("RECEIVING CHUNK: \n");
-	printf("rel : %d chunk : %d\n", ChunkGetRelid(result), ChunkGetID(result));
+	printf("rel : %d phys id %d chunk : %d\n", ChunkGetRelid(result), 
+            result->rel_id, ChunkGetID(result));
 	fflush(stdout);
+
 	JCacheSegHdr->chunks = lappend(JCacheSegHdr->chunks, result);
 	JCacheSegHdr->cachedIds = bms_add_member(JCacheSegHdr->cachedIds, ChunkGetRelid(result));
 	return result;
 
 }
-
 void JC_dropChunk(RelChunk *chunk) {
 
 	void *chunk_mem = NULL;
