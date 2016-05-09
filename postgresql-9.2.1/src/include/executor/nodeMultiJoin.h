@@ -22,7 +22,16 @@ typedef struct JoinTupleData
 	MinimalTuple mtuple;
 }	JoinTupleData;
 
+typedef struct JoinTupleData32
+{
+	struct JoinTupleData32 *next;		/* link to next tuple in same bucket */
+	uint32		hashvalue;		/* tuple's hash code */
+	uint32		mtuple;
+}	JoinTupleData32;
+
 #define JTUPLESIZE  MAXALIGN(sizeof(JoinTupleData))
+
+#define JTUPLESIZE32  MAXALIGN(sizeof(JoinTupleData32))
 
 
 
@@ -34,10 +43,13 @@ typedef struct  SimpleHashTableData
 	int			nbuckets;		/* # buckets in the in-memory hash table */
 	int			log2_nbuckets;	/* its log2 (nbuckets must be a power of 2) */
 	/* buckets[i] is head of list of tuples in i'th in-memory bucket */
-	struct JoinTupleData **buckets;
+	struct JoinTupleData32 **buckets;
 	double		totalTuples;	/* # tuples obtained from inner plan */
-	JoinTuple	firstElement;
-	JoinTuple	freeList;
+
+//	JoinTuple	firstElement;
+//	JoinTuple	freeList;
+	JoinTuple32	firstElement;
+	JoinTuple32	freeList;
 	Size		spaceUsed;		/* memory space currently used by tuples */
 	Size		spaceAllowed;	/* upper limit for space used */
 	MemoryContext hashCxt;		/* context for whole-hash-join storage */
@@ -47,6 +59,7 @@ typedef struct  SimpleHashTableData
 	char  		pad;
 	/* ^ Alex Field above must be the same as HashJoinTableData  ^*/
 	FmgrInfo   *hashfunctions;	/* lookup data for hash functions */
+	RelChunk   *chunk;
 }	SimpleHashTableData;
 
 

@@ -123,7 +123,8 @@ extern void JC_removeChunk(RelChunk *chunk);
 extern void  JC_InitChunkMemoryContext(RelChunk *chunk, RelChunk * toDrop);
 void JC_AddChunkMemoryContext(void * mcxt);
 extern RelationChunksDesc  JC_InitRelationChunks(uint32 size, Relation relation);
-extern MinimalTuple JC_StoreMinmalTuple(RelChunk *chunk , MinimalTuple mtuple);
+extern uint32 JC_StoreMinmalTuple(RelChunk *chunk , MinimalTuple mtuple);
+extern MinimalTuple JC_ReadMinmalTuple(RelChunk *chunk, uint32 index);
 
 extern void JC_InitChunk(uint32 size, Relation relation, Index index);
 extern void JC_ResetChunk(Relation relation, Index index);

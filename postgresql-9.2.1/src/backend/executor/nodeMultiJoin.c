@@ -275,7 +275,7 @@ ExecCHashJoin(CHashJoinState *node) {
 				 */
 				if (joinqual == NIL || ExecQual(joinqual, econtext, false)) {
 					node->chj_MatchedOuter = true;
-					HeapTupleHeaderSetMatch(node->chj_CurTuple->mtuple);
+					HeapTupleHeaderSetMatch(JC_ReadMinmalTuple(node->chj_HashTable->chunk,node->chj_CurTuple->mtuple));
 
 //					/* In an antijoin, we never return a matched tuple */
 //					if (node->js.jointype == JOIN_ANTI)
@@ -1305,20 +1305,23 @@ static void ExecMultiJoinGetNewChunk(MultiJoinState * mhjoinstate) {
 
 		JC_InitChunkMemoryContext(chunk, toDrop);
 
-		// Cleaning stuff for dropping chunks. We handle two mean cases. If we are abouut reusing a already allocated
+		// Cleaning stuff for dropping chunks. We handle two mean cases. If we are about reusing an already allocated
 		// hash table we have to
+
+		//persistent hash table code here
+
 		if (toDrop != NULL && toDrop->state == CH_DROPPED) {
 			MultiHashState *dropped_mhstate = mhjoinstate->mhashnodes[ChunkGetRelid(toDrop)];
 			dropped_mhstate->lchunks = list_delete(dropped_mhstate->lchunks, toDrop);
 			dropped_mhstate->hasDropped = true;
-			if (ChunkGetRelid(toDrop) == ChunkGetRelid(chunk) && toDrop->numBlocks >= chunk->numBlocks){
+		/*	if (ChunkGetRelid(toDrop) == ChunkGetRelid(chunk) && toDrop->numBlocks >= chunk->numBlocks){
 
 				ExecMultiHashResetHashTables(dropped_mhstate,chunk,toDrop);
 
 			}else{
 				ExecMultiHashTablesDestroy(dropped_mhstate, ChunkGetID(toDrop));
 				ExecResetMultiHashtable(mhstate, mhstate->chunk_hashables[ChunkGetID(chunk)]);
-			}
+			}*/
 
 		}
 		break;

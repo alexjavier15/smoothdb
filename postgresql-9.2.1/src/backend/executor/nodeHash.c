@@ -2232,11 +2232,9 @@ HashState *
 ExecInitMultiHash(MultiHash *node, EState *estate, int eflags)
 {
 	HashState  *hashstate;
-	ListCell *lc;
 	MultiHashState * mhashstate;
 	ScanState *scanNode;
 
-	List * hashkeys_list= NIL;
 
 	if(node->ps != NULL)
 		return (HashState * )node->ps;
@@ -2336,16 +2334,12 @@ ExecInitMultiHash(MultiHash *node, EState *estate, int eflags)
 
 TupleTableSlot *
 ExecMultiHash(MultiHashState *node) {
-	PlanState  *outerNode;
-	List	   *hashkeys;
-	SimpleHashTable hashtable;
+
 	TupleTableSlot *slot;
 	ExprContext *econtext;
-	uint32		hashvalue;
-	ListCell *lc;
+
 	MinimalTuple mtuple = NULL;
-	MinimalTuple  hashTuple = NULL;
-	bool inserted = false;
+
 
 	/* must provide our own instrumentation support */
 	if (node->hstate.ps.instrument)
@@ -2629,7 +2623,7 @@ ExecMultiHashFillTupleCache(MultiHashState *node)
 	for (;;)
 	{
 		MinimalTuple mtuple = NULL;
-		MinimalTuple  hashTuple = NULL;
+		uint32  hashTupleIdx = NULL;
 
 
 
@@ -2649,56 +2643,54 @@ ExecMultiHashFillTupleCache(MultiHashState *node)
 
 		mtuple = ExecFetchSlotMinimalTuple(slot);
 
-		hashTuple = JC_StoreMinmalTuple(node->currChunk,mtuple);
-
-		foreach(lc,node->all_hashkeys) {
-			/* Quick shortcut for only inserting tuples in
-			 * the current used hash table. To be reworked for join
-			 * reordering
-			 */
-			HashInfo * hinfo = (HashInfo *) lfirst(lc);
-			if (hinfo->isCurrent) {
-				if (node->hashable_array[hinfo->id] == NULL) {
-					ExecMultiHashTableCreate(node,
-							hinfo->hoperators,
-							false,
-							&node->hashable_array[hinfo->id],
-							scan->len,
-							node->currChunk->numBlocks);
-
-				}
-
-				hashtable = node->hashable_array[hinfo->id];
-				/*
-				 * set expression context
+		hashTupleIdx = JC_StoreMinmalTuple(node->currChunk,mtuple);
+		//Persistent hash table code here
+		if(node->currChunk->state !=CH_DROPPED ){
+			foreach(lc,node->all_hashkeys) {
+				/* Quick shortcut for only inserting tuples in
+				 * the current used hash table. To be reworked for join
+				 * reordering
 				 */
-				hashkeys = hinfo->hashkeys;
+				HashInfo * hinfo = (HashInfo *) lfirst(lc);
+				if (hinfo->isCurrent) {
+					if (node->hashable_array[hinfo->id] == NULL) {
+						ExecMultiHashTableCreate(node,
+								hinfo->hoperators,
+								false,
+								&node->hashable_array[hinfo->id],
+								scan->len,
+								node->currChunk->numBlocks);
 
-				if (ExecMultiHashGetHashValue(hashtable,
-						econtext,
-						hashkeys,
-						false,
-						hashtable->keepNulls,
-						&hashvalue)) {
+						node->hashable_array[hinfo->id]->chunk=node->currChunk;
 
-					/* Not subject to skew optimization, so insert normally */
-					ExecMultiHashTableInsert(hashtable, hashTuple, hashvalue);
-
-					hashtable->totalTuples += 1;
-				}
-				else{
-
-					if(hashTuple!=NULL){
-
-							pfree(hashTuple);
 					}
+
+					hashtable = node->hashable_array[hinfo->id];
+					/*
+					 * set expression context
+					 */
+					hashkeys = hinfo->hashkeys;
+
+					if (ExecMultiHashGetHashValue(hashtable,
+							econtext,
+							hashkeys,
+							false,
+							hashtable->keepNulls,
+							&hashvalue)) {
+
+						/* Not subject to skew optimization, so insert normally */
+						ExecMultiHashTableInsert(hashtable, hashTupleIdx, hashvalue);
+
+						hashtable->totalTuples += 1;
+					}
+
 				}
+				/* must provide our own instrumentation support */
+					if (node->hstate.ps.instrument)
+						InstrStopNode(node->hstate.ps.instrument, hashtable->totalTuples);
+
+
 			}
-			/* must provide our own instrumentation support */
-				if (node->hstate.ps.instrument)
-					InstrStopNode(node->hstate.ps.instrument, hashtable->totalTuples);
-
-
 		}
 
 
@@ -2871,9 +2863,9 @@ ExecMultiHashGetBucket(SimpleHashTable hashtable,
  * ----------------------------------------------------------------
  */
 
-void ExecMultiHashTableInsert(SimpleHashTable hashtable, MinimalTuple tuple, uint32 hashvalue) {
+void ExecMultiHashTableInsert(SimpleHashTable hashtable, uint32 tuple, uint32 hashvalue) {
 	int bucketno;
-	JoinTuple jtuple;
+	JoinTuple32 jtuple;
 
 
 	ExecMultiHashGetBucket(hashtable, hashvalue, &bucketno);
@@ -2904,14 +2896,14 @@ void ExecMultiHashTableInsert(SimpleHashTable hashtable, MinimalTuple tuple, uin
 		 * could not possibly have been matched to an outer tuple before it
 		 * went into the batch file.
 		 */
-		HeapTupleHeaderClearMatch(jtuple->mtuple);
+		HeapTupleHeaderClearMatch(JC_ReadMinmalTuple(hashtable->chunk,jtuple->mtuple));
 
 		/* Push it onto the front of the bucket's list */
 		jtuple->next = hashtable->buckets[bucketno];
 		hashtable->buckets[bucketno] = jtuple;
 
 		/* Account for space used, and back off if we've used too much */
-		hashtable->spaceUsed += JTUPLESIZE;
+		hashtable->spaceUsed += JTUPLESIZE32;
 
 
 
@@ -2925,7 +2917,7 @@ ExecMultiHashScanBucket(CHashJoinState *chjstate,
 {
 	List	   *hjclauses = chjstate->hashclauses;
 	SimpleHashTable hashtable = chjstate->chj_HashTable;
-	JoinTuple hashTuple =  chjstate->chj_CurTuple;
+	JoinTuple32 hashTuple =  chjstate->chj_CurTuple;
 	uint32		hashvalue = chjstate->chj_CurHashValue;
 
 	/*
@@ -2935,28 +2927,22 @@ ExecMultiHashScanBucket(CHashJoinState *chjstate,
 	 * If the tuple hashed to a skew bucket then scan the skew bucket
 	 * otherwise scan the standard hashtable bucket.
 	 */
-	//printf("hastable pointer num : %X \n",hashtable);
-//	printf("Bucket num : %d \n",chjstate->chj_CurBucketNo);
 
 	if (hashTuple != NULL)
 		hashTuple = hashTuple->next;
 	else{
-//		printf("NEW BUCKET\n");
 		hashTuple = hashtable->buckets[chjstate->chj_CurBucketNo];
 	}
 
-//	printf("hashTuple pointer : %X \n",hashTuple);
-//	printf("\n");
-//	fflush(stdout);
 
 	while (hashTuple != NULL)
 	{
 		if (hashTuple->hashvalue == hashvalue ) {
 
 			TupleTableSlot *inntuple;
-
+			MinimalTuple tuple = JC_ReadMinmalTuple(hashtable->chunk,hashTuple->mtuple);
 			/* insert hashtable's tuple into exec slot so ExecQual sees it */
-			inntuple = ExecStoreMinimalTuple(hashTuple->mtuple,
+			inntuple = ExecStoreMinimalTuple(tuple,
 					chjstate->chj_HashTupleSlot,
 					false); /* do not pfree */
 
@@ -3021,9 +3007,9 @@ static void ExecMultiHashAllocateHashtable(SimpleHashTable hashtable) {
 
 	int i;
 	Size elementSize;
-	JoinTuple firstElement;
-	JoinTuple tmpElement;
-	JoinTuple prevElement;
+	JoinTuple32 firstElement;
+	JoinTuple32 tmpElement;
+	JoinTuple32 prevElement;
 	MemoryContext oldcxt;
 
 	int num_elements = hashtable->nbuckets *NTUP_PER_BUCKET;
@@ -3031,11 +3017,11 @@ static void ExecMultiHashAllocateHashtable(SimpleHashTable hashtable) {
 
 	oldcxt = MemoryContextSwitchTo(hashtable->hashCxt);
 	printf(" Allocating hashtable with %d buckets \n", hashtable->nbuckets);
-	hashtable->buckets = (JoinTuple *) palloc0(hashtable->nbuckets * sizeof(JoinTuple));
+	hashtable->buckets = (JoinTuple32 *) palloc0(hashtable->nbuckets * sizeof(JoinTuple32));
 
-	elementSize = MAXALIGN(sizeof(JoinTupleData));
+	elementSize = MAXALIGN(sizeof(JoinTupleData32));
 
-	firstElement = (JoinTuple) palloc0( num_elements * elementSize);
+	firstElement = (JoinTuple32) palloc0( num_elements * elementSize);
 
 	if (!firstElement)
 		elog(ERROR, "out of memory. could no create hashtable jointuples");
@@ -3050,7 +3036,7 @@ static void ExecMultiHashAllocateHashtable(SimpleHashTable hashtable) {
 
 		tmpElement->next = prevElement;
 		prevElement = tmpElement;
-		tmpElement = (JoinTuple) (((char *) tmpElement) + elementSize);
+		tmpElement = (JoinTuple32) (((char *) tmpElement) + elementSize);
 	}
 
 	hashtable->freeList = prevElement;
@@ -3098,26 +3084,26 @@ static void ExecMultiHashResetHashTable(SimpleHashTable hashtable){
 
 	int i;
 	Size elementSize;
-	JoinTuple firstElement = hashtable->firstElement;
-	JoinTuple tmpElement;
-	JoinTuple prevElement;
+	JoinTuple32 firstElement = hashtable->firstElement;
+	JoinTuple32 tmpElement;
+	JoinTuple32 prevElement;
 	int nelem = hashtable->nbuckets *NTUP_PER_BUCKET;
 	//int nbuckets = hashtable->nbuckets;
 
 	prevElement = NULL;
 	tmpElement = firstElement;
 
-	elementSize = MAXALIGN(sizeof(JoinTupleData));
+	elementSize = MAXALIGN(sizeof(JoinTupleData32));
 	memset(tmpElement,0, nelem * elementSize);
 	// relink all the elements in the freelist setting its contents to NULL
 	for (i = 0; i < nelem; i++) {
 
 		tmpElement->next = prevElement;
 		prevElement = tmpElement;
-		tmpElement = (JoinTuple) (((char *) tmpElement) + elementSize);
+		tmpElement = (JoinTuple32) (((char *) tmpElement) + elementSize);
 	}
 
-	memset(hashtable->buckets, 0 ,hashtable->nbuckets * sizeof(JoinTuple));
+	memset(hashtable->buckets, 0 ,hashtable->nbuckets * sizeof(JoinTuple32));
 	hashtable->freeList = prevElement;
 	hashtable->spaceUsed = 0;
 	hashtable->totalTuples = 0;

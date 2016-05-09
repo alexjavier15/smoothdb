@@ -1705,6 +1705,7 @@ typedef struct HashJoinTupleData *HashJoinTuple;
 typedef struct HashJoinTableData *HashJoinTable;
 
 typedef struct JoinTupleData *JoinTuple;
+typedef struct JoinTupleData32 *JoinTuple32;
 
 /*hash table for a single chunk and a single hash key in mjoin ( i.e.
  * total of  SimpleHashTable = num_chunks * num_hash_keys*/
@@ -1830,7 +1831,7 @@ typedef struct SelectivityState
 	SimpleHashTable chj_HashTable;
 	uint32		chj_CurHashValue;
 	int			chj_CurBucketNo;
-	JoinTuple chj_CurTuple;
+	JoinTuple32 chj_CurTuple;
 	TupleTableSlot *chj_OuterTupleSlot;
 	TupleTableSlot *chj_HashTupleSlot;
 	TupleTableSlot *chj_NullOuterTupleSlot;
