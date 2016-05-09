@@ -1226,7 +1226,7 @@ static void ExecInitJoinCache(MultiJoinState * mhjoinstate) {
 	int chunksLeft = chunks_per_cycle;
 	while (chunksLeft) {
 
-		RelChunk * chunk =  JC_processNextChunk();
+		RelChunk * chunk =  JC_processNextChunk(true);
 		MultiHashState *mhstate = mhjoinstate->mhashnodes[ChunkGetRelid(chunk)];
 		JC_InitChunkMemoryContext(chunk, NULL);
 		ExecPrepareChunk(mhjoinstate, mhstate, chunk);
@@ -1286,46 +1286,31 @@ static void ExecMultiJoinGetNewChunk(MultiJoinState * mhjoinstate) {
 	MultiHashState *mhstate = NULL;
 
 	// loop the simulator until we find a chunk with feasible(s) join(s)
-	printf("***Getting new chunk in MultiJoin node****");
+
 	for (;;) {
 		RelChunk * toDrop = NULL;
-		chunk = JC_processNextChunk();
+		chunk =  JC_processNextChunk(false);
 		mhstate = mhjoinstate->mhashnodes[ChunkGetRelid(chunk)];
 
-		// Do we have any chunk to drop?
 		if (list_length(mhstate->lchunks) >= 0) {
 
 			toDrop = ExecMultiJoinChooseDroppedChunk(mhjoinstate, chunk);
 		}
 
-		if ((toDrop == NULL) && JC_isFull()){
-			JC_removeChunk(chunk);
+		if (toDrop == NULL)
 			continue;
-		}
-
 
 		JC_InitChunkMemoryContext(chunk, toDrop);
-
-		// Cleaning stuff for dropping chunks. We handle two mean cases. If we are abouut reusing a already allocated
-		// hash table we have to
 		if (toDrop != NULL && toDrop->state == CH_DROPPED) {
-			MultiHashState *dropped_mhstate = mhjoinstate->mhashnodes[ChunkGetRelid(toDrop)];
-			dropped_mhstate->lchunks = list_delete(dropped_mhstate->lchunks, toDrop);
-			dropped_mhstate->hasDropped = true;
-			if (ChunkGetRelid(toDrop) == ChunkGetRelid(chunk) && toDrop->numBlocks >= chunk->numBlocks){
 
-				ExecMultiHashResetHashTables(dropped_mhstate,chunk,toDrop);
-
-			}else{
-				ExecMultiHashTablesDestroy(dropped_mhstate, ChunkGetID(toDrop));
-				ExecResetMultiHashtable(mhstate, mhstate->chunk_hashables[ChunkGetID(chunk)]);
-			}
+			mhstate->lchunks = list_delete_first(mhstate->lchunks);
+			mhstate->hasDropped = true;
 
 		}
 		break;
 	}
 	ExecPrepareChunk(mhjoinstate, mhstate, chunk);
-	printf("***END Getting new chunk in MultiJoin node****");
+
 
 	if(mhjoinstate->chunkedSubplans == NIL)
 	mhjoinstate->chunkedSubplans = ExecMultiJoinPrepareSubplans(mhjoinstate,0, NIL);
