@@ -399,8 +399,9 @@ void JC_InitChunkMemoryContext(RelChunk *chunk, RelChunk * toDrop) {
 
 }
 
-MinimalTuple JC_StoreMinmalTuple(RelChunk *chunk, MinimalTuple mtuple) {
+uint32 JC_StoreMinmalTuple(RelChunk *chunk, MinimalTuple mtuple) {
 	MinimalTuple copyTuple;
+	uint32 index;
 	uint32 tupsize = MAXALIGN(mtuple->t_len);
 	volatile JCacheMemHeader *jcacheSegHdr = JCacheSegHdr;
 
@@ -411,7 +412,7 @@ MinimalTuple JC_StoreMinmalTuple(RelChunk *chunk, MinimalTuple mtuple) {
 				ChunkGetRelid(chunk));
 
 	}
-
+	index = chunk->next -chunk->tupledata;
 	copyTuple = (MinimalTuple) chunk->next;
 	if (!chunk->head)
 		chunk->head = copyTuple;
@@ -421,7 +422,7 @@ MinimalTuple JC_StoreMinmalTuple(RelChunk *chunk, MinimalTuple mtuple) {
 	Assert(chunk->next != NULL);
 	chunk->freespace -= tupsize;
 	jcacheSegHdr->freesize = jcacheSegHdr->freesize - tupsize;
-	return copyTuple;
+	return index;
 
 }
 /*Dynamic memory allocation
@@ -599,4 +600,15 @@ static bool JC_isValidChunk(RelChunk *chunk){
 	//printf("Is valid  %d \n", isValid);
 
 	return isValid;
+}
+
+MinimalTuple JC_ReadMinmalTuple(RelChunk *chunk, uint32 index){
+
+	void * head = chunk->tupledata;
+	if(index < chunk_size)
+		return (MinimalTuple)(head+index);
+	else
+		return NULL;
+
+
 }

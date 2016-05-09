@@ -1302,12 +1302,12 @@ static void ExecMultiJoinGetNewChunk(MultiJoinState * mhjoinstate) {
 
 		JC_InitChunkMemoryContext(chunk, toDrop);
 		if (toDrop != NULL && toDrop->state == CH_DROPPED) {
+					MultiHashState *dropped_mhstate = mhjoinstate->mhashnodes[ChunkGetRelid(toDrop)];
+					dropped_mhstate->lchunks = list_delete(dropped_mhstate->lchunks, toDrop);
+					dropped_mhstate->hasDropped = true;
 
-			mhstate->lchunks = list_delete_first(mhstate->lchunks);
-			mhstate->hasDropped = true;
-
-		}
-		break;
+				}
+				break;
 	}
 	ExecPrepareChunk(mhjoinstate, mhstate, chunk);
 
