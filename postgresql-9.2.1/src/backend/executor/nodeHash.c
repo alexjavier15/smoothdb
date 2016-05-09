@@ -2881,8 +2881,23 @@ void ExecMultiHashTableInsert(SimpleHashTable hashtable, uint32 tuple, uint32 ha
 		/* Create the HashJoinTuple */
 		if( hashtable->freeList == NULL){
 
+			Size elementSize = MAXALIGN(sizeof(JoinTupleData32));
 
-			elog(ERROR, "out of memory: No more buckets in the hashtable, nbuckets :%d, total_tuples: %0.lf ",hashtable->nbuckets,hashtable->totalTuples);
+			JoinTuple32 firstElement = (JoinTuple32) palloc0( NTUP_PER_BUCKET  * elementSize);
+			hashtable->freeList= firstElement
+			JoinTuple32	prevElement = NULL;
+			JoinTuple32		tmpElement = firstElement;
+			int count = 0;
+
+					for (i = 0; i < NTUP_PER_BUCKET; i++) {
+
+						tmpElement->next = prevElement;
+						prevElement = tmpElement;
+						tmpElement = (JoinTuple32) (((char *) tmpElement) + elementSize);
+					}
+
+			hashtable->freeList = prevElement;
+			//elog(ERROR, "out of memory: No more buckets in the hashtable, nbuckets :%d, total_tuples: %0.lf ",hashtable->nbuckets,hashtable->totalTuples);
 		}
 		jtuple = hashtable->freeList;
 		jtuple->hashvalue = hashvalue;
