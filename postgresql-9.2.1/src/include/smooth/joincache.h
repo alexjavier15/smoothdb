@@ -127,7 +127,7 @@ extern MinimalTuple JC_StoreMinmalTuple(RelChunk *chunk , MinimalTuple mtuple);
 
 extern void JC_InitChunk(uint32 size, Relation relation, Index index);
 extern void JC_ResetChunk(Relation relation, Index index);
-extern RelChunk * JC_processNextChunk(void);
+extern RelChunk * JC_processNextChunk(bool poll_swift);
 extern void make_random_seq(RelOptInfo ** rel_array, int size) ;
 extern void JC_DeleteChunk(RelChunk *chunk);
 #endif /* JOINCACHE_H_ */

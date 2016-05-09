@@ -17,6 +17,10 @@
 #include "lib/stringinfo.h"
 #include "utils/dynahash.h"
 
+#include "msgq.h"
+#include "json_builder.h"
+#include <libgen.h>
+
 #define  MAX_NUM_RELATIONS 16
 
 #define  CHUNK_PREFIX	"JC_"
@@ -36,7 +40,8 @@ static HTAB * RelationChunksIndex = NULL;
 int chunk_size;
 
 static List * seq_cycle;
-//static ListCell *nextChunk;
+static int nchunks_received;
+static int nchunks_requested;
 
 void JC_InitCache(void) {
 	int hash_tag = HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT;
