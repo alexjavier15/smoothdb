@@ -2866,7 +2866,12 @@ ExecMultiHashGetBucket(SimpleHashTable hashtable,
 void ExecMultiHashTableInsert(SimpleHashTable hashtable, uint32 tuple, uint32 hashvalue) {
 	int bucketno;
 	JoinTuple32 jtuple;
-
+	JoinTuple32 firstElement;
+	JoinTuple32	prevElement = NULL;
+	JoinTuple32	tmpElement;
+	Size elementSize = MAXALIGN(sizeof(JoinTupleData32));
+	int count = 0;
+	int i = 0;
 
 	ExecMultiHashGetBucket(hashtable, hashvalue, &bucketno);
 
@@ -2881,13 +2886,13 @@ void ExecMultiHashTableInsert(SimpleHashTable hashtable, uint32 tuple, uint32 ha
 		/* Create the HashJoinTuple */
 		if( hashtable->freeList == NULL){
 
-			Size elementSize = MAXALIGN(sizeof(JoinTupleData32));
+			
 
-			JoinTuple32 firstElement = (JoinTuple32) palloc0( NTUP_PER_BUCKET  * elementSize);
-			hashtable->freeList= firstElement
-			JoinTuple32	prevElement = NULL;
-			JoinTuple32		tmpElement = firstElement;
-			int count = 0;
+			firstElement = (JoinTuple32) palloc0( NTUP_PER_BUCKET  * elementSize);
+			hashtable->freeList= firstElement;
+			prevElement = NULL;
+			tmpElement = firstElement;
+			
 
 					for (i = 0; i < NTUP_PER_BUCKET; i++) {
 
