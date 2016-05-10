@@ -275,7 +275,7 @@ ExecCHashJoin(CHashJoinState *node) {
 				 */
 				if (joinqual == NIL || ExecQual(joinqual, econtext, false)) {
 					node->chj_MatchedOuter = true;
-					HeapTupleHeaderSetMatch(node->chj_CurTuple->mtuple);
+					HeapTupleHeaderSetMatch(JC_ReadMinmalTuple(node->chj_HashTable->chunk,node->chj_CurTuple->mtuple));
 
 //					/* In an antijoin, we never return a matched tuple */
 //					if (node->js.jointype == JOIN_ANTI)
