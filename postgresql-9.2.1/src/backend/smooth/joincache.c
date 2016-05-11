@@ -34,6 +34,7 @@ static JCacheMemHeader *JCacheSegHdr;
 static HTAB * RelationChunksIndex = NULL;
 //static List *JChunkQueue =  NIL;
 int chunk_size;
+static int chunk_counter;
 
 static List * seq_cycle;
 //static ListCell *nextChunk;
@@ -88,7 +89,7 @@ void JC_InitCache(void) {
 	MemoryContextSwitchTo(oldcxt);
 	oldcxt = MemoryContextSwitchTo(TopMemoryContext);
 
-	printf("NUM OF ALLOCATED CHUNKS : %.0f , Free mem: %ld \n", num_chunks, JCacheSegHdr->freesize);
+	elog(INFO_MJOIN1,"NUM OF ALLOCATED CHUNKS : %.0f , Free mem: %ld \n", num_chunks, JCacheSegHdr->freesize);
 	for (i = 0; i < num_chunks; i++) {
 		appendStringInfo(&str, "%d", i);
 		/*Dynamic memroy allcoation
@@ -143,45 +144,64 @@ void JC_AddChunkedSubPlan(ChunkedSubPlan *subplan) {
 
 RelChunk * JC_processNextChunk(void) {
 
-//	JoinCacheEntry *jcentry;
+	 //JoinCacheEntry *jcentry;
+	  int random_chunk;
+	  RelChunk *result;
 
-	// Get a ramdom item from the seq_cycle list
-	Bitmapset * refused_set= NULL;
-	int random_chunk =  rand() % list_length(seq_cycle);
+	  //random_chunk = JC_swiftNextChunk(&result);
 
-	RelChunk *result = (RelChunk *) list_nth(seq_cycle,random_chunk);
+	  // Get a ramdom item from the seq_cycle list
+	  Bitmapset * refused_set= NULL;
+	  //int random_chunk =  rand() % list_length(seq_cycle);
 
-	bool isValid = JC_isValidChunk(result);
+	  random_chunk = chunk_counter++;
+	  elog(INFO_MJOIN1,"Chunk counter: %d \n", chunk_counter);
+	  if (chunk_counter == list_length(seq_cycle)){
+		  elog(INFO_MJOIN1,"Reseting list counter. List size: %d",chunk_counter);
+	    chunk_counter = 0;
+	  }
 
-	refused_set = bms_add_member(refused_set,random_chunk);
+	  result = (RelChunk *) list_nth(seq_cycle,random_chunk);
+	  result->num_request++;
+	  bool isValid = JC_isValidChunk(result);
 
-	while (!isValid || (list_length(result->subplans) == 0 || result->state == CH_READ) ) {
+	  //refused_set = bms_add_member(refused_set,random_chunk);
+	  refused_set = bms_add_member(refused_set, random_chunk);
 
-		if(!isValid){
+	  while (!isValid || (list_length(result->subplans) == 0 || result->state == CH_READ) ) {
 
-			printf("Refusing Chunk: [ rel : %d, id %d ] !\n",ChunkGetRelid(result), ChunkGetID(result));
-			fflush(stdout);
-		}
+	    if(!isValid){
+	    	result->num_refuse++;
+	    	elog(INFO_MJOIN1,"Refusing Chunk: [ rel : %d, id %d ] !\n",ChunkGetRelid(result), ChunkGetID(result));
+	    }
 
-		refused_set = bms_add_member(refused_set,random_chunk);
-		do {
+	    refused_set = bms_add_member(refused_set,random_chunk);
+	    do {
 
-			random_chunk = rand() % list_length(seq_cycle);
+	      //random_chunk = rand() % list_length(seq_cycle);
+	      //random_chunk = JC_swiftNextChunk(&result);
+	      //ordered communication
+	      random_chunk = chunk_counter++;
+	      if (chunk_counter == list_length(seq_cycle)){
+	    	  elog(INFO_MJOIN2,"Reseting list counter in not valid. List size: %d", chunk_counter);
+	    	  chunk_counter = 0;
+	      }
+	    } while (bms_is_member(random_chunk, refused_set));
 
-		} while (bms_is_member( random_chunk, refused_set));
+	    result = (RelChunk *) list_nth(seq_cycle,random_chunk);
+	    isValid= JC_isValidChunk(result);
 
-		// = nextChunk->next;
-		result = (RelChunk *) list_nth(seq_cycle,random_chunk);
-		isValid= JC_isValidChunk(result);
+	  }
 
-	}
+		elog(INFO_MJOIN1,"\nRECEIVING CHUNK: \n");
 
-	printf("RECEIVING CHUNK: \n");
-	printf("rel : %d chunk : %d\n", ChunkGetRelid(result), ChunkGetID(result));
-	fflush(stdout);
-	JCacheSegHdr->chunks = lappend(JCacheSegHdr->chunks, result);
-	JCacheSegHdr->cachedIds = bms_add_member(JCacheSegHdr->cachedIds, ChunkGetRelid(result));
-	return result;
+		elog(INFO_MJOIN1,"rel : %d phys id %d chunk : %d\n", ChunkGetRelid(result),
+		result->rel_id, ChunkGetID(result));
+
+		JCacheSegHdr->chunks = lappend(JCacheSegHdr->chunks, result);
+		JCacheSegHdr->cachedIds = bms_add_member(JCacheSegHdr->cachedIds, ChunkGetRelid(result));
+		return result;
+
 
 }
 
@@ -191,12 +211,12 @@ void JC_dropChunk(RelChunk *chunk) {
 	if (chunk == NULL)
 		elog(ERROR, "Cannot drop a null chunk !");
 
-	printf("Dropping chunk : \n");
-	printf("rel : %d chunk : %d , state : %d , subplans : %d\n",
-			ChunkGetRelid(chunk),
-			ChunkGetID(chunk),
-			chunk->state,
-			list_length(chunk->subplans));
+	elog(INFO_MJOIN1,"Dropping chunk : \n");
+	elog(INFO_MJOIN1,"rel : %d chunk : %d , state : %d , subplans : %d\n",
+				ChunkGetRelid(chunk),
+				ChunkGetID(chunk),
+				chunk->state,
+				list_length(chunk->subplans));
 	chunk_mem = chunk->tupledata;
 	chunk->tupledata =NULL;
 	chunk->next = NULL;
@@ -205,6 +225,7 @@ void JC_dropChunk(RelChunk *chunk) {
 	chunk->priority = 0;
 	chunk->freespace = MAXALIGN(chunk_size);
 	chunk->tuples = 0;
+	chunk->num_drops++;
 	JC_removeChunk( chunk);
 	JC_AddChunkMemoryContext(chunk_mem);
 }
@@ -315,77 +336,83 @@ List * make_random_list(int max_relid) {
 }
 
 void make_random_seq(RelOptInfo ** rel_array, int size) {
+	 Bitmapset * allChunks = NULL;
+	  List *result = NIL;
+	  List *relSeq = NIL;
+	  int total_chunks = 0;
+	  int max_rel;
+	  int i;
+	  int *relation_chunk_counter;
+	  int relation_counter = 0;
 
-	Bitmapset * allChunks = NULL;
-	List *result = NIL;
-	List *relSeq = NIL;
-	int total_chunks = 0;
-	int max_rel;
-	int i;
-	JCacheSegHdr->relids = NULL;
-	for (i = 1; i < size; i++) {
-		if (rel_array[i] != NULL) {
-			JCacheSegHdr->relids = bms_add_member(JCacheSegHdr->relids, i);
-			total_chunks += list_length(rel_array[i]->chunks);
+	  relation_chunk_counter = (int *) calloc(size,sizeof(int));
 
+	  JCacheSegHdr->relids = NULL;
+	  for (i = 1; i < size; i++) {
+	    if (rel_array[i] != NULL) {
+	      JCacheSegHdr->relids = bms_add_member(JCacheSegHdr->relids, i);
+	      total_chunks += list_length(rel_array[i]->chunks);
+
+	    }
+
+	  }
+
+	  relSeq = make_random_list(size);
+
+	  pprint(relSeq);
+	  while (bms_num_members(allChunks) != total_chunks) {
+	    ListCell *lc;
+
+	    foreach(lc, relSeq) {
+	      // full cycle restart it
+	      if(relation_counter == size) {
+		relation_counter = 0;
+	      }
+	      uint32 relid = lfirst_int(lc);
+	      int nextChunk = 0;
+	      uint32 chunkid;
+	      RelOptInfo * rel = rel_array[relid];
+	      if (rel != NULL) {
+		// decide how many random chunks we will get for this relation: 1 < k  < list_length(rel->chunks)
+
+		//nextChunk = rand() % list_length(rel->chunks);
+		//order
+		nextChunk = relation_chunk_counter[relation_counter]++;
+		if (nextChunk >= list_length(rel->chunks)){
+		  nextChunk = 0;
+		}
+		//printf( " chunk for rel %d = %d \n", relid,nextChunk);
+		chunkid = (uint32) (relid << 16) | nextChunk;
+		if (chunkid != 0 && !bms_is_member(chunkid, allChunks)) {
+		  RelChunk *chunk = (RelChunk *) list_nth(rel->chunks, (int) nextChunk);
+
+		  allChunks = bms_add_member(allChunks, chunkid);
+		  //printf(" rel : %d, id : %d \n", ChunkGetRelid(chunk), ChunkGetID(chunk));
+
+		  result = lappend(result, chunk);
 		}
 
+	      }
+	      relation_counter++;
+
+	    }
+
+	  }
+	  ListCell *chk;
+	  elog(INFO_MJOIN2,"Ordering seq is : \n");
+	  foreach(chk,seq_cycle) {
+
+	    RelChunk *chunk = (RelChunk *) lfirst(chk);
+
+	    elog(INFO_MJOIN2," rel : %d, id : %d \n", ChunkGetRelid(chunk), ChunkGetID(chunk));
+
+	  }
+	  /* Make a circular list*/
+	  chunks_per_cycle = Min(chunks_per_cycle, list_length(result));
+
+	  seq_cycle = result;
+	  chunk_counter = 0;
 	}
-
-	relSeq = make_random_list(size);
-
-	pprint(relSeq);
-	while (bms_num_members(allChunks) != total_chunks) {
-		ListCell *lc;
-
-		foreach(lc, relSeq) {
-
-			uint32 relid = lfirst_int(lc);
-			int nextChunk = 0;
-			uint32 chunkid;
-			RelOptInfo * rel = rel_array[relid];
-			if (rel != NULL) {
-				// decide how many random chunks we will get for this relation: 1 < k  < list_length(rel->chunks)
-
-				nextChunk = rand() % list_length(rel->chunks);
-				//	printf( " chunk for rel %d = %d \n", relid,nextChunk);
-				chunkid = (uint32) (relid << 16) | nextChunk;
-				if (chunkid != 0 && !bms_is_member(chunkid, allChunks)) {
-					RelChunk *chunk = (RelChunk *) list_nth(rel->chunks, (int) nextChunk);
-
-					allChunks = bms_add_member(allChunks, chunkid);
-					//	printf(" rel : %d, id : %d \n", ChunkGetRelid(chunk), ChunkGetID(chunk));
-
-					result = lappend(result, chunk);
-				}
-
-			}
-
-		}
-
-	}
-//	ListCell *chk;
-//	printf("Ordering seq is : \n");
-//	foreach(chk,seq_cycle) {
-//
-//		RelChunk *chunk = (RelChunk *) lfirst(chk);
-//
-//		printf(" rel : %d, id : %d \n", ChunkGetRelid(chunk), ChunkGetID(chunk));
-//
-//	}
-	/* Make a circular list*/
-	chunks_per_cycle = Min(chunks_per_cycle, list_length(result));
-
-//	{
-//		ListCell * last = list_tail(result);
-//		last->next = list_head(result);
-//
-//		seq_cycle = result;
-//	}
-//	nextChunk = list_head(result);
-
-	seq_cycle = result;
-}
 
 void JC_EndCache(void) {
 

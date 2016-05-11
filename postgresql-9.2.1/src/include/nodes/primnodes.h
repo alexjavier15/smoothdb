@@ -1291,6 +1291,7 @@ typedef struct RelChunk{
 	uint32 chunkID;
 
 	CHUNKSTATE state;
+	uint32	rel_id;
 	int		priority;
 	List	*subplans;
 	void	*tupledata; // same that mctx for shared memory
@@ -1299,6 +1300,11 @@ typedef struct RelChunk{
 	int		tuples;
 	int 	numBlocks;
 	uint32		freespace;
+	int		num_drops;
+	int		num_reads;
+	int		num_request;
+	int		num_refuse;
+
 }RelChunk;
 
 
