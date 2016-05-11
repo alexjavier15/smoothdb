@@ -1164,7 +1164,6 @@ static List * ExecMultiJoinPrepareSubplans(MultiJoinState * mhjoinstate, int ski
 	List *result = startList;
 	int i;
 	int start = skipid == 0 ? 2 :1;
-	printf("skipping %d ", skipid);
 
 	if(result == NIL){
 
@@ -1525,7 +1524,7 @@ static RelChunk * ExecSortChuks(RelChunk ** chunk_array, int size) {
 			if (i == njoin_rel)
 				break;
 		}
-		elog(INFO_MJOIN2,"Not producing tuples chunks :");
+
 
 		foreach(lc,node->pendingSubplans) {
 			List *lchunks = NIL;
