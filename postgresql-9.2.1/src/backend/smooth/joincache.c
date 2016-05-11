@@ -95,7 +95,7 @@ void JC_InitCache(void) {
 	MemoryContextSwitchTo(oldcxt);
 	oldcxt = MemoryContextSwitchTo(TopMemoryContext);
 
-	elog(INFO_MJOIN1,"NUM OF ALLOCATED CHUNKS : %.0f , Free mem: %ld \n", num_chunks, JCacheSegHdr->freesize);
+	elog(INFO,"NUM OF ALLOCATED CHUNKS : %.0f , Free mem: %ld \n", num_chunks, JCacheSegHdr->freesize);
 	for (i = 0; i < num_chunks; i++) {
 		appendStringInfo(&str, "%d", i);
 		/*Dynamic memroy allcoation
@@ -221,12 +221,12 @@ int JC_swiftNextChunk(RelChunk **result)
             jbuilder_add_object(builder, ctarget->c, obuf);
             nchunks_requested++;
 
-            elog(INFO_MJOIN1,"Adding chunk %u to cont %u\n", chunk->chunkID & 0xFFFF,
+            elog(INFO,"Adding chunk %u to cont %u\n", chunk->chunkID & 0xFFFF,
                     ctarget->rel_id);
         }
 
         json_data = jbuilder_serialize(builder);
-        elog(INFO_MJOIN1,"json is %s\n", json_data);
+        elog(INFO,"json is %s\n", json_data);
 
         msgq_client_send(json_data);
 
@@ -245,7 +245,7 @@ int JC_swiftNextChunk(RelChunk **result)
     nchunks_received++;
 
     rel_name = basename(fname);
-    elog(INFO_MJOIN1,"Got file %s base %s\n", fname, rel_name);
+    elog(INFO,"Got file %s base %s\n", fname, rel_name);
 
     // get ids from file name
     if (strchr(rel_name, '.')) {
@@ -256,7 +256,7 @@ int JC_swiftNextChunk(RelChunk **result)
         chunk_id = 0;
     }
 
-    elog(INFO_MJOIN1,"Got rel %d chunk %u\n", rel_id, chunk_id);
+    elog(INFO,"Got rel %d chunk %u\n", rel_id, chunk_id);
 
     free(fname);
 
@@ -293,9 +293,9 @@ RelChunk * JC_processNextChunk(bool poll_swift) {
   //int random_chunk =  rand() % list_length(seq_cycle);
 
   random_chunk = chunk_counter++;
-  elog(INFO_MJOIN1,"Chunk counter: %d \n", chunk_counter);
+  elog(INFO,"Chunk counter: %d \n", chunk_counter);
   if (chunk_counter == list_length(seq_cycle)){
-	  elog(INFO_MJOIN1,"Reseting list counter. List size: %d",chunk_counter);
+	  elog(INFO,"Reseting list counter. List size: %d",chunk_counter);
     chunk_counter = 0;
   }
 
@@ -310,7 +310,7 @@ RelChunk * JC_processNextChunk(bool poll_swift) {
 
     if(!isValid){
     	result->num_refuse++;
-    	elog(INFO_MJOIN1,"Refusing Chunk: [ rel : %d, id %d ] !\n",ChunkGetRelid(result), ChunkGetID(result));
+    	elog(INFO,"Refusing Chunk: [ rel : %d, id %d ] !\n",ChunkGetRelid(result), ChunkGetID(result));
     }
 
     refused_set = bms_add_member(refused_set,random_chunk);
@@ -331,9 +331,9 @@ RelChunk * JC_processNextChunk(bool poll_swift) {
 
   }
 
-	elog(INFO_MJOIN1,"\nRECEIVING CHUNK: \n");
+	elog(INFO,"\nRECEIVING CHUNK: \n");
 
-	elog(INFO_MJOIN1,"rel : %d phys id %d chunk : %d\n", ChunkGetRelid(result),
+	elog(INFO,"rel : %d phys id %d chunk : %d\n", ChunkGetRelid(result),
 	result->rel_id, ChunkGetID(result));
 
 	JCacheSegHdr->chunks = lappend(JCacheSegHdr->chunks, result);
@@ -403,8 +403,8 @@ void JC_dropChunk(RelChunk *chunk) {
 	if (chunk == NULL)
 		elog(ERROR, "Cannot drop a null chunk !");
 
-	elog(INFO_MJOIN1,"Dropping chunk : \n");
-	elog(INFO_MJOIN1,"rel : %d chunk : %d , state : %d , subplans : %d\n",
+	elog(INFO,"Dropping chunk : \n");
+	elog(INFO,"rel : %d chunk : %d , state : %d , subplans : %d\n",
 			ChunkGetRelid(chunk),
 			ChunkGetID(chunk),
 			chunk->state,
