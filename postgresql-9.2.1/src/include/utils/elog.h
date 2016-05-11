@@ -17,13 +17,13 @@
 #include <setjmp.h>
 
 /* Error level codes */
-#define DEBUG5		08			/* Debugging messages, in categories of
+#define DEBUG5		06			/* Debugging messages, in categories of
 								 * decreasing detail. */
-#define DEBUG4		09
+#define DEBUG4		07
 #define DEBUG3		10
 #define DEBUG2		11
 #define DEBUG1		12			/* used by GUC debug_* variables */
-#define LOG			13			/* Server operational messages; sent only to
+#define LOG		13			/* Server operational messages; sent only to
 								 * server log by default. */
 #define COMMERROR	14			/* Client communication problems; same as LOG
 								 * for server reporting, but never sent to
