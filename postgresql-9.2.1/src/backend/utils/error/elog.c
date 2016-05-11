@@ -2410,6 +2410,11 @@ send_message_to_server_log(ErrorData *edata)
 				break;
 			case LOG:
 			case COMMERROR:
+			case INFO_MJOIN2:
+			case INFO_MJOIN1:
+				syslog_level = LOG_INFO;
+				break;
+			case COMMERROR:
 			case INFO:
 				syslog_level = LOG_INFO;
 				break;

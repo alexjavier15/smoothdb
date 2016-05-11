@@ -432,7 +432,7 @@ ExecMultiJoin(MultiJoinState *node) {
 				TupleTableSlot * slot = ExecProcNode(node->current_ps);
 				int ntuples =node->js.ps.state->unique_instr->ntuples;
 				node->js.ps.state->started = true;
-				elog(INFO_MJOIN1,"\nPending Subplans : %d \n", list_length(node->chunkedSubplans));
+				elog(INFO_MJOIN1,"\nPending Subplans : %d \n", list_length(node->pendingSubplans));
 
 				if (TupIsNull(slot)) {
 
