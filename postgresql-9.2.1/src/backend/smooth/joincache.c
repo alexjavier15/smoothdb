@@ -95,7 +95,7 @@ void JC_InitCache(void) {
 	MemoryContextSwitchTo(oldcxt);
 	oldcxt = MemoryContextSwitchTo(TopMemoryContext);
 
-	printf("NUM OF ALLOCATED CHUNKS : %.0f , Free mem: %ld \n", num_chunks, JCacheSegHdr->freesize);
+	elog(INFO_MJOIN1,"NUM OF ALLOCATED CHUNKS : %.0f , Free mem: %ld \n", num_chunks, JCacheSegHdr->freesize);
 	for (i = 0; i < num_chunks; i++) {
 		appendStringInfo(&str, "%d", i);
 		/*Dynamic memroy allcoation
@@ -221,12 +221,12 @@ int JC_swiftNextChunk(RelChunk **result)
             jbuilder_add_object(builder, ctarget->c, obuf);
             nchunks_requested++;
 
-            printf("Adding chunk %u to cont %u\n", chunk->chunkID & 0xFFFF,
+            elog(INFO_MJOIN1,"Adding chunk %u to cont %u\n", chunk->chunkID & 0xFFFF,
                     ctarget->rel_id);
         }
 
         json_data = jbuilder_serialize(builder);
-        printf("json is %s\n", json_data);
+        elog(INFO_MJOIN1,"json is %s\n", json_data);
 
         msgq_client_send(json_data);
 
@@ -245,7 +245,7 @@ int JC_swiftNextChunk(RelChunk **result)
     nchunks_received++;
 
     rel_name = basename(fname);
-    printf("Got file %s base %s\n", fname, rel_name);
+    elog(INFO_MJOIN1,"Got file %s base %s\n", fname, rel_name);
 
     // get ids from file name
     if (strchr(rel_name, '.')) {
@@ -256,7 +256,7 @@ int JC_swiftNextChunk(RelChunk **result)
         chunk_id = 0;
     }
 
-    printf("Got rel %d chunk %u\n", rel_id, chunk_id);
+    elog(INFO_MJOIN1,"Got rel %d chunk %u\n", rel_id, chunk_id);
 
     free(fname);
 
@@ -293,25 +293,24 @@ RelChunk * JC_processNextChunk(bool poll_swift) {
   //int random_chunk =  rand() % list_length(seq_cycle);
 
   random_chunk = chunk_counter++;
-  printf("Chunk counter: %d \n", chunk_counter);
+  elog(INFO_MJOIN1,"Chunk counter: %d \n", chunk_counter);
   if (chunk_counter == list_length(seq_cycle)){
-    printf("Reseting list counter. List size: %d",chunk_counter);
+	  elog(INFO_MJOIN1,"Reseting list counter. List size: %d",chunk_counter);
     chunk_counter = 0;
   }
 
   result = (RelChunk *) list_nth(seq_cycle,random_chunk);
-  
+  result->num_request++;
   bool isValid = JC_isValidChunk(result);
-
+  
   //refused_set = bms_add_member(refused_set,random_chunk);
   refused_set = bms_add_member(refused_set, random_chunk);
 
   while (!isValid || (list_length(result->subplans) == 0 || result->state == CH_READ) ) {
 
     if(!isValid){
-
-      printf("Refusing Chunk: [ rel : %d, id %d ] !\n",ChunkGetRelid(result), ChunkGetID(result));
-      fflush(stdout);
+    	result->num_refuse++;
+    	elog(INFO_MJOIN1,"Refusing Chunk: [ rel : %d, id %d ] !\n",ChunkGetRelid(result), ChunkGetID(result));
     }
 
     refused_set = bms_add_member(refused_set,random_chunk);
@@ -322,27 +321,24 @@ RelChunk * JC_processNextChunk(bool poll_swift) {
       //ordered communication
       random_chunk = chunk_counter++;
       if (chunk_counter == list_length(seq_cycle)){
-	printf("Reseting list counter in not valid. List size: %d", chunk_counter);
-	chunk_counter = 0;
+    	  elog(INFO_MJOIN2,"Reseting list counter in not valid. List size: %d", chunk_counter);
+    	  chunk_counter = 0;
       }
     } while (bms_is_member(random_chunk, refused_set));
-    //swift
-    //} while (bms_is_member(result->rel_id, refused_set));
 
-    // = nextChunk->next;
     result = (RelChunk *) list_nth(seq_cycle,random_chunk);
     isValid= JC_isValidChunk(result);
 
   }
 
-  printf("RECEIVING CHUNK: \n");
-  printf("rel : %d phys id %d chunk : %d\n", ChunkGetRelid(result), 
-	 result->rel_id, ChunkGetID(result));
-  fflush(stdout);
+	elog(INFO_MJOIN1,"\nRECEIVING CHUNK: \n");
 
-  JCacheSegHdr->chunks = lappend(JCacheSegHdr->chunks, result);
-  JCacheSegHdr->cachedIds = bms_add_member(JCacheSegHdr->cachedIds, ChunkGetRelid(result));
-  return result;
+	elog(INFO_MJOIN1,"rel : %d phys id %d chunk : %d\n", ChunkGetRelid(result),
+	result->rel_id, ChunkGetID(result));
+
+	JCacheSegHdr->chunks = lappend(JCacheSegHdr->chunks, result);
+	JCacheSegHdr->cachedIds = bms_add_member(JCacheSegHdr->cachedIds, ChunkGetRelid(result));
+	return result;
 
 }
 
@@ -407,8 +403,8 @@ void JC_dropChunk(RelChunk *chunk) {
 	if (chunk == NULL)
 		elog(ERROR, "Cannot drop a null chunk !");
 
-	printf("Dropping chunk : \n");
-	printf("rel : %d chunk : %d , state : %d , subplans : %d\n",
+	elog(INFO_MJOIN1,"Dropping chunk : \n");
+	elog(INFO_MJOIN1,"rel : %d chunk : %d , state : %d , subplans : %d\n",
 			ChunkGetRelid(chunk),
 			ChunkGetID(chunk),
 			chunk->state,
@@ -669,12 +665,12 @@ void make_random_seq(RelOptInfo ** rel_array, int size) {
 
   }
   ListCell *chk;
-  printf("Ordering seq is : \n");
+  elog(INFO_MJOIN2,"Ordering seq is : \n");
   foreach(chk,seq_cycle) {
 
     RelChunk *chunk = (RelChunk *) lfirst(chk);
 
-    printf(" rel : %d, id : %d \n", ChunkGetRelid(chunk), ChunkGetID(chunk));
+    elog(INFO_MJOIN2," rel : %d, id : %d \n", ChunkGetRelid(chunk), ChunkGetID(chunk));
 
   }
   /* Make a circular list*/
@@ -696,7 +692,11 @@ void make_random_seq(RelOptInfo ** rel_array, int size) {
 
 void JC_EndCache(void) {
 
+
 	MemoryContextDelete(JCacheSegHdr->mctx);
+	/*print stats*/
+
+
 
 }
 void JC_DeleteChunk(RelChunk* chunk) {

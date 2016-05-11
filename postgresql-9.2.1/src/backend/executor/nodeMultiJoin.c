@@ -58,6 +58,7 @@ static Selectivity ExecGetSelectivity(Instrumentation *instrument);
 static CHashJoinState * ExecChoseBestPlan(MultiJoinState *node);
 static void ExecCleanInfeasibleSubplans(MultiJoinState *node);
 static void ExecMultiJoinMarkCurrentHashInfos(CHashJoinState * chjstate);
+static void print_chunk_stats(MultiJoinState * node);
 
 TupleTableSlot * /* return: a tuple or NULL */
 ExecCHashJoin(CHashJoinState *node) {
@@ -107,11 +108,7 @@ ExecCHashJoin(CHashJoinState *node) {
 	/*
 	 * run the hash join state machine
 	 */
-//	printf("\n Set outer tupleslot with  %d attrs \n",  ExecGetResultType(outerPlanState(node))->natts);
-//		printf("\n Set inner tupleslot with  %d attrs \n",  node->chj_HashTupleSlot->tts_tupleDescriptor->natts);
-//		printf("\n hashclauses are:  \n");
-//		pprint(((HashJoin*)node->js.ps.plan)->hashclauses);
-//		fflush(stdout);
+
 	for (;;) {
 		switch (node->chj_JoinState) {
 			case HJ_BUILD_HASHTABLE:
@@ -204,20 +201,12 @@ ExecCHashJoin(CHashJoinState *node) {
 				outerTupleSlot = ExecMultiHashJoinOuterGetTuple(outerNode, node, &hashvalue);
 
 				if (TupIsNull(outerTupleSlot)) {
-//					/* end of batch, or maybe whole join */
-//					if (HJ_FILL_INNER(node))
-//					{
-//						/* set up to scan for unmatched inner tuples */
-//						ExecPrepHashTableForUnmatched(node);
-//						node->chj_JoinState = HJ_FILL_INNER_TUPLES;
-//					}
-//					else
+
 					node->chj_JoinState = HJ_NEED_NEW_BATCH;
 					continue;
 				}
 				node->js.ps.instrument->nloops++;
-//		    	printf("GOt new outer!\n");
-//				fflush(stdout);
+
 				econtext->ecxt_outertuple = outerTupleSlot;
 				node->chj_MatchedOuter = false;
 
@@ -300,23 +289,7 @@ ExecCHashJoin(CHashJoinState *node) {
 							node->js.ps.ps_TupFromTlist = (isDone == ExprMultipleResult);
 							//	InstrStopNode(node->js.ps.instrument, 1.0);
 							node->js.ps.instrument->ntuples++;
-//							if (node->chj_CurTuple == NULL || node->chj_CurTuple->next == NULL) {
-//
-//								InstrEndMultiJoinLoop(node->js.ps.state->unique_instr,
-//										node->js.ps.instrument);
-//								InstrEndLoop(node->js.ps.instrument);
-//							}
-//
-//							if (node->js.ps.state->unique_instr->tuplecount == 0.0) {
-//								printf("Result  node  %d: \n", node->seq_num);
-//								if (node->js.ps.state->started)
-//									node->js.ps.state->replan = true;
-//								show_instrumentation_count_b(&node->js.ps.state->unique_instr[4]);
-//								show_instrumentation_count_b(&node->js.ps.state->unique_instr[3]);
-//								show_instrumentation_count_b(&node->js.ps.state->unique_instr[2]);
-//								show_instrumentation_count_b(&node->js.ps.state->unique_instr[1]);
-//
-//							}
+
 
 							return result;
 						}
@@ -394,7 +367,6 @@ ExecCHashJoin(CHashJoinState *node) {
 				node->inner_hinfo->sel = ExecGetSelectivity(node->js.ps.instrument);
 				node->inner_hinfo->sel *= node->js.ps.instrument->nloops;
 				if (node->outer_hinfo) {
-					printf("ptr  outer: %X \n", hinfo);
 					node->outer_hinfo->sel = ExecGetSelectivity(node->js.ps.instrument);
 					node->outer_hinfo->sel *= node->js.ps.instrument->card1;
 				}
@@ -422,11 +394,10 @@ ExecMultiJoin(MultiJoinState *node) {
 		switch (node->mhj_JoinState) {
 
 			case MHJ_BUILD_SUBPLANS:
-				printf("----------------------------------\n");
-				printf("OPTIMAL PLAN IS : \n");
-				pprint(node->current_ps->plan_relids);
+				elog(INFO_MJOIN2,"----------------------------------\n");
+				elog(INFO_MJOIN2,"OPTIMAL PLAN IS : \n");
+				elog(INFO_MJOIN2,node->current_ps->plan_relids);
 
-				fflush(stdout);
 
 
 				node->mhj_JoinState = MHJ_NEED_NEW_SUBPLAN;
@@ -434,6 +405,7 @@ ExecMultiJoin(MultiJoinState *node) {
 			case MHJ_NEED_NEW_SUBPLAN: {
 
 				ChunkedSubPlan *subplan = ExecMultiJoinGetNewSubplan(node);
+				INSTR_TIME_SET_CURRENT(node->null_plans_startTime);
 				InstrStartNode(node->js.ps.state->unique_instr);
 				if (subplan == NULL) {
 
@@ -457,87 +429,64 @@ ExecMultiJoin(MultiJoinState *node) {
 				node->mhj_JoinState = MHJ_BUILD_SUBPLANS;
 				break;
 			case MHJ_EXEC_JOIN: {
-
 				TupleTableSlot * slot = ExecProcNode(node->current_ps);
 				int ntuples =node->js.ps.state->unique_instr->ntuples;
 				node->js.ps.state->started = true;
+				elog(INFO_MJOIN1,"\nPending Subplans : %d \n", list_length(node->chunkedSubplans));
+
 				if (TupIsNull(slot)) {
-		//			ListCell *lc;
-	//				ListCell *pc;
+
 					ChunkedSubPlan *curr_subplan =  linitial(node->chunkedSubplans);
-//					int i;
+					instr_time	endtime;
+					INSTR_TIME_SET_CURRENT(endtime);
+					if (INSTR_TIME_IS_ZERO(node->null_plans_startTime))
+					{
+						elog(INFO_MJOIN1, "Null plan timer called to stop without start");
+
+					}
+					INSTR_TIME_ACCUM_DIFF(node->null_plans_time, endtime, node->null_plans_startTime);
+					INSTR_TIME_SET_ZERO(node->null_plans_startTime);
 					ExecMultiJoinEndSubPlan(node,curr_subplan);
 					pfree( curr_subplan);
-					printf("\nGOT NULL TUPLE :processed tuples \n");
-//							"//%.0f!\n",
-//							node->js.ps.state->unique_instr[0].tuplecount);
+					elog(INFO_MJOIN2,"\nGOT NULL TUPLE :processed tuples \n");
 
 					node->mhj_JoinState = MHJ_NEED_NEW_SUBPLAN;
-					printf("----------------------------------\n");
-
-//					for (i = 1; i < node->hashnodes_array_size - 1; i++) {
-//						show_instrumentation_count_b(&node->js.ps.state->unique_instr[i]);
-//					}
+					elog(INFO_MJOIN2,"----------------------------------\n");
 					InstrEndLoop(node->js.ps.state->unique_instr);
-					printf(":----------------------------------\nTotal Subplan stats\n");
+					elog(INFO_MJOIN2,":----------------------------------\nTotal Subplan stats\n");
 					show_instrumentation_count(&node->js.ps.state->unique_instr[0]);
 
-					printf(":-------------END---------------------\n");
+					elog(INFO_MJOIN2,":-------------END---------------------\n");
 
 
 					if (node->js.ps.state->unique_instr->ntuples ==  ntuples) {
 						InstrStopNode(node->counter,0.0);
 						InstrEndLoop(node->counter);
 
-						printf("\n:----------------------------------\n NULL Subplan stats\n");
+						elog(INFO_MJOIN2,"\n:----------------------------------\n NULL Subplan stats\n");
 
 						show_instrumentation_count(node->counter);
-						printf(":-------------END---------------------\n");
-					}
-
-					{
+						elog(INFO_MJOIN2,":-------------END---------------------\n");
 						if(enable_cleaning_subplan)
 						ExecCleanInfeasibleSubplans(node);
 
-//						CHashJoinState *best_plan= ExecChoseBestPlan(node);
-//						if (best_plan) {
-//
-//							node->current_ps = best_plan;
-
-//						}
 					}
 
 					continue;
 
-//					if (node->js.ps.state->replan) {
-//						CHashJoinState * newPlan = NULL;
-//						ListCell *lc;
-//						int idx = 0;
-//						printf("REPLANNING !\n");
-//						foreach(lc, node->plans[4]) {
-//							newPlan = (CHashJoinState *) lfirst(lc);
-//							if (newPlan != node->current_ps)
-//								break;
-//							idx++;
-//						}
-//						printf("GOT PLAN %d  !\n", idx);
-//
-//						node->current_ps = newPlan;
-//						node->js.ps.state->replan = false;
-//						node->js.ps.state->started = false;
-//						slot = ExecProcNode(node->current_ps);
-//					}
-//
-//					fflush(stdout);
+
 				}
+				INSTR_TIME_SET_ZERO(node->null_plans_time);
 				InstrStopNode(&node->js.ps.state->unique_instr[0], 1.0);
 
 
 				return slot;
 			}
-			case MHJ_END:
+			case MHJ_END:{
+				print_chunk_stats(node);
 				return NULL;
 				break;
+			}
 			default:
 				elog(ERROR, "unrecognized  Multi hjoin state: %d", (int) node->mhj_JoinState);
 
@@ -840,7 +789,6 @@ ExecInitMultiJoin(MultiJoin *node, EState *estate, int eflags) {
 	foreach(hjplan, plan_list) {
 
 		HashJoin *hplan = (HashJoin*) lfirst(hjplan);
-		//pprint(hplan);
 		HashJoinState * hj_state = (HashJoinState *) ExecInitNode((Plan *) hplan, estate, eflags);
 		PlanState * deep_outer = hj_state->js.ps.lefttree;
 		Index driverId = -1;
@@ -856,9 +804,9 @@ ExecInitMultiJoin(MultiJoin *node, EState *estate, int eflags) {
 
 	}
 
-	printf("GENERATED %d plan states \n", list_length(all_plans));
+	elog(INFO_MJOIN2,"GENERATED %d plan states \n", list_length(all_plans));
 	mhjstate->planlist = all_plans;
-	fflush(stdout);
+;
 
 	// initialization of MultiHash node arrays. We do here because
 	// the array depends all the hash keys from teh alterantive
@@ -872,7 +820,6 @@ ExecInitMultiJoin(MultiJoin *node, EState *estate, int eflags) {
 	//Current hash join to be executed ( optimizer result  plan)
 	mhjstate->current_ps = node->hashjoin.ps;
 	ExecMultiJoinMarkCurrentHashInfos(mhjstate->current_ps);
-	pprint(mhjstate->current_ps->plan_relids);
 
 	mhjstate->plans = plans;
 	mhjstate->js.ps.state->replan = false;
@@ -991,47 +938,7 @@ void ExecEndCHashJoin(CHashJoinState *node) {
 	 */
 	ExecFreeExprContext(&node->js.ps);
 
-//	/*
-//	 * Free hash table
-//	 */
-//	MemoryContextStats(node->mhj_InnerHashTable->hashCxt);
-//	MemoryContextStats(node->mhj_OuterHashTable->hashCxt);
-//	for (; bno < node->mhj_InnerHashTable->nbatch; bno++) {
-//
-//		printf("Info pour inner ;\n");
-//		printf("nentries : %d \n", node->mhj_InnerHashTable->batches[bno]->nentries);
-//		printf("Info pour outer ;\n");
-//		printf("nentries : %d \n", node->mhj_OuterHashTable->batches[bno]->nentries);
-//
-//	}
-//
-//	printf(" \nENDING MJOIN");
-//	fflush(stdout);
-//	if (node->mhj_InnerHashTable) {
-//		ExecMHashTableDestroy(node->mhj_InnerHashTable);
-//
-//	}
-//	if (node->mhj_OuterHashTable) {
-//		ExecMHashTableDestroy(node->mhj_OuterHashTable);
-//
-//	}
-//	/*
-//	 * Free the exprcontext
-//	 */
-//	ExecFreeExprContext(&node->js.ps);
-//
-//	/*
-//	 * clean out the tuple table
-//	 */
-//	ExecClearTuple(node->js.ps.ps_ResultTupleSlot);
-//	ExecClearTuple(node->mhj_OuterTupleSlot);
-//	ExecClearTuple(node->mhj_InnerTupleSlot);
-//
-//	/*
-//	 * clean up subtrees
-//	 */
-//	ExecEndNode(outerPlanState(node));
-//	ExecEndNode(innerPlanState(node));
+
 
 }
 void ExecEndMultiJoin(MultiJoinState *node) {
@@ -1048,53 +955,16 @@ void ExecEndMultiJoin(MultiJoinState *node) {
 
 	}
 
-//	/*
-//	 * Free hash table
-//	 */
+	/*
+	 * Free hash table
+	 */
 
 	JC_EndCache();
-//	for (; bno < node->mhj_InnerHashTable->nbatch; bno++) {
-//
-//		printf("Info pour inner ;\n");
-//		printf("nentries : %d \n", node->mhj_InnerHashTable->batches[bno]->nentries);
-//		printf("Info pour outer ;\n");
-//		printf("nentries : %d \n", node->mhj_OuterHashTable->batches[bno]->nentries);
-//
-//	}
-//
-//	printf(" \nENDING MJOIN");
-//	fflush(stdout);
-//	if (node->mhj_InnerHashTable) {
-//		ExecMHashTableDestroy(node->mhj_InnerHashTable);
-//
-//	}
-//	if (node->mhj_OuterHashTable) {
-//		ExecMHashTableDestroy(node->mhj_OuterHashTable);
-//
-//	}
-//	/*
-//	 * Free the exprcontext
-//	 */
-//	ExecFreeExprContext(&node->js.ps);
-//
-//	/*
-//	 * clean out the tuple table
-//	 */
-//	ExecClearTuple(node->js.ps.ps_ResultTupleSlot);
-//	ExecClearTuple(node->mhj_OuterTupleSlot);
-//	ExecClearTuple(node->mhj_InnerTupleSlot);
-//
-//	/*
-//	 * clean up subtrees
-//	 */
-//	ExecEndNode(outerPlanState(node));
-//	ExecEndNode(innerPlanState(node));
 }
 
 static void show_instrumentation_count(Instrumentation *instrument) {
 
 	double nloops;
-	double tuple_count;
 	double ntuples;
 
 	if (!instrument)
@@ -1106,10 +976,9 @@ static void show_instrumentation_count(Instrumentation *instrument) {
 	ntuples = instrument->ntuples;
 
 
-	printf("ntuples : %.2lf \n", ntuples);
-	printf("nloops : %.2lf \n", nloops);
-	printf("time : %.6lf \n", instrument->total);
-	fflush(stdout);
+	elog(INFO_MJOIN2,"ntuples : %.2lf \n", ntuples);
+	elog(INFO_MJOIN2,"nloops : %.2lf \n", nloops);
+	elog(INFO_MJOIN2,"time : %.6lf \n", instrument->total);
 
 }
 static void show_instrumentation_count_b(Instrumentation *instrument) {
@@ -1127,16 +996,13 @@ static void show_instrumentation_count_b(Instrumentation *instrument) {
 		sel = 0.0;
 	else
 		sel = (ntuples / (card1 * nloops));
-//	printf("\nnfiltered1 : %.2lf \n", nfiltered1);
-//	printf("nfiltered2 : %.2lf \n", nfiltered2);
-	printf("-------------------------------------- \n");
-	printf("tuple_count : %.2lf \n", tuple_count);
-	printf("ntuples : %.2lf \n", ntuples);
-	printf("card inner : %.2lf \n", card1);
-	printf("card outer : %.2lf \n", nloops);
-	printf("selectivity : %.8lf \n", sel);
-	printf("-------------------------------------- \n");
-	fflush(stdout);
+	elog(INFO_MJOIN2,"-------------------------------------- \n");
+	elog(INFO_MJOIN2,"tuple_count : %.2lf \n", tuple_count);
+	elog(INFO_MJOIN2,"ntuples : %.2lf \n", ntuples);
+	elog(INFO_MJOIN2,"card inner : %.2lf \n", card1);
+	elog(INFO_MJOIN2,"card outer : %.2lf \n", nloops);
+	elog(INFO_MJOIN2,"selectivity : %.8lf \n", sel);
+	elog(INFO_MJOIN2,"-------------------------------------- \n");
 
 }
 static void ExecSetSeqNumber(CHashJoinState * chjoinstate, EState *estate) {
@@ -1147,60 +1013,18 @@ static void ExecSetSeqNumber(CHashJoinState * chjoinstate, EState *estate) {
 
 }
 
-static void ExecMultiJoinCleanUpChunk(MultiJoinState * mhjoinstate,MultiHashState *mhstate) {
-	Bitmapset *tmpset;
-	ListCell *lc;
-	List *freelist = NIL;
-	List *endSubplans = NIL;
-	bool mustclean = false;
-
-	foreach(lc, mhstate->allChunks) {
-
-		RelChunk *chunk = (RelChunk *) lfirst(lc);
-
-		if (!bms_is_member(ChunkGetID(chunk), mhstate->chunkIds)) {
-			endSubplans = list_union(chunk->subplans, endSubplans);
-			freelist = lappend(freelist, chunk);
-			mustclean = true;
-
-		}
-	}
-
-	if (mustclean) {
-		printf("Pending subplans before clean up: %d\n", list_length(mhjoinstate->pendingSubplans));
-		foreach(lc, endSubplans) {
-
-			ChunkedSubPlan *subplan = (ChunkedSubPlan *) lfirst(lc);
-			ExecMultiJoinEndSubPlan(mhjoinstate, subplan);
-
-		}
-		list_free(endSubplans);
-		foreach(lc, freelist) {
-
-			RelChunk *chunk = (RelChunk *) lfirst(lc);
-			mhstate->allChunks = list_delete(mhstate->allChunks, chunk);
-			JC_DeleteChunk(chunk);
-
-		}
-		printf("Pending subplans after clean up: %d\n", list_length(mhjoinstate->pendingSubplans));
-
-	}
-
-}
 
 static void ExecPrepareChunk(MultiJoinState * mhjoinstate, MultiHashState *mhstate, RelChunk *chunk) {
 	SeqScanState  *outerNode;
 	HeapScanDescData *scan;
+	instr_time endtime;
 	mhstate->hashable_array = mhstate->chunk_hashables[ChunkGetID(chunk)];
 	
-	printf("PREPARING rel : %d chunk : %d\n", ChunkGetRelid(chunk), ChunkGetID(chunk));
-	fflush(stdout);
+	elog(INFO_MJOIN1,"PREPARING rel : %d chunk : %d\n", ChunkGetRelid(chunk), ChunkGetID(chunk));
+	INSTR_TIME_SET_CURRENT(mhjoinstate->preparing_startTime);
 
 	mhstate->currChunk = chunk;
-//	if (chunk->state == CH_DROPPED) {
-//
-//		ExecResetMultiHashtable(mhstate, mhstate->chunk_hashables[ChunkGetID(chunk)]);
-//	}
+
 	//before we read data we have to set starting point of the block
 	/*
 	 * get state info from node
@@ -1211,8 +1035,13 @@ static void ExecPrepareChunk(MultiJoinState * mhjoinstate, MultiHashState *mhsta
 	scan->rs_startblock = ChunkGetID(chunk)*  multi_join_chunk_size * 1024L / BLCKSZ;
 	scan->rs_inited = false;
 
-	if (chunk->state != CH_READ)
+	if (chunk->state != CH_READ){
 		(void) ExecMultiHashFillTupleCache(mhstate);
+		chunk->num_reads++;
+
+	}
+	INSTR_TIME_ACCUM_DIFF(mhjoinstate->preparing_time, endtime, mhjoinstate->preparing_startTime);
+	INSTR_TIME_SET_ZERO(mhjoinstate->preparing_startTime);
 
 //	if (mhstate->needUpdate)
 //		ExecMultiJoinCleanUpChunk(mhjoinstate, mhstate);
@@ -1222,7 +1051,6 @@ static void ExecPrepareChunk(MultiJoinState * mhjoinstate, MultiHashState *mhsta
 }
 
 static void ExecInitJoinCache(MultiJoinState * mhjoinstate) {
-	//int chunksLeft = Min(chunks_per_cycle, list_length(JC_GetChunks()));
 	int chunksLeft = chunks_per_cycle;
 	while (chunksLeft) {
 
@@ -1231,7 +1059,7 @@ static void ExecInitJoinCache(MultiJoinState * mhjoinstate) {
 		JC_InitChunkMemoryContext(chunk, NULL);
 		ExecPrepareChunk(mhjoinstate, mhstate, chunk);
 		chunksLeft--;
-		//
+
 	}
 	MemoryContextStats(TopMemoryContext);
 	mhjoinstate->chunkedSubplans = ExecMultiJoinPrepareSubplans(mhjoinstate,0, NIL);
@@ -1253,7 +1081,6 @@ static void ExecMultiJoiSetSubplan(MultiJoinState * mhjoinstate, ChunkedSubPlan 
 
 static void ExecMultiJoinEndSubPlan(MultiJoinState * mhjoinstate, ChunkedSubPlan * subplan) {
 
-	//ChunkedSubPlan * subplan = linitial(mhjoinstate->chunkedSubplans);
 	List *lchunks = subplan->chunks;
 	ListCell *lc;
 	mhjoinstate->chunkedSubplans = list_delete(mhjoinstate->chunkedSubplans, subplan);
@@ -1314,15 +1141,6 @@ static void ExecMultiJoinGetNewChunk(MultiJoinState * mhjoinstate) {
 			MultiHashState *dropped_mhstate = mhjoinstate->mhashnodes[ChunkGetRelid(toDrop)];
 			dropped_mhstate->lchunks = list_delete(dropped_mhstate->lchunks, toDrop);
 			dropped_mhstate->hasDropped = true;
-		/*	if (ChunkGetRelid(toDrop) == ChunkGetRelid(chunk) && toDrop->numBlocks >= chunk->numBlocks){
-
-				ExecMultiHashResetHashTables(dropped_mhstate,chunk,toDrop);
-
-			}else{
-				ExecMultiHashTablesDestroy(dropped_mhstate, ChunkGetID(toDrop));
-				ExecResetMultiHashtable(mhstate, mhstate->chunk_hashables[ChunkGetID(chunk)]);
-			}*/
-
 		}
 		break;
 	}
@@ -1382,14 +1200,12 @@ static List * ExecMultiJoinPrepareSubplans(MultiJoinState * mhjoinstate, int ski
 			}
 
 
-			printf("got %d subplans for rel : %d \n", list_length(subplans), i);
+			elog(INFO_MJOIN2,"got %d subplans for rel : %d \n", list_length(subplans), i);
 			// if we don't have more pending subplans for relations !=  to the parent relation of the new chunk
 			//  then we don't have any possible join with this new chunk. report to the caller
 			if (subplans == NIL) {
-				printf("NOT more subplans for relation %d!\n",  i);
+				elog(INFO_MJOIN2,"NOT more subplans for relation %d!\n",  i);
 
-				//pprint(mhjoinstate->pendingSubplans);
-				fflush(stdout);
 				result = NIL;
 				break;
 
@@ -1398,19 +1214,9 @@ static List * ExecMultiJoinPrepareSubplans(MultiJoinState * mhjoinstate, int ski
 
 			result = list_intersection(result, subplans);
 
-			// if we don't have any faisible subplans with the chunks intersected so far report to the caller
-			if(result == NIL){
-
-//				printf("NOT JOIN FOUND for chunk [ rel : %d, id : %d ] !\n",  ChunkGetRelid(newChunk), ChunkGetID(newChunk));
-//				fflush(stdout);
-			//	return result;
-
-
-			}
 
 		}
-		printf("GOT %d SUBPLANS  with new !\n", list_length(result));
-		//pprint(result);
+		elog(INFO_MJOIN1,"GOT %d SUBPLANS  with new !\n", list_length(result));
 
 		return result;
 
@@ -1479,18 +1285,15 @@ static RelChunk * ExecMultiJoinChooseDroppedChunk(MultiJoinState * mhjoinstate, 
 
 		if (result == NIL) {
 
-			printf("NOT JOIN FOUND for chunk [ rel : %d, id : %d ] !\n",
+			elog(INFO_MJOIN2,"NOT JOIN FOUND for chunk [ rel : %d, id : %d ] !\n",
 					ChunkGetRelid(newChunk),
 					ChunkGetID(newChunk));
-			fflush(stdout);
-
-
 
 			return NULL;
 
 		}
 
-		printf("GOT %d SUBPLANS  with new !\n", list_length(result));
+		elog(INFO_MJOIN2,"GOT %d SUBPLANS  with new !\n", list_length(result));
 
 
 		switch (jc_cache_policy) {
@@ -1531,11 +1334,6 @@ static RelChunk * ExecMultiJoinChooseDroppedChunk(MultiJoinState * mhjoinstate, 
 				foreach( lc,chunks) {
 
 					RelChunk *chunk = lfirst(lc);
-					printf("rel : %d chunk : %d,  prio %d\n",
-							ChunkGetRelid(chunk),
-							ChunkGetID(chunk),
-							chunk->priority);
-					fflush(stdout);
 
 	#if 0
 					if (!done
@@ -1557,7 +1355,6 @@ static RelChunk * ExecMultiJoinChooseDroppedChunk(MultiJoinState * mhjoinstate, 
 
 				}
 
-				//pfree(chunk_array);
 			}
 				break;
 			default:
@@ -1604,13 +1401,11 @@ static CHashJoinState * ExecChoseBestPlan(MultiJoinState *node) {
 		int order = 1 <<  (node->hashnodes_array_size -1);
 
 		printf("selectivity for plan : \n");
-		pprint(planstate->plan_relids);
 		bool found = true;
 
 		foreach(lc, planstate->selstate->hinfo) {
 			HashInfo *hinfo = (HashInfo *) lfirst(lc);
 			//printf("ptr : %X", hinfo);
-			pprint(hinfo);
 			printf("...........order %d ...................\n",order);
 			if (hinfo->sel == 0) {
 				curr =(double) INT_MAX;
@@ -1706,7 +1501,7 @@ static RelChunk * ExecSortChuks(RelChunk ** chunk_array, int size) {
 			break;
 		}
 	}
-
+	node->null_plans_executed+=list_length(node->pendingSubplans);
 	// if we detected un infaisible join extract the relations
 	if (njoin_rel) {
 		ListCell *lc;
@@ -1717,7 +1512,7 @@ static RelChunk * ExecSortChuks(RelChunk ** chunk_array, int size) {
 
 		int i = 0;
 
-		printf("Pending subplans before clean up: %d\n",
+		elog(INFO_MJOIN2,"Pending subplans before clean up: %d\n",
 							list_length(node->pendingSubplans));
 		foreach(lc,node->current_ps->plan_relids) {
 
@@ -1727,16 +1522,14 @@ static RelChunk * ExecSortChuks(RelChunk ** chunk_array, int size) {
 			if (i == njoin_rel)
 				break;
 		}
-		printf("Not producing tuples chunks :\n");
-		pprint(p_subplan);
+		elog(INFO_MJOIN2,"Not producing tuples chunks :\n");
 
 		foreach(lc,node->pendingSubplans) {
 			List *lchunks = NIL;
 			subplan = lfirst(lc);
 			lchunks = list_difference(p_subplan->chunks, subplan->chunks);
 			if (lchunks == NIL) {
-				printf("Preparing for cleaning subplan with zero tuples:\n");
-				pprint(subplan);
+				elog(INFO_MJOIN2,"Preparing for cleaning subplan with zero tuples:\n");
 				endSubplans = lappend(endSubplans, subplan);
 
 			}else
@@ -1755,8 +1548,40 @@ static RelChunk * ExecSortChuks(RelChunk ** chunk_array, int size) {
 		}
 		list_free(p_subplan->chunks);
 		pfree(p_subplan);
-		printf("Pending subplans after clean up: %d\n",
+		elog(INFO_MJOIN2,"Pending subplans after clean up: %d\n",
 						list_length(node->pendingSubplans));
 	}
+	node->null_plans_executed-=list_length(node->pendingSubplans);
 
+}
+
+static void print_chunk_stats(MultiJoinState * node){
+	int num_requests = 0;
+	int num_refuse= 0;
+	int num_reads = 0;
+	int num_drops=0;
+	int i= 0;
+
+	for (i = 0; i < node->hashnodes_array_size; i++) {
+		ListCell *lc = NULL;
+		foreach(lc,node->mhashnodes[i]->allChunks)
+		{
+			num_requests+=((RelChunk*)lfirst(lc))->num_request;
+			num_refuse+=((RelChunk*)lfirst(lc))->num_refuse;
+			num_reads+=((RelChunk*)lfirst(lc))->num_reads;
+			num_drops+=((RelChunk*)lfirst(lc))->num_drops;
+
+		}
+
+	}
+	elog(INFO_MJOIN1,"\n*********Overall Chunk Stats*******\n");
+	elog(INFO_MJOIN1,"\n*********Num of requests: %d\n",num_requests);
+	elog(INFO_MJOIN1,"*********Num of refuses: %d\n",num_refuse);
+	elog(INFO_MJOIN1,"*********Num of reads: %d\n",num_reads);
+	elog(INFO_MJOIN1,"*********Num of drops: %d\n",num_drops);
+	elog(INFO_MJOIN1,"*********Num of executed subplans with NULL result : %d\n",node->null_plans_executed);
+	elog(INFO_MJOIN1,"*********Num of pruned subplans with NULL result : %d\n",node->null_plans_cleaned);
+	elog(INFO_MJOIN1,"*********Overall time for Null result plans : %.6lf \n", INSTR_TIME_GET_DOUBLE(node->null_plans_time));
+	elog(INFO_MJOIN1,"*********Overall time for plans preparation(Read/Hash) : %.6lf \n", INSTR_TIME_GET_DOUBLE(node->preparing_time));
+	elog(INFO_MJOIN1,"\n***********************************\n");
 }

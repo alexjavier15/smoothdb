@@ -1777,6 +1777,13 @@ typedef struct MultiJoinState
 	List			*chunkedSubplans;
 	List			*pendingSubplans;
 	Instrumentation *counter;
+	int				null_plans_executed;
+	int				null_plans_cleaned;
+	instr_time		null_plans_time;
+	instr_time		null_plans_startTime;
+	instr_time		preparing_time;
+	instr_time		preparing_startTime;
+
 } MultiJoinState;
 
 typedef struct SymHashJoinState

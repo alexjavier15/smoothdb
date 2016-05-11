@@ -1300,6 +1300,11 @@ typedef struct RelChunk{
 	int		tuples;
 	int 	numBlocks;
 	uint32		freespace;
+	int		num_drops;
+	int		num_reads;
+	int		num_request;
+	int		num_refuse;
+
 }RelChunk;
 
 
