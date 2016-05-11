@@ -89,7 +89,7 @@ void JC_InitCache(void) {
 	MemoryContextSwitchTo(oldcxt);
 	oldcxt = MemoryContextSwitchTo(TopMemoryContext);
 
-	elog(INFO_MJOIN1,"NUM OF ALLOCATED CHUNKS : %.0f , Free mem: %ld \n", num_chunks, JCacheSegHdr->freesize);
+	elog(INFO,"NUM OF ALLOCATED CHUNKS : %.0f , Free mem: %ld \n", num_chunks, JCacheSegHdr->freesize);
 	for (i = 0; i < num_chunks; i++) {
 		appendStringInfo(&str, "%d", i);
 		/*Dynamic memroy allcoation
@@ -155,9 +155,9 @@ RelChunk * JC_processNextChunk(void) {
 	  //int random_chunk =  rand() % list_length(seq_cycle);
 
 	  random_chunk = chunk_counter++;
-	  elog(INFO_MJOIN1,"Chunk counter: %d \n", chunk_counter);
+	  elog(INFO,"Chunk counter: %d \n", chunk_counter);
 	  if (chunk_counter == list_length(seq_cycle)){
-		  elog(INFO_MJOIN1,"Reseting list counter. List size: %d",chunk_counter);
+		  elog(INFO,"Reseting list counter. List size: %d",chunk_counter);
 	    chunk_counter = 0;
 	  }
 
@@ -172,7 +172,7 @@ RelChunk * JC_processNextChunk(void) {
 
 	    if(!isValid){
 	    	result->num_refuse++;
-	    	elog(INFO_MJOIN1,"Refusing Chunk: [ rel : %d, id %d ] !\n",ChunkGetRelid(result), ChunkGetID(result));
+	    	elog(INFO,"Refusing Chunk: [ rel : %d, id %d ] !\n",ChunkGetRelid(result), ChunkGetID(result));
 	    }
 
 	    refused_set = bms_add_member(refused_set,random_chunk);
@@ -193,9 +193,9 @@ RelChunk * JC_processNextChunk(void) {
 
 	  }
 
-		elog(INFO_MJOIN1,"\nRECEIVING CHUNK: \n");
+		elog(INFO,"\nRECEIVING CHUNK: \n");
 
-		elog(INFO_MJOIN1,"rel : %d phys id %d chunk : %d\n", ChunkGetRelid(result),
+		elog(INFO,"rel : %d phys id %d chunk : %d\n", ChunkGetRelid(result),
 		result->rel_id, ChunkGetID(result));
 
 		JCacheSegHdr->chunks = lappend(JCacheSegHdr->chunks, result);
@@ -211,8 +211,8 @@ void JC_dropChunk(RelChunk *chunk) {
 	if (chunk == NULL)
 		elog(ERROR, "Cannot drop a null chunk !");
 
-	elog(INFO_MJOIN1,"Dropping chunk : \n");
-	elog(INFO_MJOIN1,"rel : %d chunk : %d , state : %d , subplans : %d\n",
+	elog(INFO,"Dropping chunk : \n");
+	elog(INFO,"rel : %d chunk : %d , state : %d , subplans : %d\n",
 				ChunkGetRelid(chunk),
 				ChunkGetID(chunk),
 				chunk->state,

@@ -17,19 +17,18 @@
 #include <setjmp.h>
 
 /* Error level codes */
-#define DEBUG5		06			/* Debugging messages, in categories of
+#define DEBUG5		07			/* Debugging messages, in categories of
 								 * decreasing detail. */
-#define DEBUG4		07
-#define DEBUG3		10
-#define DEBUG2		11
-#define DEBUG1		12			/* used by GUC debug_* variables */
-#define LOG		13			/* Server operational messages; sent only to
+#define DEBUG4		10
+#define DEBUG3		11
+#define DEBUG2		12
+#define DEBUG1		13			/* used by GUC debug_* variables */
+#define LOG		14			/* Server operational messages; sent only to
 								 * server log by default. */
-#define COMMERROR	14			/* Client communication problems; same as LOG
+#define COMMERROR	15			/* Client communication problems; same as LOG
 								 * for server reporting, but never sent to
 								 * client. */
-#define INFO_MJOIN2	15			/*Info mjoin 2*/
-#define INFO_MJOIN1	16			/*Info mjoin 1*/
+#define INFO_MJOIN2	16			/*Info mjoin 2*/
 #define INFO		17			/* Messages specifically requested by user (eg
 								 * VACUUM VERBOSE output); always sent to
 								 * client regardless of client_min_messages,

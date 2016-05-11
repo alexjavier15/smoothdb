@@ -407,6 +407,7 @@ ExecMultiJoin(MultiJoinState *node) {
 				ChunkedSubPlan *subplan = ExecMultiJoinGetNewSubplan(node);
 				INSTR_TIME_SET_CURRENT(node->null_plans_startTime);
 				InstrStartNode(node->js.ps.state->unique_instr);
+				elog(INFO,"\nPending Subplans : %d \n", list_length(node->pendingSubplans));
 				if (subplan == NULL) {
 
 					node->mhj_JoinState = MHJ_NEED_NEW_CHUNK;
@@ -432,7 +433,7 @@ ExecMultiJoin(MultiJoinState *node) {
 				TupleTableSlot * slot = ExecProcNode(node->current_ps);
 				int ntuples =node->js.ps.state->unique_instr->ntuples;
 				node->js.ps.state->started = true;
-				elog(INFO_MJOIN1,"\nPending Subplans : %d \n", list_length(node->pendingSubplans));
+
 
 				if (TupIsNull(slot)) {
 
@@ -441,7 +442,7 @@ ExecMultiJoin(MultiJoinState *node) {
 					INSTR_TIME_SET_CURRENT(endtime);
 					if (INSTR_TIME_IS_ZERO(node->null_plans_startTime))
 					{
-						elog(INFO_MJOIN1, "Null plan timer called to stop without start");
+						elog(INFO, "Null plan timer called to stop without start");
 
 					}
 					INSTR_TIME_ACCUM_DIFF(node->null_plans_time, endtime, node->null_plans_startTime);
@@ -1020,7 +1021,7 @@ static void ExecPrepareChunk(MultiJoinState * mhjoinstate, MultiHashState *mhsta
 	instr_time endtime;
 	mhstate->hashable_array = mhstate->chunk_hashables[ChunkGetID(chunk)];
 	
-	elog(INFO_MJOIN1,"PREPARING rel : %d chunk : %d\n", ChunkGetRelid(chunk), ChunkGetID(chunk));
+	elog(INFO,"PREPARING rel : %d chunk : %d\n", ChunkGetRelid(chunk), ChunkGetID(chunk));
 	INSTR_TIME_SET_CURRENT(mhjoinstate->preparing_startTime);
 
 	mhstate->currChunk = chunk;
@@ -1216,7 +1217,7 @@ static List * ExecMultiJoinPrepareSubplans(MultiJoinState * mhjoinstate, int ski
 
 
 		}
-		elog(INFO_MJOIN1,"GOT %d SUBPLANS  with new !\n", list_length(result));
+		elog(INFO,"GOT %d SUBPLANS  with new !\n", list_length(result));
 
 		return result;
 
@@ -1562,7 +1563,7 @@ static void print_chunk_stats(MultiJoinState * node){
 	int num_drops=0;
 	int i= 0;
 
-	for (i = 0; i < node->hashnodes_array_size; i++) {
+	for (i = 1; i < node->hashnodes_array_size; i++) {
 		ListCell *lc = NULL;
 		foreach(lc,node->mhashnodes[i]->allChunks)
 		{
@@ -1574,14 +1575,14 @@ static void print_chunk_stats(MultiJoinState * node){
 		}
 
 	}
-	elog(INFO_MJOIN1,"\n*********Overall Chunk Stats*******\n");
-	elog(INFO_MJOIN1,"\n*********Num of requests: %d\n",num_requests);
-	elog(INFO_MJOIN1,"*********Num of refuses: %d\n",num_refuse);
-	elog(INFO_MJOIN1,"*********Num of reads: %d\n",num_reads);
-	elog(INFO_MJOIN1,"*********Num of drops: %d\n",num_drops);
-	elog(INFO_MJOIN1,"*********Num of executed subplans with NULL result : %d\n",node->null_plans_executed);
-	elog(INFO_MJOIN1,"*********Num of pruned subplans with NULL result : %d\n",node->null_plans_cleaned);
-	elog(INFO_MJOIN1,"*********Overall time for Null result plans : %.6lf \n", INSTR_TIME_GET_DOUBLE(node->null_plans_time));
-	elog(INFO_MJOIN1,"*********Overall time for plans preparation(Read/Hash) : %.6lf \n", INSTR_TIME_GET_DOUBLE(node->preparing_time));
-	elog(INFO_MJOIN1,"\n***********************************\n");
+	elog(INFO,"\n*********Overall Chunk Stats*******\n");
+	elog(INFO,"\n*********Num of requests: %d\n",num_requests);
+	elog(INFO,"*********Num of refuses: %d\n",num_refuse);
+	elog(INFO,"*********Num of reads: %d\n",num_reads);
+	elog(INFO,"*********Num of drops: %d\n",num_drops);
+	elog(INFO,"*********Num of executed subplans with NULL result : %d\n",node->null_plans_executed);
+	elog(INFO,"*********Num of pruned subplans with NULL result : %d\n",node->null_plans_cleaned);
+	elog(INFO,"*********Overall time for Null result plans : %.6lf \n", INSTR_TIME_GET_DOUBLE(node->null_plans_time));
+	elog(INFO,"*********Overall time for plans preparation(Read/Hash) : %.6lf \n", INSTR_TIME_GET_DOUBLE(node->preparing_time));
+	elog(INFO,"\n***********************************\n");
 }
